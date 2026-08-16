@@ -1,0 +1,242 @@
+<title>Diff Preview</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --add-bg: #12261e;
+    --add-gutter: #1a3326;
+    --add-text: #56d364;
+    --del-bg: #25171c;
+    --del-gutter: #3a1d22;
+    --del-text: #f85149;
+    --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 85% -10%, rgba(88,166,255,0.10), transparent 60%),
+      radial-gradient(900px 500px at 0% 110%, rgba(210,168,255,0.08), transparent 55%),
+      linear-gradient(160deg, #0b1018 0%, #0d1117 45%, #11161f 100%);
+    background-attachment: fixed;
+  }
+  .wrap {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--text); padding: 24px; min-height: 100vh;
+  }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 10px; margin-bottom: 20px;
+  }
+  .topbar h1 {
+    font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .2px;
+    display: flex; align-items: center; gap: 9px; color: var(--text);
+  }
+  .topbar h1 .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 10px var(--accent);
+  }
+  .topbar .meta {
+    font-size: 12.5px; color: var(--muted);
+    background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    padding: 5px 12px; border-radius: 20px;
+  }
+  .topbar .meta .plus { color: var(--add-text); font-family: monospace; font-weight: 600; }
+  .topbar .meta .minus { color: var(--del-text); font-family: monospace; font-weight: 600; }
+
+  .file { margin-bottom: 18px; border-radius: 12px; overflow: hidden;
+    border: 1px solid var(--border);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+    backdrop-filter: blur(6px); }
+  .file-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 12px 16px; background: rgba(22,27,34,0.72);
+    cursor: pointer; user-select: none;
+  }
+  .file-head:hover { background: rgba(28,34,43,0.78); }
+  .file-head .left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .file-head .chev { color: var(--muted); transition: transform .15s; flex-shrink: 0; }
+  .file-head.collapsed .chev { transform: rotate(-90deg); }
+  .file-head .path {
+    font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .file-head .tag {
+    font-size: 11px; padding: 1px 7px; border-radius: 10px;
+    border: 1px solid var(--border); color: var(--muted); flex-shrink: 0;
+  }
+  .file-head .fstat { font-family: monospace; font-size: 12px; flex-shrink: 0; }
+  .file-head .fstat .plus { color: var(--add-text); }
+  .file-head .fstat .minus { color: var(--del-text); }
+
+  .file-body {
+    border-top: 1px solid var(--border); overflow: hidden;
+    background: rgba(13,17,23,0.78);
+  }
+  .file-body.hidden { display: none; }
+
+  .diff-scroll { max-height: 70vh; overflow-y: auto; }
+  table.diff { width: 100%; border-collapse: collapse; table-layout: fixed;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: 14.5px; line-height: 1.6; }
+  table.diff td { padding: 1px 8px; white-space: pre-wrap;
+    overflow-wrap: anywhere; word-break: break-word; vertical-align: top; }
+  .gutter { width: 44px; text-align: right; color: var(--muted); user-select: none;
+    padding: 0 10px; border-right: 1px solid var(--border); }
+  .sign { width: 20px; text-align: center; user-select: none; padding: 0 4px; }
+  .code { width: auto; }
+  tr.add { background: var(--add-bg); }
+  tr.add .gutter { background: var(--add-gutter); color: var(--add-text); }
+  tr.add .sign { color: var(--add-text); }
+  tr.del { background: var(--del-bg); }
+  tr.del .gutter { background: var(--del-gutter); color: var(--del-text); }
+  tr.del .sign { color: var(--del-text); }
+
+  /* ── syntax highlighting (GitHub Dark) ── */
+  .t-cmt { color: #8b949e; font-style: italic; }
+  .t-kw  { color: #ff7b72; }
+  .t-str { color: #a5d6ff; }
+  .t-num { color: #79c0ff; }
+  .t-lit { color: #79c0ff; }
+  .t-typ { color: #ffa657; }
+  .t-fn  { color: #d2a8ff; }
+  .t-id  { color: #e6edf3; }
+  .t-punc{ color: #c9d1d9; }
+</style>
+
+<div class="wrap">
+  <div class="topbar">
+    <h1><span class="dot"></span>Diff Preview</h1>
+    <div class="meta" id="summary"></div>
+  </div>
+  <div id="files"></div>
+</div>
+
+<script>
+  // ── 每次改动我用真实「整文件」内容填充。type: 'add'|'del'|'ctx' ──
+  const FILES = [
+    {
+      path: 'src/utils/spacedRepetition.ts',
+      tag: 'modified',
+      // 整个文件，逐行。o=旧行号, n=新行号, null 表示该侧不存在
+      lines: [
+        { o: 1,  n: 1,  type: 'ctx', text: "import type { Card } from '@/types/flashCard.ts';" },
+        { o: 2,  n: 2,  type: 'ctx', text: "" },
+        { o: null, n: 3, type: 'add', text: "// Computes the next review interval using an SM-2-style spaced repetition algorithm." },
+        { o: 3,  n: 4,  type: 'ctx', text: "export const calculateNextReview = (card: Card, quality: number) => {" },
+        { o: 4,  n: 5,  type: 'ctx', text: "    let { interval, easeFactor, streak } = card;" },
+        { o: 5,  n: 6,  type: 'ctx', text: "" },
+        { o: 6,  n: 7,  type: 'ctx', text: "    if (quality < 3) {" },
+        { o: 7,  n: 8,  type: 'ctx', text: "        streak = 0;" },
+        { o: 8,  n: 9,  type: 'ctx', text: "        interval = 1;" },
+        { o: 9,  n: 10, type: 'ctx', text: "    } else {" },
+        { o: 10, n: 11, type: 'ctx', text: "        if (streak === 0) interval = 1;" },
+        { o: 11, n: 12, type: 'ctx', text: "        else if (streak === 1) interval = 3;" },
+        { o: 12, n: 13, type: 'ctx', text: "        else interval = Math.round(interval * easeFactor);" },
+        { o: 13, n: 14, type: 'ctx', text: "        streak++;" },
+        { o: 14, n: 15, type: 'ctx', text: "    }" },
+        { o: 15, n: 16, type: 'ctx', text: "" },
+        { o: 16, n: 17, type: 'ctx', text: "    easeFactor = easeFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));" },
+        { o: 17, n: 18, type: 'ctx', text: "    if (easeFactor < 1.3) easeFactor = 1.3;" },
+        { o: 18, n: 19, type: 'ctx', text: "" },
+        { o: 19, n: 20, type: 'ctx', text: "    const nextReview = Date.now() + interval * 24 * 60 * 60 * 1000;" },
+        { o: 20, n: 21, type: 'ctx', text: "    return { ...card, interval, easeFactor, streak, nextReview };" },
+        { o: 21, n: 22, type: 'ctx', text: "};" },
+      ],
+    },
+  ];
+
+  function esc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // 轻量 TS/JS 语法高亮（逐行；行注释/字符串按行处理）
+  const KW = new Set(['import','from','export','const','let','var','return','if','else',
+    'for','while','function','type','interface','class','extends','implements','new',
+    'typeof','instanceof','in','of','await','async','yield','switch','case','break',
+    'continue','default','throw','try','catch','finally','do','as','void','enum',
+    'namespace','declare','readonly','public','private','protected','static','keyof','infer']);
+  const LIT = new Set(['null','undefined','true','false','this','super','NaN','Infinity']);
+  const RULES = [
+    ['cmt',  /\/\/[^\n]*/y],
+    ['cmt',  /\/\*[\s\S]*?\*\//y],
+    ['str',  /`(?:\\.|[^`\\])*`/y],
+    ['str',  /"(?:\\.|[^"\\])*"/y],
+    ['str',  /'(?:\\.|[^'\\])*'/y],
+    ['num',  /\d[\w.]*/y],
+    ['word', /[A-Za-z_$][\w$]*/y],
+    ['ws',   /\s+/y],
+    ['punc', /[^\w\s]+/y],
+  ];
+  function highlight(code) {
+    if (code === '' || code == null) return ' ';
+    let i = 0, out = '';
+    while (i < code.length) {
+      let matched = false;
+      for (const [type, re] of RULES) {
+        re.lastIndex = i;
+        const m = re.exec(code);
+        if (m && m.index === i) {
+          const txt = m[0];
+          if (type === 'ws') { out += esc(txt); }
+          else if (type === 'word') {
+            let cls;
+            if (KW.has(txt)) cls = 'kw';
+            else if (LIT.has(txt)) cls = 'lit';
+            else if (/^[A-Z]/.test(txt)) cls = 'typ';
+            else cls = /^\s*\(/.test(code.slice(i + txt.length)) ? 'fn' : 'id';
+            out += `<span class="t-${cls}">${esc(txt)}</span>`;
+          } else {
+            out += `<span class="t-${type}">${esc(txt)}</span>`;
+          }
+          i += txt.length; matched = true; break;
+        }
+      }
+      if (!matched) { out += esc(code[i]); i++; }
+    }
+    return out;
+  }
+
+  function render() {
+    let totalAdd = 0, totalDel = 0;
+    const root = document.getElementById('files');
+    FILES.forEach((file, fi) => {
+      let fa = 0, fd = 0;
+      file.lines.forEach(l => { if (l.type === 'add') fa++; if (l.type === 'del') fd++; });
+      totalAdd += fa; totalDel += fd;
+
+      const rows = file.lines.map(l => {
+        const sign = l.type === 'add' ? '+' : l.type === 'del' ? '−' : '';
+        const o = l.o == null ? '' : l.o;
+        const n = l.n == null ? '' : l.n;
+        return `<tr class="${l.type}"><td class="gutter">${o}</td><td class="gutter">${n}</td><td class="sign">${sign}</td><td class="code">${highlight(l.text)}</td></tr>`;
+      }).join('');
+
+      root.insertAdjacentHTML('beforeend', `
+        <div class="file">
+          <div class="file-head" onclick="toggle(${fi})">
+            <div class="left">
+              <span class="chev">▾</span>
+              <span class="path">${esc(file.path)}</span>
+              <span class="tag">${file.tag}</span>
+            </div>
+            <span class="fstat"><span class="plus">+${fa}</span> <span class="minus">−${fd}</span></span>
+          </div>
+          <div class="file-body" id="body-${fi}"><div class="diff-scroll"><table class="diff"><tbody>${rows}</tbody></table></div></div>
+        </div>
+      `);
+    });
+    document.getElementById('summary').innerHTML =
+      `${FILES.length} 个文件 · <span class="plus">+${totalAdd}</span> <span class="minus">−${totalDel}</span>`;
+  }
+
+  function toggle(fi) {
+    document.getElementById('body-' + fi).classList.toggle('hidden');
+    document.querySelectorAll('.file-head')[fi].classList.toggle('collapsed');
+  }
+
+  render();
+</script>

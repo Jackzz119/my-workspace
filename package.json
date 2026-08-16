@@ -1,0 +1,13 @@
+{
+  "name": "my-workspace",
+  "private": true,
+  "type": "module",
+  "description": "Personal workflow monorepo: atk CLI + shelf content store, future visual workflow apps.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
