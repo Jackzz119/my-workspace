@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { commonPackDir, commonPackName } from "../paths.mjs";
+import { displayName } from "../shelfnames.mjs";
 import { readDescription } from "../frontmatter.mjs";
 import { wrap, termWidth } from "../format.mjs";
 
 export async function cmdList() {
   if (!fs.existsSync(commonPackDir)) {
-    console.error(`pack '${commonPackName}' not found at ${commonPackDir}`);
+    console.error(`pack '${displayName(commonPackName)}' not found at ${commonPackDir}`);
     process.exit(1);
   }
   const names = fs.readdirSync(commonPackDir, { withFileTypes: true })
@@ -32,5 +33,5 @@ export async function cmdList() {
     }
     console.log("");
   }
-  console.log(`${names.length} skill(s) in '${commonPackName}' pack.`);
+  console.log(`${names.length} skill(s) in '${displayName(commonPackName)}' pack.`);
 }
