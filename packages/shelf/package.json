@@ -1,0 +1,14 @@
+{
+  "name": "shelf",
+  "version": "0.2.0",
+  "description": "Personal content shelf: pull/push skills, templates, docs and code snippets across projects. (npm publish will use a scoped name; local bins stay shelf/atk.)",
+  "type": "module",
+  "bin": {
+    "shelf": "bin/shelf.mjs",
+    "atk": "bin/shelf.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

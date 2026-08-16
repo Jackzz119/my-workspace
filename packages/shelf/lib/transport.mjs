@@ -5,10 +5,10 @@ import { execFileSync } from "node:child_process";
 import { repoRoot } from "./paths.mjs";
 
 // shelf 的三层传输（SHELF 决策 #4）：
-//   1. ATK_HOME 环境变量指定的 workspace clone
+//   1. SHELF_HOME 环境变量指定的 workspace clone（兼容旧名 ATK_HOME）
 //   2. CLI 自身所在的 clone（monorepo 内直跑 / npm link 都命中）
-//   3. ~/.atkrc 里记录的 home 路径
-//   4. 兜底：按 ~/.atkrc 或 ATK_REMOTE 的 remote 做临时 sparse clone（只取 shelf/）
+//   3. ~/.shelfrc 里记录的 home 路径（兼容旧文件 ~/.atkrc）
+//   4. 兜底：按 rc 或 SHELF_REMOTE/ATK_REMOTE 的 remote 做临时 sparse clone（只取 shelf/）
 
 function git(args, cwd, opts = {}) {
   return execFileSync("git", args, {
@@ -24,14 +24,16 @@ function hasShelf(root) {
 }
 
 function readRc() {
-  const rcPath = path.join(os.homedir(), ".atkrc");
-  if (!fs.existsSync(rcPath)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(rcPath, "utf8"));
-  } catch {
-    console.warn(`! ~/.atkrc 不是合法 JSON，已忽略`);
-    return {};
+  for (const name of [".shelfrc", ".atkrc"]) {
+    const rcPath = path.join(os.homedir(), name);
+    if (!fs.existsSync(rcPath)) continue;
+    try {
+      return JSON.parse(fs.readFileSync(rcPath, "utf8"));
+    } catch {
+      console.warn(`! ~/${name} 不是合法 JSON，已忽略`);
+    }
   }
+  return {};
 }
 
 function ephemeralClone(remote) {
@@ -48,7 +50,7 @@ function ephemeralClone(remote) {
 export function resolveShelfContext() {
   const rc = readRc();
 
-  const home = [process.env.ATK_HOME, repoRoot, rc.home].find(hasShelf);
+  const home = [process.env.SHELF_HOME, process.env.ATK_HOME, repoRoot, rc.home].find(hasShelf);
   if (home) {
     return {
       mode: "home",
@@ -58,7 +60,7 @@ export function resolveShelfContext() {
     };
   }
 
-  const remote = process.env.ATK_REMOTE || rc.remote;
+  const remote = process.env.SHELF_REMOTE || process.env.ATK_REMOTE || rc.remote;
   if (remote) {
     const tmp = ephemeralClone(remote);
     return {
@@ -72,7 +74,7 @@ export function resolveShelfContext() {
   }
 
   throw new Error(
-    "找不到 shelf：设置 ATK_HOME 指向 my-workspace clone，或在 ~/.atkrc 写入 { \"home\": \"...\" } / { \"remote\": \"...\" }",
+    "找不到 shelf：设置 SHELF_HOME 指向 my-workspace clone，或在 ~/.shelfrc 写入 { \"home\": \"...\" } / { \"remote\": \"...\" }",
   );
 }
 

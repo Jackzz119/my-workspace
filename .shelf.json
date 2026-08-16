@@ -1,0 +1,6 @@
+{
+  "source": "github:unknown/agent-toolkit",
+  "skillsDir": ".claude/skills",
+  "skills": {},
+  "shelf": {}
+}

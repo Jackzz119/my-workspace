@@ -134,7 +134,7 @@ allowed-tools: Bash, Read, Edit   # 预批准工具，免去每次确认
 
 my-workspace 是管理所有个人工作流的 monorepo：
 
-- `packages/atk/` — `atk` CLI（shelf 内容的 list / pull / push 工具）
+- `packages/shelf/` — `shelf` CLI（别名 `atk`）：货架内容的浏览、pull、push、init
 - `shelf/` — 内容货架（**唯一真源**）：`skills/`（技能包）、`agents/`（工作协议模板）、以及任何要跨项目取用的文件/文件夹
 - `apps/` — 应用（如未来的可视化工作流引擎），当前为空
 - `ai/` — 工作区级 PROJECT.md / TODO.md / features/ 文档

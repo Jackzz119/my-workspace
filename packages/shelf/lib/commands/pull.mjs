@@ -57,6 +57,13 @@ export async function cmdPull() {
     const src = path.join(commonPackDir, name);
     const dest = path.join(destRoot, name);
 
+    // 链接模式的工作区（如 my-workspace 本身）由 setup-links 管理，整包同步不得动链接
+    if (fs.existsSync(dest) && fs.lstatSync(dest).isSymbolicLink()) {
+      console.log(`= 链接跳过 ${name}（由 setup-links 管理）`);
+      upToDate++;
+      continue;
+    }
+
     if (!fs.existsSync(dest)) {
       fs.cpSync(src, dest, { recursive: true });
       setSkillEntry(manifest, name, buildEntry(commonPackName, name));

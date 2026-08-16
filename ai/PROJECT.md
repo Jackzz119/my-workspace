@@ -2,12 +2,12 @@
 
 > 最后更新：2026-08-16
 
-管理所有个人工作流的 monorepo：`atk` CLI + `shelf/` 内容货架（skill 库、AI 工作协议模板、跨项目取用的任意文件），未来承载可视化工作流引擎等 app。前身是独立仓库 agent-toolkit，2026-08-16 按 GitHub HEAD 并入（原仓库 `Jackzz119/agent-toolkit` 保留为历史）。
+管理所有个人工作流的 monorepo：`shelf` CLI（别名 `atk`） + `shelf/` 内容货架（skill 库、AI 工作协议模板、跨项目取用的任意文件），未来承载可视化工作流引擎等 app。前身是独立仓库 agent-toolkit，2026-08-16 按 GitHub HEAD 并入（原仓库 `Jackzz119/agent-toolkit` 保留为历史）。
 
 ## 项目结构
 
-- `packages/atk/` — `atk` CLI 实现（`bin/atk.mjs` + `lib/`），详见 [`ai/features/SKILL-SYNC-CLI.md`](features/SKILL-SYNC-CLI.md) 与 [`ai/features/SHELF.md`](features/SHELF.md)
-- `shelf/` — 内容货架（唯一真源），任何条目均可被 `atk` 拉到目标项目 / 推回
+- `packages/shelf/` — `shelf` CLI（别名 `atk`）实现（`bin/shelf.mjs` + `lib/`），详见 [`ai/features/SKILL-SYNC-CLI.md`](features/SKILL-SYNC-CLI.md) 与 [`ai/features/SHELF.md`](features/SHELF.md)
+- `shelf/` — 内容货架（唯一真源），任何条目均可被 `shelf` 拉到目标项目 / 推回
   - `shelf/skills/` — 主 skill 集，按**包**组织：`common/`（默认包）、`<pack>/`（领域包，如 `blender/`）
   - `shelf/agents/` — AI 平台工作协议模板：`claude/CLAUDE.md`（用 `.claude/skills/`、`${CLAUDE_SKILL_DIR}`）、`codex/AGENTS.md`（平台中立，用 `skills/`、`${SKILL_DIR}`）
 - `apps/` — 应用（预留，当前为空；可视化工作流引擎将落在这里）
@@ -24,7 +24,7 @@
 | `custom-skill` | — | Skill 主管，管理所有 skill 的生命周期 |
 | `logman` | 自动 | log 语句格式与功能域标签规范 |
 | `blender-create` | — | Blender MCP 建模 / 材质 / Retopo / Rigging / 导出流程 |
-| `shelf-ops` | 自动 | 货架操作手册——agent 执行 shelf pull/push 的用法、落点约定与冲突守则（`atk shelf init` 会装进目标工作区） |
+| `shelf-ops` | 自动 | 货架操作手册——agent 执行 shelf pull/push 的用法、落点约定与冲突守则（`shelf init` 会装进目标工作区） |
 
 ## AI 工作协议核心
 
@@ -48,7 +48,7 @@
 |---|---|---|
 | [`ai/features/SHELF.md`](features/SHELF.md) | 设计定稿，待开工 | Shelf — 通用内容货架 + push/pull（含三层传输策略） |
 | [`ai/features/SKILL-SYNC-CLI.md`](features/SKILL-SYNC-CLI.md) | 50% (3/6 ST) | Milestone 1 — Skill 双向同步 CLI（本地 git-based） |
-| [`ai/features/ATK-SERVER.md`](features/ATK-SERVER.md) | 需求对齐中 | Milestone 2 — ATK Server 社区平台（账户 / Web / REST API） |
+| [`ai/features/SHELF-SERVER.md`](features/SHELF-SERVER.md) | 需求对齐中 | Milestone 2 — Shelf Server 社区平台（账户 / Web / REST API） |
 | [`ai/features/NPM-PUBLISH.md`](features/NPM-PUBLISH.md) | 策略已定，待执行 | npm 发布策略与流程（等 M2 品牌敲定后启动） |
 
 ## Brain Dump

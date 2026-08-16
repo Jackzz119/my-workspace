@@ -199,7 +199,7 @@ function printSummary(c) {
 
 // ---- 子命令：非交互 pull ----
 
-async function cmdShelfPull(args) {
+export async function cmdShelfPull(args) {
   const destFlag = args.indexOf("--dest");
   let destRoot = null;
   if (destFlag !== -1) {
@@ -207,7 +207,7 @@ async function cmdShelfPull(args) {
     args = args.filter((_, i) => i !== destFlag && i !== destFlag + 1);
   }
   if (args.length === 0) {
-    console.error("用法: atk shelf pull <shelf路径> [...] [--dest <目录>]");
+    console.error("用法: shelf pull <shelf路径> [...] [--dest <目录>]");
     process.exit(1);
   }
 
@@ -266,7 +266,7 @@ function makeLineReader() {
   };
 }
 
-async function cmdShelfBrowse() {
+export async function cmdShelfBrowse() {
   const ctx = resolveShelfContext();
   const rl = makeLineReader();
   const askWithRl = async (question, choices) => {
@@ -355,7 +355,7 @@ function takeFlag(args, name, hasValue = false) {
   return { args: args.filter((_, j) => j !== i && (!hasValue || j !== i + 1)), value };
 }
 
-async function cmdShelfPush(argv) {
+export async function cmdShelfPush(argv) {
   let rest = argv;
   let to, yes, force, forceSecret;
   ({ args: rest, value: to } = takeFlag(rest, "--to", true));
@@ -365,7 +365,7 @@ async function cmdShelfPush(argv) {
 
   const local = rest[0];
   if (!local) {
-    console.error("用法: atk shelf push <本地文件/文件夹> [--to <shelf路径>] [--yes] [--force-secret]");
+    console.error("用法: shelf push <本地文件/文件夹> [--to <shelf路径>] [--yes] [--force] [--force-secret]");
     process.exit(1);
   }
   const localAbs = path.resolve(process.cwd(), local);
@@ -507,7 +507,7 @@ async function cmdShelfPush(argv) {
 
 // ---- 子命令：init ----
 
-async function cmdShelfInit() {
+export async function cmdShelfInit() {
   const ctx = resolveShelfContext();
   try {
     const manifest = loadManifest();
@@ -525,21 +525,10 @@ async function cmdShelfInit() {
 
     console.log("");
     console.log("工作区已就绪:");
-    console.log("  .atk.json                 版本追踪 manifest");
+    console.log("  .shelf.json               版本追踪 manifest");
     console.log("  .claude/skills/shelf-ops  货架操作手册（agent 据此执行 pull/push）");
   } finally {
     ctx.cleanup();
   }
 }
 
-// ---- 入口 ----
-
-export async function cmdShelf(argv) {
-  const sub = argv[0];
-  if (sub === "pull") return cmdShelfPull(argv.slice(1));
-  if (sub === "push") return cmdShelfPush(argv.slice(1));
-  if (sub === "init") return cmdShelfInit(argv.slice(1));
-  if (sub === undefined || sub === "list" || sub === "browse") return cmdShelfBrowse();
-  console.error(`Unknown shelf command: ${sub}\n可用: atk shelf | pull | push | init`);
-  process.exit(1);
-}
