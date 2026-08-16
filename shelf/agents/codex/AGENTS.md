@@ -1,22 +1,28 @@
-# AI 工作协议
+# Codex 工作协议
 
-本协议适用于任何参与本项目的 AI 助手，包括 Codex、Claude 以及其他具备文件读写能力的代理。
+## 本文档修改规则（元规则）
+
+AGENTS.md 与 CLAUDE.md 是**跨项目通用协议**，只收跨项目规则：
+
+- **永不自动添加规则**：只有用户明确提出"把某规则加进这个文档"时才修改
+- 不含任何项目专属内容；项目相关规则一律分发到项目内对应文档（如 PROJECT.md / TODO.md / 专题规范文档）
 
 ## 上下文准备
 
 每次对话开始时：
-1. 读取 `ai/PROJECT.md` 和 `ai/TODO.md`，将项目现状和任务列表纳入上下文
-2. 扫描 `skills/` 目录，了解当前有哪些可用 skill
-3. 遇到对应场景时，**必须调用对应的 skill**，不要重新发明已有规范
+
+1. 读取 `Ai/PROJECT.md` 和 `Ai/TODO.md`，将项目现状和任务列表纳入上下文
+2. 根据任务需要读取 `Ai/Features/*.md`、`Ai/UNITY_PROJECT.md`、`Ai/UNITY_TODO.md`
+3. 了解当前可用的 Codex skill；遇到对应场景时，**必须调用对应的 skill**，不要重新发明已有规范
 
 ### Skill 对话规范
 
-在 skill 上下文中回复时，**在回复开头标注 skill 名称**，像这个 skill 的"人"在说话：
+在 skill 上下文中回复时，**在回复开头标注 skill 名称**，像这个 skill 的“人”在说话：
 
-```
+```text
 **INTJ** 好，我看了一下，你现在还有...
 **VC** 当前分支状态如下...
-**Logman** 这行 log 格式有问题...
+**LOGMAN** 这行 log 格式有问题...
 ```
 
 格式：`**SKILL名称（全大写）**` + 空格 + 正文。
@@ -25,50 +31,66 @@
 
 始终保持对当前可用 skill 的感知，在对应场景**主动触发**，不等用户提醒：
 
-| 场景 | 应触发的 skill |
-|---|---|
-| 更新 TODO、记录任务、Bug、优先级判断 | `intj` |
-| **查看任务列表、项目进度、待办总览**（如"查看 todo"、"有什么要做的"） | `intj` |
-| **更新项目文档**（如"更新文档"、"同步文档"、"记录到文档"） | `intj` |
-| 功能开发、Feature 文档读写、Subtask 执行 | `feature` |
-| git commit、分支、PR 操作 | `vc` |
-| 创建或修改 skill 文件（SKILL.md、reference.md 等） | `custom-skill` |
-| 写/改/检查 log 语句、新增功能域标签 | `logman` |
+| 场景                                                                  | 应触发的 skill    |
+| --------------------------------------------------------------------- | ----------------- |
+| 更新 TODO、记录任务、Bug、优先级判断                                  | `intj`            |
+| **查看任务列表、项目进度、待办总览**（如“查看 todo”、“有什么要做的”） | `intj`            |
+| **更新项目文档**（如“更新文档”、“同步文档”、“记录到文档”）            | `intj`            |
+| 功能开发、Feature 文档读写、Subtask 执行                              | `feature`         |
+| git commit、分支、PR 操作                                             | `vc`              |
+| 创建或修改 Codex skill 文件（`SKILL.md`、reference、scripts 等）      | `skill-creator`   |
+| 安装 Codex skill                                                      | `skill-installer` |
+| 写/改/检查 log 语句、新增功能域标签                                   | `logman`          |
 
-**重要**：任何对 `skills/` 目录下文件的读写，都必须先触发 `custom-skill`，不得绕过 skill 规范直接操作。
+**重要**：Codex 的 skill 不放在项目 `.claude/skills/` 中。项目内 `.claude/skills/` 是 Claude
+侧配置，Codex 可以参考其流程，但不要假设它们会被 Codex 自动注册为可调用 skill。
 
 ## Skill 系统
 
+### Skill 放置位置
+
+Codex skill 是用户级能力，默认放在用户 Codex 目录：
+
+```text
+~/.codex/skills/<skill-name>/SKILL.md
+~/.codex/skills/.system/<system-skill-name>/SKILL.md
+```
+
+本项目不需要为了 Codex skill 创建 `.codex/` 目录。项目级 Codex 使用规则写在仓库根目录的
+`AGENTS.md`；跨项目复用的 Codex skill 写到 `~/.codex/skills/<skill-name>/`。
+
 ### Skill 创建规范
 
-创建新 skill 时遵循以下结构：
+创建新 Codex skill 时遵循以下结构：
 
-```
-skills/<skill-name>/
-├── SKILL.md        # 必需：入口指令 + frontmatter，控制在 500 行以内
-├── reference.md    # 可选：详细规范，需要时才加载
-└── examples.md     # 可选：示例
+```text
+~/.codex/skills/<skill-name>/
+├── SKILL.md          # 必需：frontmatter + 核心指令，控制在 500 行以内
+├── agents/
+│   └── openai.yaml   # 推荐：UI 展示元数据
+├── references/       # 可选：详细规范，需要时才加载
+├── scripts/          # 可选：可执行脚本
+└── assets/           # 可选：模板、图片、字体等输出资源
 ```
 
-**SKILL.md frontmatter 常用字段：**
+**SKILL.md frontmatter 必需字段：**
 
 ```yaml
 ---
 name: skill-name
-description: 一句话描述，用于决定何时触发
-allowed-tools: shell, read-only-search   # 示例：具体工具名由运行环境决定
+description: 一句话描述 skill 的用途，以及什么时候应该触发
 ---
 ```
 
-**支持的动态特性：**
-- `!`shell命令`` — skill 运行前注入命令输出（如 `!git status`）
-- `$ARGUMENTS` — 接收调用时传入的参数
-- `${SKILL_DIR}` — 引用 skill 目录内的文件或脚本；如果平台使用其他变量名，应映射到同一语义
+Codex 主要读取 `name` 和 `description` 来判断是否触发 skill。描述要明确覆盖触发场景。
 
 **最佳实践：**
-- `SKILL.md` 只写核心指令和入口，细节拆到 `reference.md`
+
+- `SKILL.md` 只写核心指令和入口，细节拆到 `references/`
 - 支持文件按需加载，不增加每次运行的上下文成本
-- 通用 skill 不写项目特定内容，保持跨项目、跨 AI 平台复用
+- 通用 skill 不写项目特定内容，保持跨项目复用
+- 需要稳定执行的重复流程放到 `scripts/`
+- 不创建无关的 `README.md`、安装指南、变更日志等杂项文档
 
 ## 文档维护规则
 
@@ -107,18 +129,10 @@ allowed-tools: shell, read-only-search   # 示例：具体工具名由运行环�
 
 ## 代码修改规则
 
-**未经用户明确说"帮我改"、"写进去"、"更新文件"等授权之前，不直接修改任何文件。**
+**未经用户明确说“帮我改”之前，不直接修改代码。**
 
 分析阶段应：
 
 1. 说明要改哪里、为什么这么改
 2. 展示改动的代码片段
 3. 等用户确认后再动手
-
-实际修改文件时必须遵守：
-
-- 所有文件内容修改都必须使用能触发可见 diff/确认流程的编辑方式。
-- 修改前先说明即将修改的文件和改动意图。
-- 不得绕过用户可见 diff，静默写入、批量替换或隐藏式生成文件。
-- 如果运行环境无法弹出 diff/确认界面，必须先告知用户，并等待用户明确允许后再继续。
-- 用户中断或拒绝 diff 时，视为未授权该次修改；不得用其他方式重复写入同一改动。
