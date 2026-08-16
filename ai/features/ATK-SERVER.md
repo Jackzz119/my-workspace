@@ -159,8 +159,8 @@ manifest 字段扩展：
 
 | 位置 | manifest | skill 落点 |
 |---|---|---|
-| 项目级 | `<project>/.agent-toolkit.json` | `<project>/.claude/skills/` |
-| 全局级 | `~/.claude/.agent-toolkit.json` | `~/.claude/skills/` |
+| 项目级 | `<project>/.atk.json` | `<project>/.claude/skills/` |
+| 全局级 | `~/.claude/.atk.json` | `~/.claude/skills/` |
 
 ### 3.7 Web UI（MVP）
 

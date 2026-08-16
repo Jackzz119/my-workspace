@@ -1,14 +1,23 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const MANIFEST_NAME = ".agent-toolkit.json";
+const MANIFEST_NAME = ".atk.json";
+// 项目还叫 agent-toolkit 时的旧名：读取时自动兼容，saveManifest 落新名并删旧文件
+const LEGACY_MANIFEST_NAME = ".agent-toolkit.json";
 
 export function manifestPath(cwd = process.cwd()) {
   return path.join(cwd, MANIFEST_NAME);
 }
 
+function legacyManifestPath(cwd = process.cwd()) {
+  return path.join(cwd, LEGACY_MANIFEST_NAME);
+}
+
 export function loadManifest(cwd = process.cwd()) {
-  const file = manifestPath(cwd);
+  let file = manifestPath(cwd);
+  if (!fs.existsSync(file) && fs.existsSync(legacyManifestPath(cwd))) {
+    file = legacyManifestPath(cwd);
+  }
   if (!fs.existsSync(file)) {
     return {
       source: null,
@@ -26,6 +35,11 @@ export function loadManifest(cwd = process.cwd()) {
 export function saveManifest(manifest, cwd = process.cwd()) {
   const file = manifestPath(cwd);
   fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+  const legacy = legacyManifestPath(cwd);
+  if (fs.existsSync(legacy)) {
+    fs.rmSync(legacy);
+    console.log(`（已迁移 ${LEGACY_MANIFEST_NAME} → ${MANIFEST_NAME}）`);
+  }
 }
 
 export function setSkillEntry(manifest, name, entry) {

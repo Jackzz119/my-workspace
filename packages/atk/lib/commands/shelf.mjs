@@ -525,7 +525,7 @@ async function cmdShelfInit() {
 
     console.log("");
     console.log("工作区已就绪:");
-    console.log("  .agent-toolkit.json     版本追踪 manifest");
+    console.log("  .atk.json                 版本追踪 manifest");
     console.log("  .claude/skills/shelf-ops  货架操作手册（agent 据此执行 pull/push）");
   } finally {
     ctx.cleanup();

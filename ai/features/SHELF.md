@@ -25,13 +25,13 @@
 | 3 | 内容归属 | 原 `skills/`、`agents/` 整体挪入 `shelf/` 之下，`shelf/skills/` 仍是 skill 真源 |
 | 4 | 传输策略 | 见下节「三层传输」：优先本地 workspace clone，否则临时 sparse clone，与 monorepo 体积解耦 |
 | 5 | push 冲突保护 | push 前比对云端当前 contentHash 与本地 manifest 记录：不一致（他机改过）给 `[d]iff / [f]orce / [a]bort`，不静默覆盖 |
-| 6 | 版本记录 | 复用 `.agent-toolkit.json`，新增 `shelf` 段，**以 shelf 相对路径为键**：`"skills/common/intj": { sourceCommit, contentHash, pulledAt, localPath }`（旧 `skills` 段保留读取兼容，ST-C 附迁移） |
+| 6 | 版本记录 | manifest 更名 **`.atk.json`**（跟 CLI 命令走，与全局 `~/.atkrc` 成对；旧名 `.agent-toolkit.json` 读取兼容、存盘自动迁移）。新增 `shelf` 段，**以 shelf 相对路径为键**：`"skills/common/intj": { sourceCommit, contentHash, pulledAt, localPath }` |
 | 7 | 分发方式 | `npx github:` 模式随单仓库废弃；短期 = 本机 workspace clone 里 `npm link`（或 node 直跑），长期 = npm publish（挂 NPM-PUBLISH） |
 | 8 | 结构解耦 | pull/push **不硬编码任何目录名**（common、skills 等都只是普通目录），纯文件系统导航；shelf 结构可随时重排，CLI 不用改 |
 | 9 | 落点规则（修订） | CLI 一律拉到 `./<真实名>`（`--dest` 可覆盖），**不做分类特判**——货架分类会增多，逐类落点逻辑即冗余；「技能放 `.claude/skills/`」这类智能放在 shelf-ops 手册里由 agent 执行 |
 | 10 | 链接模式 | 同机引用真源用**链接**（本仓库 `.claude/skills` 即此模式，见 `scripts/setup-links.mjs`）；跨机用**复制** + manifest 版本追踪。远期可给 atk 加 `pull --link` |
 | 11 | `_` 前缀 | 文件系统**保留**（置顶用），CLI 显示层过滤：`common` ⇄ `_common` 输入双向解析，落盘与 manifest 永远用真实名 |
-| 12 | `atk shelf init` | 在任意工作区落两样东西：`.agent-toolkit.json` manifest + shelf-ops 操作手册（→ `.claude/skills/shelf-ops`）；操作智能在手册，CLI 保持哑传输 |
+| 12 | `atk shelf init` | 在任意工作区落两样东西：`.atk.json` manifest + shelf-ops 操作手册（→ `.claude/skills/shelf-ops`）；操作智能在手册，CLI 保持哑传输 |
 | 13 | 非交互守卫 | 非 TTY（agent 经 Bash 驱动）：pull 冲突自动选安全项（skip/keep）；push 确认要求 `--yes`、异机冲突打印差异后中止（exit 3）要求 `--force`——杜绝 agent 挂死在交互提问上 |
 
 ## 三、三层传输（解决「push 要不要整库 clone」）

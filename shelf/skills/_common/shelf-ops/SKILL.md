@@ -22,7 +22,7 @@ atk shelf init                             # 初始化工作区（manifest + 本
 
 - 路径里 `_` 前缀可省略：`skills/common/intj` 和 `skills/_common/intj` 等价，落盘用真实名。
 - 找不到货架时先检查 `ATK_HOME` 环境变量或 `~/.atkrc`（`{"home": "<my-workspace clone 路径>"}`）。
-- 版本追踪在当前目录 `.agent-toolkit.json`（`shelf` 段，按 shelf 相对路径为键），不要手改。
+- 版本追踪在当前目录 `.atk.json`（`shelf` 段，按 shelf 相对路径为键），不要手改；见到旧名 `.agent-toolkit.json` 属正常，任一次 pull/push 会自动迁移。
 
 ## 落点约定（pull 之后放哪）
 
