@@ -8,7 +8,7 @@ export const repoRoot = path.resolve(here, "..", "..", "..");
 export const shelfRoot = path.join(repoRoot, "shelf");
 export const packsRoot = path.join(shelfRoot, "skills");
 
-export const commonPackName = "_common";
+export const commonPackName = "common";
 export const commonPackDir = path.join(packsRoot, commonPackName);
 
 export function packDir(name) {

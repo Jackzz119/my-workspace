@@ -6,6 +6,7 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 
 - [x] 目录迁移 + `paths.mjs` 适配（repoRoot = monorepo 根，packsRoot = `shelf/skills/`）
 - [x] monorepo 脚手架：根 `package.json`（workspaces）+ `.gitignore`
+- [x] `.claude/skills` 从拷贝改为链接引用真源（`scripts/setup-links.mjs`，junction/symlink，幂等）；`_common` 包更名 `common`
 - [ ] 迁移遗留：旧仓库**本地未提交改动**（`blender-create/SKILL.md`、`extra-skills → other-skills` 重命名，见 Phase 2）需从旧工作副本找回或放弃
 - [ ] 在 GitHub 创建 `my-workspace` 私有仓库并 push（待用户执行或授权）
 

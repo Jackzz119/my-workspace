@@ -8,7 +8,7 @@
 
 - `packages/atk/` — `atk` CLI 实现（`bin/atk.mjs` + `lib/`），详见 [`ai/features/SKILL-SYNC-CLI.md`](features/SKILL-SYNC-CLI.md) 与 [`ai/features/SHELF.md`](features/SHELF.md)
 - `shelf/` — 内容货架（唯一真源），任何条目均可被 `atk` 拉到目标项目 / 推回
-  - `shelf/skills/` — 主 skill 集，按**包**组织：`_common/`（默认包）、`<pack>/`（领域包，如 `blender/`）
+  - `shelf/skills/` — 主 skill 集，按**包**组织：`common/`（默认包）、`<pack>/`（领域包，如 `blender/`）
   - `shelf/agents/` — AI 平台工作协议模板：`claude/CLAUDE.md`（用 `.claude/skills/`、`${CLAUDE_SKILL_DIR}`）、`codex/AGENTS.md`（平台中立，用 `skills/`、`${SKILL_DIR}`）
 - `apps/` — 应用（预留，当前为空；可视化工作流引擎将落在这里）
 - `ai/` — 工作区级 PROJECT.md / TODO.md / features/ 文档
@@ -35,8 +35,8 @@
 ## Skill 真源规则
 
 - **`shelf/skills/` 是唯一真源**，所有 skill 修改只在这里进行
-- **`.claude/skills/` 是本地缓存**，仅供本仓库自身的 Claude Code 会话使用，不手动改
-- 真源更新后通过 `atk pull` 同步到 `.claude/skills/`；本仓库也算一个"目标项目"
+- **`.claude/skills/` 是指向真源的链接**（Windows junction / POSIX symlink，git 忽略），由 `node scripts/setup-links.mjs` 生成；通过链接改技能 = 直接改真源，不存在第二份拷贝
+- 新 clone 后跑一次 `node scripts/setup-links.mjs`；shelf 里增删 skill 后重跑即可（幂等）
 
 ## 功能文档
 

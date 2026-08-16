@@ -138,4 +138,4 @@ my-workspace 是管理所有个人工作流的 monorepo：
 - `shelf/` — 内容货架（**唯一真源**）：`skills/`（技能包）、`agents/`（工作协议模板）、以及任何要跨项目取用的文件/文件夹
 - `apps/` — 应用（如未来的可视化工作流引擎），当前为空
 - `ai/` — 工作区级 PROJECT.md / TODO.md / features/ 文档
-- `.claude/skills/` — 本地缓存（供本仓库会话使用），不手动改，真源在 `shelf/skills/`
+- `.claude/skills/` — 指向 `shelf/skills/` 的链接（`node scripts/setup-links.mjs` 生成，git 忽略）；通过链接修改技能就是修改真源
