@@ -17,13 +17,18 @@ function walkFiles(dir, base = dir) {
   return out;
 }
 
-export function contentHash(skillDir) {
-  const files = walkFiles(skillDir).sort();
+export function contentHash(target) {
   const hash = crypto.createHash("sha256");
+  if (fs.statSync(target).isFile()) {
+    hash.update("file\0");
+    hash.update(fs.readFileSync(target));
+    return `sha256:${hash.digest("hex")}`;
+  }
+  const files = walkFiles(target).sort();
   for (const rel of files) {
     hash.update(rel);
     hash.update("\0");
-    hash.update(fs.readFileSync(path.join(skillDir, rel)));
+    hash.update(fs.readFileSync(path.join(target, rel)));
     hash.update("\0");
   }
   return `sha256:${hash.digest("hex")}`;

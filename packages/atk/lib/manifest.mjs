@@ -14,10 +14,12 @@ export function loadManifest(cwd = process.cwd()) {
       source: null,
       skillsDir: ".claude/skills",
       skills: {},
+      shelf: {},
     };
   }
   const data = JSON.parse(fs.readFileSync(file, "utf8"));
   data.skills ??= {};
+  data.shelf ??= {};
   return data;
 }
 
@@ -32,4 +34,20 @@ export function setSkillEntry(manifest, name, entry) {
 
 export function removeSkillEntry(manifest, name) {
   delete manifest.skills[name];
+}
+
+// shelf 段以 shelf 相对路径（真实名）为键，见 SHELF 决策 #6
+export function setShelfEntry(manifest, shelfPath, entry) {
+  manifest.shelf ??= {};
+  manifest.shelf[shelfPath] = entry;
+}
+
+export function findShelfEntryByLocalPath(manifest, localPath) {
+  const normalized = localPath.replaceAll("\\", "/");
+  for (const [shelfPath, entry] of Object.entries(manifest.shelf ?? {})) {
+    if ((entry.localPath ?? "").replaceAll("\\", "/") === normalized) {
+      return { shelfPath, entry };
+    }
+  }
+  return null;
 }

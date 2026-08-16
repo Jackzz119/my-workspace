@@ -10,16 +10,17 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 - [ ] 迁移遗留：旧仓库**本地未提交改动**（`blender-create/SKILL.md`、`extra-skills → other-skills` 重命名，见 Phase 2）需从旧工作副本找回或放弃
 - [ ] 在 GitHub 创建 `my-workspace` 私有仓库并 push（待用户执行或授权）
 
-## Shelf — 通用内容 push/pull（最高优先级）
+## Shelf — 通用内容 push/pull
 
 > 设计文档：[`ai/features/SHELF.md`](features/SHELF.md)
-> 状态：设计定稿，待确认开工
+> 状态：已实现（2026-08-16，Windows 全链路冒烟通过）
 
-- [ ] **ST-A**：transport 层（ATK_HOME 发现 + 临时 sparse clone + push helper）
-- [ ] **ST-B**：`atk shelf`（list 根条目）
-- [ ] **ST-C**：`atk shelf pull`（多选 + manifest `shelf` 段 + 四情景菜单复用）
-- [ ] **ST-D**：`atk shelf push`（冲突检测 + 变更清单确认 + commit/push）
-- [ ] **ST-E**：跨平台冒烟 + README shelf 章节
+- [x] **ST-A**：transport 层（ATK_HOME → 自身 clone → ~/.atkrc → 临时 sparse clone）
+- [x] **ST-B**：`atk shelf` 交互浏览器（导航 + 多选 + 管道输入安全）
+- [x] **ST-C**：`atk shelf pull`（展示名解析 + manifest shelf 段 + 四情景菜单）
+- [x] **ST-D**：`atk shelf push`（异机冲突保护 + 变更清单 + 凭据拦截 + 非交互守卫）
+- [x] **ST-F**：`atk shelf init` + `shelf-ops` 操作手册 skill
+- [ ] **ST-E**：macOS 侧冒烟 + README shelf 章节
 
 ## 发版策略（npm publish）
 

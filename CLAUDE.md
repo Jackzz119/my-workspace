@@ -139,3 +139,10 @@ my-workspace 是管理所有个人工作流的 monorepo：
 - `apps/` — 应用（如未来的可视化工作流引擎），当前为空
 - `ai/` — 工作区级 PROJECT.md / TODO.md / features/ 文档
 - `.claude/skills/` — 指向 `shelf/skills/` 的链接（`node scripts/setup-links.mjs` 生成，git 忽略）；通过链接修改技能就是修改真源
+
+### 技能真源铁律
+
+- 新建或修改技能，一律发生在 `shelf/skills/<pack>/<skill>/`；**禁止在 `.claude/skills/` 下创建真实文件**
+- shelf 里增删技能后，运行 `node scripts/setup-links.mjs` 重建链接（幂等，Windows 用 junction 无需管理员权限）
+- `.claude/skills/` 只应包含链接（git 已忽略整个目录）；发现真实目录即违规——把内容迁回 shelf，重建链接
+- 新 clone 本仓库后，先跑一次 `node scripts/setup-links.mjs` 再开工

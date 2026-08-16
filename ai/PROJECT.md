@@ -12,6 +12,7 @@
   - `shelf/agents/` — AI 平台工作协议模板：`claude/CLAUDE.md`（用 `.claude/skills/`、`${CLAUDE_SKILL_DIR}`）、`codex/AGENTS.md`（平台中立，用 `skills/`、`${SKILL_DIR}`）
 - `apps/` — 应用（预留，当前为空；可视化工作流引擎将落在这里）
 - `ai/` — 工作区级 PROJECT.md / TODO.md / features/ 文档
+- `scripts/setup-links.mjs` — 把 shelf 技能链接进 `.claude/skills/`（clone 后跑一次，幂等；铁律见 CLAUDE.md）
 
 ## Skill 清单
 
@@ -23,6 +24,7 @@
 | `custom-skill` | — | Skill 主管，管理所有 skill 的生命周期 |
 | `logman` | 自动 | log 语句格式与功能域标签规范 |
 | `blender-create` | — | Blender MCP 建模 / 材质 / Retopo / Rigging / 导出流程 |
+| `shelf-ops` | 自动 | 货架操作手册——agent 执行 shelf pull/push 的用法、落点约定与冲突守则（`atk shelf init` 会装进目标工作区） |
 
 ## AI 工作协议核心
 
