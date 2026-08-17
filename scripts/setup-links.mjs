@@ -1,10 +1,13 @@
 #!/usr/bin/env node
-// 把 shelf/skills 里的全部 skill 以链接形式挂到 .claude/skills/。
+// 把「启用清单」里的 shelf 技能以链接形式挂到 .claude/skills/。
 // Windows 用 junction（无需管理员权限），POSIX 用符号链接；幂等，重复运行即重建。
-// .claude/skills 里不放真实文件——真源规则见 ai/PROJECT.md。
+// 货架 ≠ 启用（CLAUDE.md 技能真源铁律）：shelf 里的其他技能是库存，不在清单里就不链接。
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+// 启用清单：三种写法——"包名"（链接包内全部技能）、"包/技能"、顶层技能名
+const ACTIVE = ["_common"];
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const skillsSrc = path.join(root, "shelf", "skills");
@@ -14,23 +17,28 @@ function isSkillDir(p) {
   return fs.existsSync(path.join(p, "SKILL.md"));
 }
 
-// shelf/skills 下两种形态：直接的 skill 目录（含 SKILL.md），或包目录（子目录才是 skill）
 const links = new Map();
-for (const entry of fs.readdirSync(skillsSrc, { withFileTypes: true })) {
-  if (!entry.isDirectory()) continue;
-  const full = path.join(skillsSrc, entry.name);
+function addLink(name, target) {
+  if (links.has(name)) {
+    console.warn(`! skip ${path.relative(root, target)}: name '${name}' already linked from ${path.relative(root, links.get(name))}`);
+    return;
+  }
+  links.set(name, target);
+}
+
+for (const entry of ACTIVE) {
+  const full = path.join(skillsSrc, ...entry.split("/"));
+  if (!fs.existsSync(full)) {
+    console.warn(`! ACTIVE 条目不存在，跳过: ${entry}`);
+    continue;
+  }
   if (isSkillDir(full)) {
-    links.set(entry.name, full);
+    addLink(path.basename(full), full);
     continue;
   }
   for (const sub of fs.readdirSync(full, { withFileTypes: true })) {
     const subFull = path.join(full, sub.name);
-    if (!sub.isDirectory() || !isSkillDir(subFull)) continue;
-    if (links.has(sub.name)) {
-      console.warn(`! skip ${entry.name}/${sub.name}: name already linked from ${path.relative(root, links.get(sub.name))}`);
-      continue;
-    }
-    links.set(sub.name, subFull);
+    if (sub.isDirectory() && isSkillDir(subFull)) addLink(sub.name, subFull);
   }
 }
 
@@ -42,4 +50,4 @@ for (const [name, target] of [...links.entries()].sort()) {
   fs.symlinkSync(target, path.join(dest, name), linkType);
   console.log(`→ ${name}  ⇒  ${path.relative(root, target)}`);
 }
-console.log(`${links.size} skill link(s) created at .claude/skills/`);
+console.log(`${links.size} skill link(s) created at .claude/skills/ (ACTIVE: ${ACTIVE.join(", ")})`);

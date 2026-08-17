@@ -146,3 +146,4 @@ my-workspace 是管理所有个人工作流的 monorepo：
 - shelf 里增删技能后，运行 `node scripts/setup-links.mjs` 重建链接（幂等，Windows 用 junction 无需管理员权限）
 - `.claude/skills/` 只应包含链接（git 已忽略整个目录）；发现真实目录即违规——把内容迁回 shelf，重建链接
 - 新 clone 本仓库后，先跑一次 `node scripts/setup-links.mjs` 再开工
+- **货架 ≠ 启用（2026-08-17 用户定规）**：`shelf/` 里的技能只是库存；任何 agent（包括 Claude 自己）只认原生目录 `.claude/skills/` 里实际存在的 skill，**不得读取或遵循库存技能**。本仓库启用哪些技能由 `scripts/setup-links.mjs` 顶部的 ACTIVE 清单显式声明（当前 = `_common` 包全体）
