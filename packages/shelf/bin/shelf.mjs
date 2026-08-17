@@ -5,6 +5,7 @@ import {
   cmdShelfBrowse,
   cmdShelfPull,
   cmdShelfPush,
+  cmdShelfCreate,
   cmdShelfInit,
 } from "../lib/commands/shelf.mjs";
 
@@ -15,8 +16,10 @@ Usage:
   shelf                  交互浏览货架（数字进目录，p 1,3-5 拉取，a 全部）
   shelf pull <路径...>    按路径拉取，如 shelf pull skills/common/intj
                          [--dest <目录>]
-  shelf push <本地路径>   推回货架 [--to <shelf路径>] [--yes] [--force]
-                         [--force-secret]
+  shelf create <本地路径> 上架新货：全架查重名，交互选位（m <名> 建目录，
+                         d 放下）[--to <货架目录>] [--yes]
+  shelf push <本地路径>   更新已有货：按记账/名字自动定位
+                         [--yes] [--force] [--force-secret]
   shelf init             初始化工作区（.shelf.json + shelf-ops 手册）
 
   shelf skills list      技能包清单（原 atk list）
@@ -39,6 +42,8 @@ async function dispatch(sub, rest) {
         return cmdPull();
       }
       return cmdShelfPull(rest);
+    case "create":
+      return cmdShelfCreate(rest);
     case "push":
       return cmdShelfPush(rest);
     case "init":

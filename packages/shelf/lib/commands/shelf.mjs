@@ -4,7 +4,7 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { resolveShelfContext, headCommit, remoteUrl, commitAndPush } from "../transport.mjs";
-import { displayName, displayPath, resolveShelfPath } from "../shelfnames.mjs";
+import { displayName, displayPath, resolveShelfPath, findByBasename } from "../shelfnames.mjs";
 import { contentHash } from "../version.mjs";
 import {
   loadManifest,
@@ -346,7 +346,7 @@ export async function cmdShelfBrowse() {
   }
 }
 
-// ---- 子命令：push ----
+// ---- 上架/更新共用 ----
 
 function takeFlag(args, name, hasValue = false) {
   const i = args.indexOf(name);
@@ -355,17 +355,114 @@ function takeFlag(args, name, hasValue = false) {
   return { args: args.filter((_, j) => j !== i && (!hasValue || j !== i + 1)), value };
 }
 
+// 凭据/大文件安全阀；违规直接退出
+function guardFiles(localAbs, forceSecret) {
+  const files = listFilesRecursive(localAbs);
+  const secrets = files.filter((f) => SECRET_PATTERNS.some((re) => re.test(path.basename(f.rel))));
+  if (secrets.length > 0 && !forceSecret) {
+    console.error(`✗ 疑似凭据文件，已拒绝（--force-secret 可放行）:`);
+    for (const s of secrets) console.error(`    ${s.rel}`);
+    process.exit(1);
+  }
+  for (const b of files.filter((f) => f.size > BIG_FILE_BYTES)) {
+    console.warn(`! 大文件 ${b.rel} (${fmtSize(b.size)})，GitHub 单文件上限 100MB`);
+  }
+}
+
+function printChangeList(targetAbs, localAbs, shown) {
+  const d = diffSummary(targetAbs, localAbs);
+  const total = d.added.length + d.removed.length + d.changed.length;
+  console.log(`将写入 shelf/${shown}：新增 ${d.added.length} / 删除 ${d.removed.length} / 修改 ${d.changed.length}`);
+  for (const f of d.added) console.log(`  + ${f}`);
+  for (const f of d.removed) console.log(`  - ${f}`);
+  for (const f of d.changed) console.log(`  ~ ${f}`);
+  return total;
+}
+
+async function confirmOrExit(promptText, yes) {
+  if (yes) return true;
+  if (!INTERACTIVE) {
+    console.error(`✗ 非交互环境：清单如上，确认无误后加 --yes 重跑。已中止。`);
+    process.exit(2);
+  }
+  const act = await choose(promptText, [{ key: "y" }, { key: "n" }]);
+  if (act === "n") {
+    console.log("已中止。");
+    return false;
+  }
+  return true;
+}
+
+// 覆盖货架条目并提交；返回是否需要保留临时 clone
+function applyAndCommit(ctx, key, localAbs, manifest, verb) {
+  const targetAbs = path.join(ctx.shelfDir, ...key.split("/"));
+  const shown = displayPath(key);
+
+  fs.rmSync(targetAbs, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(targetAbs), { recursive: true });
+  copyFiltered(localAbs, targetAbs);
+
+  const message = `shelf: ${verb} ${shown} (from ${os.hostname()})`;
+  const result = commitAndPush(ctx.root, [toPosix(path.join("shelf", key))], message);
+
+  let keepEphemeral = false;
+  if (!result.committed) {
+    console.log("= 内容与货架一致，无需提交");
+  } else if (result.pushed) {
+    console.log(`✓ 已推送 ${shown} (${result.sha.slice(0, 7)})`);
+  } else if (result.pushError === "no-remote") {
+    console.log(`✓ 已提交 ${shown} (${result.sha.slice(0, 7)})，仓库还没配 remote，配好后 git push 即同步`);
+  } else {
+    console.warn(`! 已提交 (${result.sha.slice(0, 7)}) 但 push 失败: ${result.pushError}`);
+    if (ctx.mode === "ephemeral") {
+      keepEphemeral = true;
+      console.warn(`! 临时 clone 保留在 ${ctx.root}，手动处理后可删除`);
+    }
+  }
+
+  setShelfEntry(manifest, key, {
+    sourceCommit: result.sha ?? headCommit(ctx.root),
+    contentHash: contentHash(targetAbs),
+    pulledAt: todayISO(),
+    localPath: toPosix(path.relative(process.cwd(), localAbs)),
+  });
+  manifest.source ??= remoteUrl(ctx.root) || toPosix(ctx.root);
+  saveManifest(manifest);
+  return keepEphemeral;
+}
+
+// 多个同名命中时让用户挑一个；非交互直接中止
+async function pickAmong(hits, promptLabel) {
+  console.log(promptLabel);
+  hits.forEach((h, i) => console.log(`  ${i + 1}. ${displayPath(h)}`));
+  if (!INTERACTIVE) {
+    console.error(`✗ 非交互环境无法选择，已中止。`);
+    process.exit(3);
+  }
+  const act = await choose(
+    `选择编号（或 [q]uit）? `,
+    [...hits.map((_, i) => ({ key: String(i + 1) })), { key: "q" }],
+  );
+  if (act === "q") return null;
+  return hits[Number(act) - 1];
+}
+
+// ---- 子命令：push（更新已有货，SHELF 决策 #15）----
+
 export async function cmdShelfPush(argv) {
+  if (argv.includes("--to")) {
+    console.error("✗ push 不再接受 --to：更新已有条目会自动定位；新内容上架用 shelf create <路径> [--to <目录>]");
+    process.exit(1);
+  }
   let rest = argv;
-  let to, yes, force, forceSecret;
-  ({ args: rest, value: to } = takeFlag(rest, "--to", true));
+  let yes, force, forceSecret;
   ({ args: rest, value: yes } = takeFlag(rest, "--yes"));
   ({ args: rest, value: force } = takeFlag(rest, "--force"));
   ({ args: rest, value: forceSecret } = takeFlag(rest, "--force-secret"));
 
   const local = rest[0];
   if (!local) {
-    console.error("用法: shelf push <本地文件/文件夹> [--to <shelf路径>] [--yes] [--force] [--force-secret]");
+    console.error("用法: shelf push <本地文件/文件夹> [--yes] [--force] [--force-secret]");
     process.exit(1);
   }
   const localAbs = path.resolve(process.cwd(), local);
@@ -379,35 +476,67 @@ export async function cmdShelfPush(argv) {
   try {
     const manifest = loadManifest();
 
-    // 目标 shelf 路径：--to 全路径 > manifest 反查 > 货架根/<名字>
+    // 定位链：记账原位 → 原位失效按名字找回 → 无记账按名字匹配 → 指路 create
+    const found = findShelfEntryByLocalPath(manifest, toPosix(path.relative(process.cwd(), localAbs)));
     let key;
-    if (to) {
-      const hit = resolveShelfPath(ctx.shelfDir, to, { allowCreate: true });
-      key = hit.realRel;
-      if (hit.created) console.log(`（货架上将新建路径 ${displayPath(key)}）`);
+    let record = null;
+    let relocatedFrom = null;
+
+    if (found) {
+      record = found.entry;
+      key = found.shelfPath;
+      if (!fs.existsSync(path.join(ctx.shelfDir, ...key.split("/")))) {
+        const name = path.basename(key);
+        const hits = findByBasename(ctx.shelfDir, name);
+        if (hits.length === 0) {
+          console.error(`✗ 原路径 ${displayPath(key)} 已不存在，货架上也没有同名 '${displayName(name)}'；如是新内容用 shelf create`);
+          process.exit(1);
+        }
+        const target = hits.length === 1
+          ? hits[0]
+          : await pickAmong(hits, `货架上有多个同名 '${displayName(name)}'：`);
+        if (!target) {
+          console.log("已中止。");
+          return;
+        }
+        const sameContent = record.contentHash === contentHash(path.join(ctx.shelfDir, ...target.split("/")));
+        console.log(`↪ ${displayPath(key)} 已被移动到 ${displayPath(target)}${sameContent ? "（内容一致，纯搬家）" : "（且货架侧内容有差异）"}`);
+        if (INTERACTIVE && !yes) {
+          const act = await choose(`推到新位置并更新记账? [y]es / [n]o? `, [{ key: "y" }, { key: "n" }]);
+          if (act === "n") {
+            console.log("已中止。");
+            return;
+          }
+        }
+        relocatedFrom = key;
+        key = target;
+      }
     } else {
-      const found = findShelfEntryByLocalPath(manifest, toPosix(path.relative(process.cwd(), localAbs)));
-      key = found ? found.shelfPath : path.basename(localAbs);
+      const name = path.basename(localAbs);
+      const hits = findByBasename(ctx.shelfDir, name);
+      if (hits.length === 0) {
+        console.error(`✗ 货架上没有名为 '${name}' 的条目；新内容上架用 shelf create ${local}`);
+        process.exit(1);
+      }
+      key = hits.length === 1
+        ? hits[0]
+        : await pickAmong(hits, `货架上有多个同名 '${name}'：`);
+      if (!key) {
+        console.log("已中止。");
+        return;
+      }
+      console.log(`≈ 按名字匹配到货架条目 ${displayPath(key)}（本工作区无 pull 记录）`);
     }
+
     const targetAbs = path.join(ctx.shelfDir, ...key.split("/"));
     const shown = displayPath(key);
 
-    // 安全阀：疑似凭据文件
-    const files = listFilesRecursive(localAbs);
-    const secrets = files.filter((f) => SECRET_PATTERNS.some((re) => re.test(path.basename(f.rel))));
-    if (secrets.length > 0 && !forceSecret) {
-      console.error(`✗ 疑似凭据文件，已拒绝（--force-secret 可放行）:`);
-      for (const s of secrets) console.error(`    ${s.rel}`);
-      process.exit(1);
-    }
-    const bigs = files.filter((f) => f.size > BIG_FILE_BYTES);
-    for (const b of bigs) console.warn(`! 大文件 ${b.rel} (${fmtSize(b.size)})，GitHub 单文件上限 100MB`);
+    guardFiles(localAbs, forceSecret);
 
     // 冲突保护：货架在我们上次 pull 之后被别的设备改过？
-    const recorded = manifest.shelf[key];
     if (fs.existsSync(targetAbs)) {
       const currentHash = contentHash(targetAbs);
-      if (recorded && recorded.contentHash !== currentHash && !force) {
+      if (record && record.contentHash !== currentHash && !force) {
         if (!INTERACTIVE) {
           const d = diffSummary(localAbs, targetAbs);
           console.error(`✗ 货架上的 ${shown} 在你上次 pull 之后已被修改（可能来自其他设备），已中止。`);
@@ -434,7 +563,7 @@ export async function cmdShelfPush(argv) {
           for (const f of d.removed) console.log(`    - ${f}`);
           for (const f of d.changed) console.log(`    ~ ${f}`);
         }
-      } else if (!recorded && !yes && !force) {
+      } else if (!record && !yes && !force) {
         if (!INTERACTIVE) {
           console.error(`✗ 货架上已存在 ${shown}（本工作区没有它的 pull 记录），覆盖需 --yes。已中止。`);
           process.exit(2);
@@ -448,58 +577,136 @@ export async function cmdShelfPush(argv) {
     }
 
     // 变更清单确认
-    const d = diffSummary(targetAbs, localAbs);
-    const total = d.added.length + d.removed.length + d.changed.length;
+    const total = printChangeList(targetAbs, localAbs, shown);
     if (total === 0 && fs.existsSync(targetAbs)) {
       console.log(`= ${shown} 与货架一致，无需 push`);
+      if (relocatedFrom) {
+        delete manifest.shelf[relocatedFrom];
+        setShelfEntry(manifest, key, { ...record, localPath: toPosix(path.relative(process.cwd(), localAbs)) });
+        saveManifest(manifest);
+        console.log(`（记账已更新到新位置 ${shown}）`);
+      }
       return;
     }
-    console.log(`将写入 shelf/${shown}：新增 ${d.added.length} / 删除 ${d.removed.length} / 修改 ${d.changed.length}`);
-    for (const f of d.added) console.log(`  + ${f}`);
-    for (const f of d.removed) console.log(`  - ${f}`);
-    for (const f of d.changed) console.log(`  ~ ${f}`);
-    if (!yes) {
+    if (!(await confirmOrExit(`确认 push? [y]es / [n]o? `, yes))) return;
+
+    if (relocatedFrom) delete manifest.shelf[relocatedFrom];
+    keepEphemeral = applyAndCommit(ctx, key, localAbs, manifest, "update");
+  } finally {
+    if (!keepEphemeral) ctx.cleanup();
+  }
+}
+
+// ---- 子命令：create（上架新货，SHELF 决策 #14）----
+
+// 选位浏览器：只逛目录，m <名> 新建目录并进入，d 放在当前位置；返回目录相对路径或 null（取消）
+async function placementBrowse(ctx) {
+  const rl = makeLineReader();
+  try {
+    const segs = [];
+    while (true) {
+      const absDir = path.join(ctx.shelfDir, ...segs);
+      const exists = fs.existsSync(absDir);
+      const entries = exists ? listEntries(absDir).filter((e) => e.isDir) : [];
+      const here = segs.length ? displayPath(segs.join("/")) : "";
+
+      console.log("");
+      console.log(`放到: shelf:/${here}${exists ? "" : "（新目录，放下时创建）"}`);
+      entries.forEach((e, i) => {
+        console.log(`  ${String(i + 1).padStart(2)}. ${e.display}/  (${e.info})`);
+      });
+      console.log("  [数字]=进入 · m <名>=新建目录并进入 · d=放在这里 · ..=上级 · q=取消");
+
+      const raw = await rl.question("> ");
+      if (raw === null) return null;
+      const ans = raw.trim();
+      if (ans === "q") return null;
+      if (ans === "d") return segs.join("/");
+      if (ans === "..") {
+        segs.pop();
+        continue;
+      }
+      if (/^\d+$/.test(ans)) {
+        const idx = Number(ans) - 1;
+        if (idx < 0 || idx >= entries.length) {
+          console.log("  无此编号");
+          continue;
+        }
+        segs.push(entries[idx].name);
+        continue;
+      }
+      const mk = ans.match(/^m\s+(\S+)$/);
+      if (mk) {
+        segs.push(mk[1]);
+        continue;
+      }
+      console.log("  没看懂。数字进入，m <名> 新建目录，d 放这里，.. 上级，q 取消");
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+export async function cmdShelfCreate(argv) {
+  let rest = argv;
+  let to, yes, forceSecret;
+  ({ args: rest, value: to } = takeFlag(rest, "--to", true));
+  ({ args: rest, value: yes } = takeFlag(rest, "--yes"));
+  ({ args: rest, value: forceSecret } = takeFlag(rest, "--force-secret"));
+
+  const local = rest[0];
+  if (!local) {
+    console.error("用法: shelf create <本地文件/文件夹> [--to <货架目录>] [--yes] [--force-secret]");
+    process.exit(1);
+  }
+  const localAbs = path.resolve(process.cwd(), local);
+  if (!fs.existsSync(localAbs)) {
+    console.error(`✗ 本地路径不存在: ${local}`);
+    process.exit(1);
+  }
+  const name = path.basename(localAbs);
+
+  const ctx = resolveShelfContext();
+  let keepEphemeral = false;
+  try {
+    // 名字即 ID：全架查重，重名拒绝
+    const hits = findByBasename(ctx.shelfDir, name);
+    if (hits.length > 0) {
+      console.error(`✗ 货架上已有同名条目：`);
+      for (const h of hits) console.error(`    ${displayPath(h)}`);
+      console.error(`  想更新它 → shelf push ${local}；想另起一件 → 改个名字再 create。`);
+      process.exit(1);
+    }
+
+    // 选位：--to 直达（可新建目录），否则交互浏览
+    let destDirRel;
+    if (to !== undefined) {
+      const hit = resolveShelfPath(ctx.shelfDir, to, { allowCreate: true });
+      if (!hit.created && fs.statSync(hit.abs).isFile()) {
+        console.error(`✗ --to 必须是货架目录，不能是文件: ${to}`);
+        process.exit(1);
+      }
+      if (hit.created) console.log(`（货架上将新建目录 ${displayPath(hit.realRel)}）`);
+      destDirRel = hit.realRel;
+    } else {
       if (!INTERACTIVE) {
-        console.error(`✗ 非交互环境：清单如上，确认无误后加 --yes 重跑。已中止。`);
+        console.error(`✗ 非交互环境请用 --to <货架目录> 指定位置（如 --to templates）。已中止。`);
         process.exit(2);
       }
-      const act = await choose(`确认 push? [y]es / [n]o? `, [{ key: "y" }, { key: "n" }]);
-      if (act === "n") {
-        console.log("已中止。");
+      destDirRel = await placementBrowse(ctx);
+      if (destDirRel === null) {
+        console.log("已取消。");
         return;
       }
     }
+    const key = destDirRel ? `${destDirRel}/${name}` : name;
 
-    // 应用 + 提交
-    fs.rmSync(targetAbs, { recursive: true, force: true });
-    fs.mkdirSync(path.dirname(targetAbs), { recursive: true });
-    copyFiltered(localAbs, targetAbs);
+    guardFiles(localAbs, forceSecret);
+    printChangeList(path.join(ctx.shelfDir, ...key.split("/")), localAbs, displayPath(key));
+    if (!(await confirmOrExit(`确认上架? [y]es / [n]o? `, yes))) return;
 
-    const message = `shelf: update ${shown} (from ${os.hostname()})`;
-    const result = commitAndPush(ctx.root, [toPosix(path.join("shelf", key))], message);
-
-    if (!result.committed) {
-      console.log("= 内容与货架一致，无需提交");
-    } else if (result.pushed) {
-      console.log(`✓ 已推送 ${shown} (${result.sha.slice(0, 7)})`);
-    } else if (result.pushError === "no-remote") {
-      console.log(`✓ 已提交 ${shown} (${result.sha.slice(0, 7)})，仓库还没配 remote，配好后 git push 即同步`);
-    } else {
-      console.warn(`! 已提交 (${result.sha.slice(0, 7)}) 但 push 失败: ${result.pushError}`);
-      if (ctx.mode === "ephemeral") {
-        keepEphemeral = true;
-        console.warn(`! 临时 clone 保留在 ${ctx.root}，手动处理后可删除`);
-      }
-    }
-
-    setShelfEntry(manifest, key, {
-      sourceCommit: result.sha ?? headCommit(ctx.root),
-      contentHash: contentHash(targetAbs),
-      pulledAt: todayISO(),
-      localPath: toPosix(path.relative(process.cwd(), localAbs)),
-    });
-    manifest.source ??= remoteUrl(ctx.root) || toPosix(ctx.root);
-    saveManifest(manifest);
+    const manifest = loadManifest();
+    keepEphemeral = applyAndCommit(ctx, key, localAbs, manifest, "add");
   } finally {
     if (!keepEphemeral) ctx.cleanup();
   }
@@ -531,4 +738,3 @@ export async function cmdShelfInit() {
     ctx.cleanup();
   }
 }
-

@@ -4,6 +4,8 @@ import path from "node:path";
 // `_` 前缀只是文件系统里的置顶手段（SHELF 决策 #11）：
 // 展示时隐藏，输入时两种写法都接受，落盘与 manifest 永远用真实名。
 
+const SKIP_NAMES = new Set(["node_modules", ".git", ".DS_Store"]);
+
 export function displayName(realName) {
   return realName.replace(/^_+/, "");
 }
@@ -44,4 +46,24 @@ export function resolveShelfPath(shelfDir, inputPath, { allowCreate = false } = 
   }
   const realRel = realSegments.join("/");
   return { realRel, abs: path.join(shelfDir, ...realSegments), created };
+}
+
+// 全架按名字找条目（名字即 ID，SHELF 决策 #14/#15）：
+// 目录或文件的真实名/展示名匹配即命中；命中的目录不再深入其内部（内部文件是货物的组成部分，不是货物）。
+export function findByBasename(shelfDir, name) {
+  const hits = [];
+  const walk = (dir, rel) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (SKIP_NAMES.has(entry.name)) continue;
+      const entryRel = rel ? `${rel}/${entry.name}` : entry.name;
+      const matched = entry.name === name || displayName(entry.name) === name;
+      if (matched) {
+        hits.push(entryRel);
+        continue;
+      }
+      if (entry.isDirectory()) walk(path.join(dir, entry.name), entryRel);
+    }
+  };
+  walk(shelfDir, "");
+  return hits;
 }

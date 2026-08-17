@@ -12,7 +12,8 @@
 
 - `shelf` — **交互浏览器**：从 `shelf/` 根开始按目录导航，任意层级可继续下钻、选择条目拉取、或拉取当前目录全部
 - `shelf pull <shelf路径> [...]` — 非交互直拉，如 `shelf pull skills/common/intj agents/claude`
-- `shelf push <本地路径> [--to <shelf路径>]` — 把本地文件/文件夹推回 shelf 并同步 GitHub
+- `shelf create <本地路径> [--to <货架目录>]` — **上架新货**：全架查重名（重名拒绝），交互选位浏览器（`m <名>` 建目录、`d` 放下）或 `--to` 直达
+- `shelf push <本地路径>` — **更新已有货**：按记账/名字自动定位，不接受手填地址
 
 浏览器输入语法（零依赖 readline）：数字 `3` = 进入该目录；`p 1,3-5` = 拉取所选；`a` = 拉取当前目录全部；`..` = 返回上级；`q` = 退出。每屏显示条目类型与大小/子项数。
 
@@ -33,6 +34,8 @@
 | 11 | `_` 前缀 | 文件系统**保留**（置顶用），CLI 显示层过滤：`common` ⇄ `_common` 输入双向解析，落盘与 manifest 永远用真实名 |
 | 12 | `shelf init` | 在任意工作区落两样东西：`.shelf.json` manifest + shelf-ops 操作手册（→ `.claude/skills/shelf-ops`）；操作智能在手册，CLI 保持哑传输 |
 | 13 | 非交互守卫 | 非 TTY（agent 经 Bash 驱动）：pull 冲突自动选安全项（skip/keep）；push 确认要求 `--yes`、异机冲突打印差异后中止（exit 3）要求 `--force`——杜绝 agent 挂死在交互提问上 |
+| 14 | 名字即 ID | **货物名（basename）全架唯一**：`shelf create` 上架前全架扫描重名，命中即拒绝并列出位置（想更新→push；想另起→改名）。这使名字成为可靠 ID，无需注册表 |
+| 15 | push 定位链 | push **不接受 `--to`**（误传给迁移提示）。定位顺序：①记账原位；②原位失效→按名字全架找回（对比记账哈希提示纯搬家/有差异），确认后推新位置**并更新记账键**；③无记账→同名唯一匹配视为更新；④找不到→指路 `shelf create`。人与 AI 都不需要记忆或翻查远程路径 |
 
 ## 三、三层传输（解决「push 要不要整库 clone」）
 
@@ -58,6 +61,8 @@ monorepo 会随 apps 变大，但 shelf 操作的传输量必须只跟 shelf 内
 - [x] **ST-C**：`shelf pull`——展示名/真实名双向解析（`lib/shelfnames.mjs`）+ manifest `shelf` 段（真实路径为键）+ 四情景菜单
 - [x] **ST-D**：`shelf push`——`--to`（缺失段自动新建）、异机冲突 d/f/a、变更清单确认、凭据拦截、大文件警告、commit/push、manifest 回写
 - [x] **ST-F**：`shelf init` + `shelf-ops` 操作手册 skill（`shelf/skills/_common/shelf-ops/`）
+- [x] **ST-G**：`shelf create`——全架重名检查（决策 #14）+ 选位浏览器（数字进入 / `m <名>` 新建目录 / `d` 放下 / `q` 取消）+ `--to <目录>` 非交互直达 + 提交信息 `shelf: add <路径>`
+- [x] **ST-H**：push 定位链重构（决策 #15）——移除 `--to`、搬家找回（名字匹配 + 哈希对比提示）、记账键迁移、无记录同名匹配、`shelf create` 指路
 - [ ] **ST-E**：macOS 侧冒烟（Windows 已过：pull/push/冲突/守卫/init 全链路）+ README 补 shelf 章节
 
 ## 六、与既有里程碑的关系

@@ -46,7 +46,7 @@
 
 | 文档 | 状态 | 说明 |
 |---|---|---|
-| [`ai/features/SHELF.md`](features/SHELF.md) | 设计定稿，待开工 | Shelf — 通用内容货架 + push/pull（含三层传输策略） |
+| [`ai/features/SHELF.md`](features/SHELF.md) | 已实现（余 macOS 冒烟+README） | Shelf — 通用内容货架 + push/pull（含三层传输策略） |
 | [`ai/features/SKILL-SYNC-CLI.md`](features/SKILL-SYNC-CLI.md) | 50% (3/6 ST) | Milestone 1 — Skill 双向同步 CLI（本地 git-based） |
 | [`ai/features/SHELF-SERVER.md`](features/SHELF-SERVER.md) | 需求对齐中 | Milestone 2 — Shelf Server 社区平台（账户 / Web / REST API） |
 | [`ai/features/NPM-PUBLISH.md`](features/NPM-PUBLISH.md) | 策略已定，待执行 | npm 发布策略与流程（等 M2 品牌敲定后启动） |

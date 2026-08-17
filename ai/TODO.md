@@ -20,6 +20,8 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 - [x] **ST-C**：`shelf pull`（展示名解析 + manifest shelf 段 + 四情景菜单）
 - [x] **ST-D**：`shelf push`（异机冲突保护 + 变更清单 + 凭据拦截 + 非交互守卫）
 - [x] **ST-F**：`shelf init` + `shelf-ops` 操作手册 skill
+- [x] **ST-G**：`shelf create` 上架新货（全架重名检查 + 选位浏览器 + `--to` 直达）（2026-08-17）
+- [x] **ST-H**：push 定位链重构（移除 `--to`、搬家找回 + 记账迁移、无记录同名匹配）（2026-08-17）
 - [ ] **ST-E**：macOS 侧冒烟 + README shelf 章节
 
 ## 发版策略（npm publish）
