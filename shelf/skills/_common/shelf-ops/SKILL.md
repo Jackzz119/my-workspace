@@ -28,6 +28,7 @@ shelf skills sync                       # 整包同步 common 技能到 ./.claud
 - 你（AI）在非交互环境运行：create **必须带 `--to`**；push/create 的最终确认**必须带 `--yes`**（先跑一遍不带 `--yes` 拿到变更清单转述给用户，用户同意后再加 `--yes` 重跑）。
 - 版本追踪在当前目录 `.shelf.json`（`shelf` 段，按 shelf 相对路径为键），不要手改；见到旧名 `.agent-toolkit.json` / `.atk.json` 属正常，任一次 pull/push 会自动迁移。
 - 找不到货架时按序检查：`SHELF_HOME` 环境变量 → 本机是否有 my-workspace clone（CLI 就装在里面）→ `~/.shelfrc`（`{"home": "<clone路径>"}`）；临时机器可设 `SHELF_REMOTE=<仓库地址>` 走一次性 sparse clone。
+- **免 clone 设备**：`npx -y -p github:Jackzz119/my-workspace shelf <命令>`——读操作用 npm 包内快照，push/create 自动走临时 clone（remote 内置在 package.json，前提是该设备 git 能访问私有仓）。所有命令用法完全一致。
 
 ## create 还是 push？
 

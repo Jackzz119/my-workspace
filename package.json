@@ -1,8 +1,17 @@
 {
   "name": "my-workspace",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Personal workflow monorepo: atk CLI + shelf content store, future visual workflow apps.",
+  "description": "Personal workflow monorepo: shelf CLI + shelf content store, future visual workflow apps.",
+  "bin": {
+    "shelf": "packages/shelf/bin/shelf.mjs",
+    "atk": "packages/shelf/bin/shelf.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jackzz119/my-workspace.git"
+  },
   "workspaces": [
     "packages/*",
     "apps/*"

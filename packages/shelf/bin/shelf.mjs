@@ -25,7 +25,9 @@ Usage:
   shelf skills list      技能包清单（原 atk list）
   shelf skills sync      整包同步 common 技能到 ./.claude/skills/（原 atk pull）
 
-货架定位：SHELF_HOME 环境变量 > 本 clone > ~/.shelfrc {"home"|"remote"}`);
+货架定位：SHELF_HOME 环境变量 > 本 clone > ~/.shelfrc {"home"|"remote"}
+免 clone 直跑：npx -y -p github:Jackzz119/my-workspace shelf <命令>
+（读操作用包内快照；push/create 自动走临时 clone）`);
 }
 
 const argv = process.argv.slice(2);

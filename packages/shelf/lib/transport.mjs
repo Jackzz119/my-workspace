@@ -23,6 +23,24 @@ function hasShelf(root) {
   return !!root && fs.existsSync(path.join(root, "shelf"));
 }
 
+function isGitRepo(root) {
+  return !!root && fs.existsSync(path.join(root, ".git"));
+}
+
+function pkgField(root, field) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"))[field] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function repoUrlFromPkg(root) {
+  const repo = pkgField(root, "repository");
+  const url = typeof repo === "string" ? repo : repo?.url;
+  return url ? url.replace(/^git\+/, "") : null;
+}
+
 function readRc() {
   for (const name of [".shelfrc", ".atkrc"]) {
     const rcPath = path.join(os.homedir(), name);
@@ -47,10 +65,12 @@ function ephemeralClone(remote) {
   return tmp;
 }
 
-export function resolveShelfContext() {
+export function resolveShelfContext({ forWrite = false } = {}) {
   const rc = readRc();
 
-  const home = [process.env.SHELF_HOME, process.env.ATK_HOME, repoRoot, rc.home].find(hasShelf);
+  // home 模式必须是真 git 仓库（npm/npx 安装的副本被剥掉 .git，不能当 home）
+  const home = [process.env.SHELF_HOME, process.env.ATK_HOME, repoRoot, rc.home]
+    .find((r) => hasShelf(r) && isGitRepo(r));
   if (home) {
     return {
       mode: "home",
@@ -60,7 +80,19 @@ export function resolveShelfContext() {
     };
   }
 
-  const remote = process.env.SHELF_REMOTE || process.env.ATK_REMOTE || rc.remote;
+  // npx/npm 安装的快照：有 shelf/ 没 .git。读操作直接用包内快照；写操作落到下面的临时 clone
+  const snapshot = hasShelf(repoRoot) && !isGitRepo(repoRoot) ? repoRoot : null;
+  if (snapshot && !forWrite) {
+    return {
+      mode: "snapshot",
+      root: snapshot,
+      shelfDir: path.join(snapshot, "shelf"),
+      cleanup() {},
+    };
+  }
+
+  const remote = process.env.SHELF_REMOTE || process.env.ATK_REMOTE || rc.remote
+    || (snapshot ? repoUrlFromPkg(snapshot) : null);
   if (remote) {
     const tmp = ephemeralClone(remote);
     return {
@@ -74,7 +106,7 @@ export function resolveShelfContext() {
   }
 
   throw new Error(
-    "找不到 shelf：设置 SHELF_HOME 指向 my-workspace clone，或在 ~/.shelfrc 写入 { \"home\": \"...\" } / { \"remote\": \"...\" }",
+    "找不到 shelf：设置 SHELF_HOME 指向 my-workspace clone，或在 ~/.shelfrc 写入 { \"home\": \"...\" } / { \"remote\": \"...\" }（npx 快照做写操作需要 package.json repository 或 SHELF_REMOTE）",
   );
 }
 
@@ -82,7 +114,8 @@ export function headCommit(root) {
   try {
     return git(["rev-parse", "HEAD"], root) || null;
   } catch {
-    return null;
+    // npx 快照没有 .git；npm 打包 git 依赖时会把源提交注入 package.json 的 gitHead
+    return pkgField(root, "gitHead");
   }
 }
 
@@ -90,7 +123,7 @@ export function remoteUrl(root) {
   try {
     return git(["config", "--get", "remote.origin.url"], root) || null;
   } catch {
-    return null;
+    return repoUrlFromPkg(root);
   }
 }
 

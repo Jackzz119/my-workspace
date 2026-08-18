@@ -471,7 +471,7 @@ export async function cmdShelfPush(argv) {
     process.exit(1);
   }
 
-  const ctx = resolveShelfContext();
+  const ctx = resolveShelfContext({ forWrite: true });
   let keepEphemeral = false;
   try {
     const manifest = loadManifest();
@@ -666,7 +666,7 @@ export async function cmdShelfCreate(argv) {
   }
   const name = path.basename(localAbs);
 
-  const ctx = resolveShelfContext();
+  const ctx = resolveShelfContext({ forWrite: true });
   let keepEphemeral = false;
   try {
     // 名字即 ID：全架查重，重名拒绝
