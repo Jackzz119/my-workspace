@@ -34,12 +34,13 @@ export function contentHash(target) {
   return `sha256:${hash.digest("hex")}`;
 }
 
-export function lastCommitForPath(relPathInRepo) {
+export function lastCommitForPath(relPathInRepo, root = repoRoot) {
+  if (!root) return null;
   try {
     const out = execFileSync(
       "git",
       ["log", "-1", "--format=%H", "--", relPathInRepo],
-      { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     ).trim();
     return out || null;
   } catch {
@@ -47,12 +48,13 @@ export function lastCommitForPath(relPathInRepo) {
   }
 }
 
-export function remoteOriginUrl() {
+export function remoteOriginUrl(root = repoRoot) {
+  if (!root) return null;
   try {
     const out = execFileSync(
       "git",
       ["config", "--get", "remote.origin.url"],
-      { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     ).trim();
     return out || null;
   } catch {

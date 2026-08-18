@@ -8,7 +8,7 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 - [x] monorepo 脚手架：根 `package.json`（workspaces）+ `.gitignore`
 - [x] `.claude/skills` 从拷贝改为链接引用真源（`scripts/setup-links.mjs`，junction/symlink，幂等）；`_common` 包更名 `common`
 - [x] 迁移遗留核实（2026-08-17）：旧工作副本 `D:\Repo\agent-toolkit` 工作区干净、无未推提交、无 stash——TODO Phase 2 所记的未提交改动已在迁移前入库（随 GitHub HEAD 并入）或被舍弃，无需找回；全局 `atk` 命令已从旧副本改指 monorepo（npm link -w shelf）
-- [ ] 在 GitHub 创建 `my-workspace` 私有仓库并 push（待用户执行或授权）
+- [x] 在 GitHub 创建 `my-workspace` 私有仓库并 push（2026-08-17，https://github.com/Jackzz119/my-workspace）
 
 ## Shelf — 通用内容 push/pull
 
@@ -22,6 +22,8 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 - [x] **ST-F**：`shelf init` + `shelf-ops` 操作手册 skill
 - [x] **ST-G**：`shelf create` 上架新货（全架重名检查 + 选位浏览器 + `--to` 直达）（2026-08-17）
 - [x] **ST-H**：push 定位链重构（移除 `--to`、搬家找回 + 记账迁移、无记录同名匹配）（2026-08-17）
+- [x] **ST-I**：CLI 拆成可发布的独立包（@scope/shelf，18.5kB，含 README/LICENSE）（2026-08-18）
+- [x] **ST-J**：托管档口 `~/.shelf/home` 自动开档口 + 身份兜底/提交回滚/CRLF/临时目录清理（2026-08-18）
 - [ ] **ST-E**：macOS 侧冒烟 + README shelf 章节
 
 ## 发版策略（npm publish）
@@ -29,11 +31,11 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 > 设计文档：[`ai/features/NPM-PUBLISH.md`](features/NPM-PUBLISH.md)
 > 触发条件：M1 完成 + M2 品牌敲定
 
-- [ ] 查名字可用性（`shelf` 已被占，走 scoped 包或 M2 新品牌）
-- [ ] 补全 package.json + 写 LICENSE
-- [ ] 编写 README.md
-- [ ] `npm pack --dry-run` 验证打包内容
-- [ ] 正式 `npm publish` + GitHub Release
+- [x] 查名字可用性：`shelf`/`atk` 均被占 → 走 scoped `@<npm用户名>/shelf`（命令名仍是裸 `shelf`）（2026-08-18）
+- [x] 补全 package.json + 写 LICENSE + README.md（2026-08-18）
+- [x] `npm pack --dry-run` 验证打包内容（18.5 kB / 15 文件，无内容混入）（2026-08-18）
+- [ ] 确认 npm 用户名并改包名（当前假设 `@jackzz119/shelf`）
+- [ ] `npm login` 后正式 `npm publish`（需用户执行/授权）+ GitHub Release
 
 ## Milestone 2 — Shelf Server 社区平台（规划中）
 

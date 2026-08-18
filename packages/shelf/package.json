@@ -1,11 +1,37 @@
 {
-  "name": "shelf",
-  "version": "0.2.0",
-  "description": "Personal content shelf: pull/push skills, templates, docs and code snippets across projects. (npm publish will use a scoped name; local bins stay shelf/atk.)",
+  "name": "@jackzz119/shelf",
+  "version": "0.3.0",
+  "description": "Personal content shelf CLI: browse, pull and push skills, templates, docs and snippets across every machine you work on.",
   "type": "module",
   "bin": {
     "shelf": "bin/shelf.mjs",
     "atk": "bin/shelf.mjs"
+  },
+  "files": [
+    "bin",
+    "lib"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jackzz119/my-workspace.git",
+    "directory": "packages/shelf"
+  },
+  "homepage": "https://github.com/Jackzz119/my-workspace/tree/main/packages/shelf#readme",
+  "bugs": {
+    "url": "https://github.com/Jackzz119/my-workspace/issues"
+  },
+  "keywords": [
+    "cli",
+    "skills",
+    "claude-code",
+    "codex",
+    "agent",
+    "dotfiles",
+    "sync",
+    "templates"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=18"

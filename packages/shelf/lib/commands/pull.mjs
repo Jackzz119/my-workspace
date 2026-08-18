@@ -1,11 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  commonPackDir,
+  commonPackDirOf,
   commonPackName,
   relPackPath,
   targetSkillsDir,
 } from "../paths.mjs";
+import { resolveShelfContext } from "../transport.mjs";
 import { choose } from "../prompt.mjs";
 import { contentHash, lastCommitForPath, remoteOriginUrl } from "../version.mjs";
 import { loadManifest, saveManifest, setSkillEntry } from "../manifest.mjs";
@@ -14,10 +15,11 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function buildEntry(packName, skillName) {
+function buildEntry(packName, skillName, ctx) {
+  const commonPackDir = commonPackDirOf(ctx.shelfDir);
   const src = path.join(commonPackDir, skillName);
   return {
-    sourceCommit: lastCommitForPath(relPackPath(packName, skillName)),
+    sourceCommit: lastCommitForPath(relPackPath(packName, skillName), ctx.root),
     contentHash: contentHash(src),
     pulledAt: todayISO(),
     pack: packName,
@@ -25,6 +27,16 @@ function buildEntry(packName, skillName) {
 }
 
 export async function cmdPull() {
+  const ctx = resolveShelfContext();
+  try {
+    await runPull(ctx);
+  } finally {
+    ctx.cleanup();
+  }
+}
+
+async function runPull(ctx) {
+  const commonPackDir = commonPackDirOf(ctx.shelfDir);
   if (!fs.existsSync(commonPackDir)) {
     console.error(`source pack '${commonPackName}' not found at ${commonPackDir}`);
     process.exit(1);
@@ -44,7 +56,7 @@ export async function cmdPull() {
   fs.mkdirSync(destRoot, { recursive: true });
 
   const manifest = loadManifest();
-  manifest.source ??= remoteOriginUrl() || "github:unknown/agent-toolkit";
+  manifest.source ??= remoteOriginUrl(ctx.root) || "github:unknown/agent-toolkit";
 
   let pulled = 0;
   let updated = 0;
@@ -66,7 +78,7 @@ export async function cmdPull() {
 
     if (!fs.existsSync(dest)) {
       fs.cpSync(src, dest, { recursive: true });
-      setSkillEntry(manifest, name, buildEntry(commonPackName, name));
+      setSkillEntry(manifest, name, buildEntry(commonPackName, name, ctx));
       console.log(`✓ pulled ${name}`);
       pulled++;
       continue;
@@ -103,7 +115,7 @@ export async function cmdPull() {
     if (action === "u" || action === "o") {
       fs.rmSync(dest, { recursive: true, force: true });
       fs.cpSync(src, dest, { recursive: true });
-      setSkillEntry(manifest, name, buildEntry(commonPackName, name));
+      setSkillEntry(manifest, name, buildEntry(commonPackName, name, ctx));
       console.log(`✓ updated ${name}`);
       updated++;
     } else if (action === "s" || action === "k") {

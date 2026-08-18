@@ -37,6 +37,8 @@
 | 14 | 名字即 ID | **货物名（basename）全架唯一**：`shelf create` 上架前全架扫描重名，命中即拒绝并列出位置（想更新→push；想另起→改名）。这使名字成为可靠 ID，无需注册表 |
 | 15 | push 定位链 | push **不接受 `--to`**（误传给迁移提示）。定位顺序：①记账原位；②原位失效→按名字全架找回（对比记账哈希提示纯搬家/有差异），确认后推新位置**并更新记账键**；③无记账→同名唯一匹配视为更新；④找不到→指路 `shelf create`。人与 AI 都不需要记忆或翻查远程路径 |
 | 16 | 免 clone 运行（快照模式） | `npx -y -p github:Jackzz119/my-workspace shelf <命令>`：npm 安装副本无 `.git`（home 判定已加 git 仓库校验），识别为**快照**——读操作直接用包内 shelf，push/create 自动转临时 sparse clone，remote 取根 package.json `repository`（或 SHELF_REMOTE）；sourceCommit 回退读 npm 注入的 `gitHead`（实测当前 npm 对 git 依赖不注入 → 快照模式下为 null，仅影响溯源字段，冲突/搬家等哈希主逻辑不受影响）。老 atk 的 npx 直跑体验回归，且这次连写都行 |
+| 17 | 托管档口（自动开档口） | 全局安装的 CLI 首次运行时，自动把内容仓 clone 到 `~/.shelf/home` 并长期使用：之后所有命令本地跑（秒起、可离线、写操作直接提交），按小时节流 `git pull --ff-only` 保持最新。用户**永不需要手动 clone**。`shelf home [--update]` 查看/立即更新；`SHELF_EPHEMERAL=1` 或 `~/.shelfrc {"ephemeral": true}` 可退回一次性 clone（临时机器/CI） |
+| 18 | 工具自建 clone 的健壮性 | ①**git 身份兜底**：全新机器没配 user.name/email 时，给工具自建的 clone（档口/临时）设 `shelf <shelf@主机名>`，不碰用户自己的 clone；②**提交失败回滚**：commit 出错时把货架工作区恢复原状（reset/checkout/clean），避免半改状态被下次 push 误判成"异机修改"；③**换行符**：档口 clone 时带 `-c core.autocrlf=false`，否则 CRLF 转换让工作区永远"脏"、卡住自动更新；④**临时目录不泄漏**：`process.exit` 会跳过 finally，临时 clone 注册退出钩子兜底清理（push 失败要保留现场时用 `keep()` 解除） |
 
 ## 三、三层传输（解决「push 要不要整库 clone」）
 
@@ -64,6 +66,8 @@ monorepo 会随 apps 变大，但 shelf 操作的传输量必须只跟 shelf 内
 - [x] **ST-F**：`shelf init` + `shelf-ops` 操作手册 skill（`shelf/skills/_common/shelf-ops/`）
 - [x] **ST-G**：`shelf create`——全架重名检查（决策 #14）+ 选位浏览器（数字进入 / `m <名>` 新建目录 / `d` 放下 / `q` 取消）+ `--to <目录>` 非交互直达 + 提交信息 `shelf: add <路径>`
 - [x] **ST-H**：push 定位链重构（决策 #15）——移除 `--to`、搬家找回（名字匹配 + 哈希对比提示）、记账键迁移、无记录同名匹配、`shelf create` 指路
+- [x] **ST-I**：可发布形态——`packages/shelf` 独立成包（`files` 只含 bin/lib，18.5kB）、`publishConfig.access=public`、README/LICENSE；`paths.mjs` 改为向上探测（不再假设 monorepo 布局），`list`/`skills sync` 接入解析链
+- [x] **ST-J**：托管档口 + 健壮性（决策 #17/#18），六场景冒烟：全新机器读/写、ephemeral 开关、npx 快照读/写、monorepo 回归
 - [ ] **ST-E**：macOS 侧冒烟（Windows 已过：pull/push/冲突/守卫/init 全链路）+ README 补 shelf 章节
 
 ## 六、与既有里程碑的关系

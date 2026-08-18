@@ -7,6 +7,7 @@ import {
   cmdShelfPush,
   cmdShelfCreate,
   cmdShelfInit,
+  cmdShelfHome,
 } from "../lib/commands/shelf.mjs";
 
 function usage() {
@@ -21,6 +22,7 @@ Usage:
   shelf push <本地路径>   更新已有货：按记账/名字自动定位
                          [--yes] [--force] [--force-secret]
   shelf init             初始化工作区（.shelf.json + shelf-ops 手册）
+  shelf home [--update]  查看货架在哪、什么模式；--update 拉取最新
 
   shelf skills list      技能包清单（原 atk list）
   shelf skills sync      整包同步 common 技能到 ./.claude/skills/（原 atk pull）
@@ -50,6 +52,8 @@ async function dispatch(sub, rest) {
       return cmdShelfPush(rest);
     case "init":
       return cmdShelfInit(rest);
+    case "home":
+      return cmdShelfHome(rest);
     case "skills": {
       const action = rest[0];
       if (action === "list") return cmdList();

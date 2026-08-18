@@ -3,7 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { resolveShelfContext, headCommit, remoteUrl, commitAndPush } from "../transport.mjs";
+import {
+  resolveShelfContext,
+  headCommit,
+  remoteUrl,
+  commitAndPush,
+  refreshManagedHome,
+  managedHomeDir,
+  DEFAULT_REMOTE,
+} from "../transport.mjs";
 import { displayName, displayPath, resolveShelfPath, findByBasename } from "../shelfnames.mjs";
 import { contentHash } from "../version.mjs";
 import {
@@ -406,7 +414,10 @@ function applyAndCommit(ctx, key, localAbs, manifest, verb) {
   const result = commitAndPush(ctx.root, [toPosix(path.join("shelf", key))], message);
 
   let keepEphemeral = false;
-  if (!result.committed) {
+  if (result.failed) {
+    console.error(`✗ 提交失败，货架已回滚到改动前: ${result.pushError}`);
+    process.exit(4);
+  } else if (!result.committed) {
     console.log("= 内容与货架一致，无需提交");
   } else if (result.pushed) {
     console.log(`✓ 已推送 ${shown} (${result.sha.slice(0, 7)})`);
@@ -416,6 +427,7 @@ function applyAndCommit(ctx, key, localAbs, manifest, verb) {
     console.warn(`! 已提交 (${result.sha.slice(0, 7)}) 但 push 失败: ${result.pushError}`);
     if (ctx.mode === "ephemeral") {
       keepEphemeral = true;
+      ctx.keep?.();
       console.warn(`! 临时 clone 保留在 ${ctx.root}，手动处理后可删除`);
     }
   }
@@ -734,6 +746,37 @@ export async function cmdShelfInit() {
     console.log("工作区已就绪:");
     console.log("  .shelf.json               版本追踪 manifest");
     console.log("  .claude/skills/shelf-ops  货架操作手册（agent 据此执行 pull/push）");
+  } finally {
+    ctx.cleanup();
+  }
+}
+
+// ---- 子命令：home（查看/更新档口）----
+
+export async function cmdShelfHome(argv) {
+  if (argv.includes("--update")) {
+    const ok = refreshManagedHome({ force: true });
+    if (!ok && !fs.existsSync(managedHomeDir)) {
+      console.log("（本机没有托管档口——你用的是自己的 clone 或 npx 快照，更新请用 git pull）");
+    } else if (ok) {
+      console.log("✓ 托管档口已更新到最新");
+    }
+  }
+  const ctx = resolveShelfContext();
+  try {
+    const modeText = {
+      home: "你自己的 clone",
+      managed: "托管档口（shelf 自动维护）",
+      snapshot: "npx 包内快照（只读，写操作会走临时 clone）",
+      ephemeral: "一次性临时 clone",
+    }[ctx.mode] ?? ctx.mode;
+    console.log(`货架位置: ${ctx.shelfDir}`);
+    console.log(`模式:     ${modeText}`);
+    console.log(`来源:     ${remoteUrl(ctx.root) ?? DEFAULT_REMOTE}`);
+    const entries = fs.readdirSync(ctx.shelfDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !IGNORE_NAMES.has(e.name))
+      .map((e) => displayName(e.name));
+    console.log(`根分类:   ${entries.join(" · ") || "(空)"}`);
   } finally {
     ctx.cleanup();
   }

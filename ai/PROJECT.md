@@ -6,7 +6,7 @@
 
 ## 项目结构
 
-- `packages/shelf/` — `shelf` CLI（别名 `atk`）实现（`bin/shelf.mjs` + `lib/`），详见 [`ai/features/SKILL-SYNC-CLI.md`](features/SKILL-SYNC-CLI.md) 与 [`ai/features/SHELF.md`](features/SHELF.md)
+- `packages/shelf/` — `shelf` CLI（别名 `atk`）实现（`bin/shelf.mjs` + `lib/`），可独立发布为 npm 包（含自身 README/LICENSE），详见 [`ai/features/SKILL-SYNC-CLI.md`](features/SKILL-SYNC-CLI.md) 与 [`ai/features/SHELF.md`](features/SHELF.md)
 - `shelf/` — 内容货架（唯一真源），任何条目均可被 `shelf` 拉到目标项目 / 推回
   - `shelf/skills/` — 主 skill 集，按**包**组织：`common/`（默认包）、`<pack>/`（领域包，如 `blender/`）
   - `shelf/agents/` — AI 平台工作协议模板：`claude/CLAUDE.md`（用 `.claude/skills/`、`${CLAUDE_SKILL_DIR}`）、`codex/AGENTS.md`（平台中立，用 `skills/`、`${SKILL_DIR}`）
@@ -46,7 +46,7 @@
 
 | 文档 | 状态 | 说明 |
 |---|---|---|
-| [`ai/features/SHELF.md`](features/SHELF.md) | 已实现（余 macOS 冒烟+README） | Shelf — 通用内容货架 + push/pull（含三层传输策略） |
+| [`ai/features/SHELF.md`](features/SHELF.md) | 已实现 + 可发布形态（余 macOS 冒烟） | Shelf — 通用内容货架 + push/pull（含三层传输策略） |
 | [`ai/features/SKILL-SYNC-CLI.md`](features/SKILL-SYNC-CLI.md) | 50% (3/6 ST) | Milestone 1 — Skill 双向同步 CLI（本地 git-based） |
 | [`ai/features/SHELF-SERVER.md`](features/SHELF-SERVER.md) | 需求对齐中 | Milestone 2 — Shelf Server 社区平台（账户 / Web / REST API） |
 | [`ai/features/NPM-PUBLISH.md`](features/NPM-PUBLISH.md) | 策略已定，待执行 | npm 发布策略与流程（等 M2 品牌敲定后启动） |
