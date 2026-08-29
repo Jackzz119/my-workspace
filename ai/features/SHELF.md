@@ -37,7 +37,7 @@
 | 14 | 名字即 ID | **货物名（basename）全架唯一**：`shelf create` 上架前全架扫描重名，命中即拒绝并列出位置（想更新→push；想另起→改名）。这使名字成为可靠 ID，无需注册表 |
 | 15 | push 定位链 | push **不接受 `--to`**（误传给迁移提示）。定位顺序：①记账原位；②原位失效→按名字全架找回（对比记账哈希提示纯搬家/有差异），确认后推新位置**并更新记账键**；③无记账→同名唯一匹配视为更新；④找不到→指路 `shelf create`。人与 AI 都不需要记忆或翻查远程路径 |
 | 16 | 免 clone 运行（快照模式） | `npx -y -p github:Jackzz119/my-workspace shelf <命令>`：npm 安装副本无 `.git`（home 判定已加 git 仓库校验），识别为**快照**——读操作直接用包内 shelf，push/create 自动转临时 sparse clone，remote 取根 package.json `repository`（或 SHELF_REMOTE）；sourceCommit 回退读 npm 注入的 `gitHead`（实测当前 npm 对 git 依赖不注入 → 快照模式下为 null，仅影响溯源字段，冲突/搬家等哈希主逻辑不受影响）。老 atk 的 npx 直跑体验回归，且这次连写都行 |
-| 17 | 托管档口（自动开档口） | 全局安装的 CLI 首次运行时，自动把内容仓 clone 到 `~/.shelf/home` 并长期使用：之后所有命令本地跑（秒起、可离线、写操作直接提交），按小时节流 `git pull --ff-only` 保持最新。用户**永不需要手动 clone**。`shelf home [--update]` 查看/立即更新；`SHELF_EPHEMERAL=1` 或 `~/.shelfrc {"ephemeral": true}` 可退回一次性 clone（临时机器/CI） |
+| 17 | 托管档口（自动开档口） | 全局安装的 CLI 首次运行时，自动把内容仓 clone 到 `~/.shelf/home` 并长期使用：之后所有命令本地跑（可离线、写操作直接提交）。**保鲜策略（2026-08-18 修订，适配货架高频更新）**：读操作每次都 `git pull --ff-only`（60 秒戳记只用于去重连环命令），写操作无条件强制先拉；push 被远端拒收（non-fast-forward）时自动 `pull --rebase --autostash` 后重推一次，多设备竞写自愈。离线时拉取失败仅警告，不阻断。用户**永不需要手动 clone**。`shelf home [--update]` 查看/立即更新；`SHELF_EPHEMERAL=1` 或 `~/.shelfrc {"ephemeral": true}` 可退回一次性 clone（临时机器/CI） |
 | 18 | 工具自建 clone 的健壮性 | ①**git 身份兜底**：全新机器没配 user.name/email 时，给工具自建的 clone（档口/临时）设 `shelf <shelf@主机名>`，不碰用户自己的 clone；②**提交失败回滚**：commit 出错时把货架工作区恢复原状（reset/checkout/clean），避免半改状态被下次 push 误判成"异机修改"；③**换行符**：档口 clone 时带 `-c core.autocrlf=false`，否则 CRLF 转换让工作区永远"脏"、卡住自动更新；④**临时目录不泄漏**：`process.exit` 会跳过 finally，临时 clone 注册退出钩子兜底清理（push 失败要保留现场时用 `keep()` 解除） |
 
 ## 三、三层传输（解决「push 要不要整库 clone」）

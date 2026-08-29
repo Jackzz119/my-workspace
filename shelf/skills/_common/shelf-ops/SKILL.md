@@ -28,7 +28,7 @@ shelf skills sync                       # 整包同步 common 技能到 ./.claud
 - 路径里 `_` 前缀可省略：`skills/common/intj` 和 `skills/_common/intj` 等价，落盘用真实名。
 - 你（AI）在非交互环境运行：create **必须带 `--to`**；push/create 的最终确认**必须带 `--yes`**（先跑一遍不带 `--yes` 拿到变更清单转述给用户，用户同意后再加 `--yes` 重跑）。
 - 版本追踪在当前目录 `.shelf.json`（`shelf` 段，按 shelf 相对路径为键），不要手改；见到旧名 `.agent-toolkit.json` / `.atk.json` 属正常，任一次 pull/push 会自动迁移。
-- **货架从哪来**：`SHELF_HOME` 环境变量 → CLI 自身所在 clone → `~/.shelfrc` 的 `home` → 托管档口 `~/.shelf/home`（全局安装场景下首次运行自动创建，之后本地秒起、每小时自动拉更新）。用 `shelf home` 一眼看清当前模式；内容像是旧的就 `shelf home --update`。
+- **货架从哪来**：`SHELF_HOME` 环境变量 → CLI 自身所在 clone → `~/.shelfrc` 的 `home` → 托管档口 `~/.shelf/home`（全局安装场景下首次运行自动创建）。**每次操作前自动拉最新**（写操作强制拉，push 撞上别的设备刚推过会自动变基重推），所以正常情况下你永远在用最新货架；离线时用本地副本并警告。`shelf home` 一眼看清当前模式，`shelf home --update` 手动强刷。
 - 临时机器不想留档口：`SHELF_EPHEMERAL=1` 走一次性 clone，用完即删。
 - **免 clone 设备**：`npx -y -p github:Jackzz119/my-workspace shelf <命令>`——读操作用 npm 包内快照，push/create 自动走临时 clone（remote 内置在 package.json，前提是该设备 git 能访问私有仓）。所有命令用法完全一致。
 
