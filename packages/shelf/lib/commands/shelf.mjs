@@ -732,28 +732,98 @@ export async function cmdShelfCreate(argv) {
   }
 }
 
+// ---- init 植入协议（SHELF 决策 #21/#22/#23）----
+
+// gitignore 补行：只补缺失的，其余不动；目录行同时认 ".claude" 与 ".claude/"
+function ensureGitignore(cwd, lines) {
+  const p = path.join(cwd, ".gitignore");
+  const content = fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
+  const NL = String.fromCharCode(10);
+  const CR = String.fromCharCode(13);
+  const have = new Set(content.split(NL).map((l) => l.replaceAll(CR, "").trim()));
+  const missing = lines.filter((l) => {
+    const bare = l.endsWith("/") ? l.slice(0, -1) : l;
+    return !have.has(bare) && !have.has(bare + "/");
+  });
+  if (missing.length === 0) return [];
+  const sep = content === "" || content.endsWith(NL) ? "" : NL;
+  fs.writeFileSync(p, content + sep + "# shelf init: agent 资产不入项目库" + NL + missing.join(NL) + NL, "utf8");
+  return missing;
+}
+
+// 镜像跟随正本：缺失或内容不一致就整体重刷；返回是否动了
+function refreshMirror(primaryAbs, mirrorAbs) {
+  if (!fs.existsSync(primaryAbs)) return false;
+  if (fs.existsSync(mirrorAbs) && contentHash(mirrorAbs) === contentHash(primaryAbs)) return false;
+  fs.rmSync(mirrorAbs, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(mirrorAbs), { recursive: true });
+  copyFiltered(primaryAbs, mirrorAbs);
+  return true;
+}
+
 // ---- 子命令：init ----
 
 export async function cmdShelfInit() {
   const ctx = resolveShelfContext();
   try {
+    if (path.resolve(process.cwd()) === path.resolve(ctx.root)) {
+      console.error("✗ 这里就是货架 home 本体，不能对它 init（防止把忽略规则写进货架仓库）");
+      process.exit(1);
+    }
     const manifest = loadManifest();
     manifest.source ??= remoteUrl(ctx.root) || toPosix(ctx.root);
 
-    const hit = resolveShelfPath(ctx.shelfDir, "skills/common/shelf-ops");
-    if (!hit) {
-      console.error("✗ 货架上找不到 skills/common/shelf-ops（操作手册 skill），检查 shelf 是否最新");
-      process.exit(1);
+    // 植入清单：input=货架路径，dest=项目内落点，mirror=被动镜像，optional=货架上没有就跳过
+    const plan = [
+      { input: "agents/claude/CLAUDE.md", dest: "CLAUDE.md" },
+      { input: "agents/codex/AGENTS.md", dest: "AGENTS.md" },
+      { input: "multica", dest: "multica", optional: true },
+      { input: "docs/JASKILL.md", dest: "ai/JASKILL.md" },
+    ];
+    const common = resolveShelfPath(ctx.shelfDir, "skills/common");
+    if (common) {
+      for (const e of fs.readdirSync(common.abs, { withFileTypes: true })) {
+        if (!e.isDirectory() || IGNORE_NAMES.has(e.name)) continue;
+        plan.push({
+          input: common.realRel + "/" + e.name,
+          dest: ".claude/skills/" + e.name,
+          mirror: ".agents/skills/" + e.name,
+        });
+      }
     }
+
     const counters = newCounters();
-    const dest = path.join(process.cwd(), ".claude", "skills", "shelf-ops");
-    await pullEntry(ctx, hit.realRel, manifest, counters, safeAsk, dest);
+    let mirrored = 0;
+    for (const item of plan) {
+      const hit = resolveShelfPath(ctx.shelfDir, item.input);
+      if (!hit) {
+        console.log(item.optional
+          ? "- 货架上暂无 " + item.input + "，跳过"
+          : "✗ 货架上找不到 " + item.input + "（检查货架是否最新）");
+        continue;
+      }
+      const destAbs = path.resolve(process.cwd(), item.dest);
+      await pullEntry(ctx, hit.realRel, manifest, counters, safeAsk, destAbs);
+      if (item.mirror) {
+        const entry = manifest.shelf[hit.realRel];
+        if (entry) entry.mirrors = [toPosix(item.mirror)];
+        if (refreshMirror(destAbs, path.resolve(process.cwd(), item.mirror))) mirrored++;
+      }
+    }
+
+    const added = ensureGitignore(process.cwd(), ["CLAUDE.md", "AGENTS.md", ".agents/", ".claude/"]);
     saveManifest(manifest);
 
+    printSummary(counters);
+    if (mirrored) console.log("≡ 镜像刷新 " + mirrored + " 项（.agents/skills/）");
+    if (added.length) console.log("✓ .gitignore 补行: " + added.join(", "));
     console.log("");
-    console.log("工作区已就绪:");
-    console.log("  .shelf.json               版本追踪 manifest");
-    console.log("  .claude/skills/shelf-ops  货架操作手册（agent 据此执行 pull/push）");
+    console.log("工作区已接入货架:");
+    console.log("  CLAUDE.md / AGENTS.md      工作协议（真源在货架，shelf sync 保持最新）");
+    console.log("  ai/JASKILL.md              基础技能名册");
+    console.log("  .claude/skills/            common 包技能（正本）");
+    console.log("  .agents/skills/            同步镜像（永远跟随正本）");
+    console.log("  .shelf.json                记账本（进项目 git，队友 clone 后 shelf init 即还原）");
   } finally {
     ctx.cleanup();
   }
@@ -937,11 +1007,23 @@ export async function cmdShelfSync(argv) {
       c.pushed++;
     }
 
+    // 镜像校对（决策 #22）：正本处理完后统一核对，哈希不符即从正本重刷
+    let mirrorFixed = 0;
+    if (!dryRun) {
+      for (const [, rec] of Object.entries(manifest.shelf ?? {})) {
+        if (!rec.mirrors?.length || !rec.localPath) continue;
+        const primary = path.resolve(process.cwd(), rec.localPath);
+        for (const m of rec.mirrors) {
+          if (refreshMirror(primary, path.resolve(process.cwd(), m))) mirrorFixed++;
+        }
+      }
+    }
+
     if (!dryRun) saveManifest(manifest);
     console.log("");
     console.log(
       `Sync${dryRun ? "（dry-run）" : ""}: ${c.same} 一致, ${c.updated} 更新本地, ${c.pushed} 推上库, ` +
-      `${c.cleaned} 清账, ${c.skipped} 跳过, ${pending.length} 待决`,
+      `${c.cleaned} 清账, ${c.skipped} 跳过, ${mirrorFixed} 镜像刷新, ${pending.length} 待决`,
     );
     if (pending.length) {
       for (const x of pending) console.log(`  · ${x}`);

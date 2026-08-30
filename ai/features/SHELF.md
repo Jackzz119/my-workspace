@@ -77,7 +77,7 @@ monorepo 会随 apps 变大，但 shelf 操作的传输量必须只跟 shelf 内
 - [x] **ST-J**：托管档口 + 健壮性（决策 #17/#18），六场景冒烟：全新机器读/写、ephemeral 开关、npx 快照读/写、monorepo 回归
 - [x] **ST-K**：`shelf sync`（决策 #19）——混合情景冒烟：自动更新/本地领先/双改/搬家迁账/下架/孤儿 + dry-run 只读 + 非交互 exit 2
 - [x] **ST-L**：老版技能命令清退（决策 #20）——bin 精简为 7 命令，删 4 个遗留模块，引用审计清零
-- [ ] **ST-M**：init 植入协议（决策 #21/#22/#23）——JASKILL.md 真源上架、init 重写（协议文档+multica+JASKILL+双技能目录+gitignore）、sync 镜像校对、幂等与防呆冒烟
+- [x] **ST-M**：init 植入协议（决策 #21/#22/#23）——七场景冒烟全过：全新接入(9 项+镜像 6+gitignore 4 行)、幂等重跑、自有文件保护(auto-skip)、防呆拒绝、镜像损坏自愈、multica 上架即植入(10 项)（2026-08-30，v1.1.0）
 - [ ] **ST-E**：macOS 侧冒烟（Windows 已过：pull/push/冲突/守卫/init/sync 全链路）+ README 补 shelf 章节
 
 ## 六、与既有里程碑的关系

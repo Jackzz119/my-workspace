@@ -26,7 +26,7 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 - [x] **ST-J**：托管档口 `~/.shelf/home` 自动开档口 + 身份兜底/提交回滚/CRLF/临时目录清理（2026-08-18）
 - [x] **ST-K**：`shelf sync` 六情形对账（库新自动更新/本地改动看 diff 定方向/搬家迁账/下架孤儿处理）（2026-08-18）
 - [x] **ST-L**：老版技能命令清退（skills list/sync 等，删 4 个遗留模块）（2026-08-18）
-- [ ] **ST-M**：`shelf init` 植入协议（CLAUDE/AGENTS/multica/JASKILL/双技能目录/gitignore + 镜像校对）（进行中）
+- [x] **ST-M**：`shelf init` 植入协议 + sync 镜像校对（2026-08-30，v1.1.0）
 - [ ] **ST-E**：macOS 侧冒烟 + README shelf 章节
 
 ## 发版策略（npm publish）

@@ -22,7 +22,8 @@ Usage:
                          [--yes] [--force] [--force-secret]
   shelf sync [--dry-run] 按账本对账：库上新版自动更新本地；本地有改动
                          则显示 diff 由你决定推上库还是覆盖本地
-  shelf init             初始化工作区（.shelf.json + shelf-ops 手册）
+  shelf init             项目接入（幂等）：CLAUDE/AGENTS 协议、ai/JASKILL 名册、
+                         .claude+.agents 双技能目录、gitignore、记账本
   shelf home [--update]  查看货架在哪、什么模式；--update 拉取最新
 
 货架定位：SHELF_HOME 环境变量 > 本 clone > ~/.shelfrc > 托管档口 ~/.shelf/home
