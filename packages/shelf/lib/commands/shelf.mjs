@@ -751,19 +751,10 @@ function ensureGitignore(cwd, lines) {
   return missing;
 }
 
-// 镜像跟随正本：缺失或内容不一致就整体重刷；返回是否动了
-function refreshMirror(primaryAbs, mirrorAbs) {
-  if (!fs.existsSync(primaryAbs)) return false;
-  if (fs.existsSync(mirrorAbs) && contentHash(mirrorAbs) === contentHash(primaryAbs)) return false;
-  fs.rmSync(mirrorAbs, { recursive: true, force: true });
-  fs.mkdirSync(path.dirname(mirrorAbs), { recursive: true });
-  copyFiltered(primaryAbs, mirrorAbs);
-  return true;
-}
+// ---- agent 目标与技能正本（SHELF 决策 #24/#26）----
 
-// ---- 子命令：init ----
-
-// ---- agent 目标（SHELF 决策 #24）----
+// 项目里技能的唯一正本；所有 agent 目录都是指向它的链接
+const CANONICAL_SKILLS_DIR = "ai/jaSkills";
 
 const AGENT_TARGETS = {
   claude: { skillsDir: ".claude/skills", doc: { input: "agents/claude/CLAUDE.md", dest: "CLAUDE.md" }, ignore: [".claude/", "CLAUDE.md"] },
@@ -772,7 +763,7 @@ const AGENT_TARGETS = {
 };
 const TARGET_PRIORITY = ["claude", "codex", "kimi"];
 
-// "claude,codex" / "all" → 校验并按优先级排序去重
+// "claude,codex" / "all" → 校验并按固定顺序去重
 function parseTargetNames(spec) {
   const names = spec === "all"
     ? [...TARGET_PRIORITY]
@@ -788,7 +779,7 @@ function parseTargetNames(spec) {
 async function askTargets() {
   const rl = makeLineReader();
   try {
-    console.log("要接入哪些 agent？（决定植入哪些技能目录与协议文档）");
+    console.log("要接入哪些 agent？（各自的技能目录会链接到正本 " + CANONICAL_SKILLS_DIR + "/）");
     TARGET_PRIORITY.forEach((n, i) => {
       const t = AGENT_TARGETS[n];
       console.log("  " + (i + 1) + ". " + n + "  （" + t.skillsDir + "/ · " + t.doc.dest + "）");
@@ -807,12 +798,58 @@ async function askTargets() {
   }
 }
 
-// 植入引擎（init 与 agents add 共用）：协议文档去重植入 + multica/JASKILL + common 技能
-// 正本 = 所选目标中优先级最高者，其余目标目录挂 mirrors；gitignore 行随目标生成
-async function plantForTargets(ctx, manifest, targets) {
-  const primaryDir = AGENT_TARGETS[targets[0]].skillsDir;
-  const mirrorDirs = targets.slice(1).map((n) => AGENT_TARGETS[n].skillsDir);
+// 把 agent 的技能目录做成指向正本的链接（Windows junction 免管理员 / POSIX 相对 symlink）。
+// 遇到老式实体目录（复制镜像时代）自动迁移：内容并入正本（同名跳过），原地替换为链接。
+// 返回 "ok"（已正确）/ "created" / "fixed"
+function ensureSkillsLink(cwd, targetName) {
+  const rel = AGENT_TARGETS[targetName].skillsDir;
+  const linkPath = path.join(cwd, ...rel.split("/"));
+  const canonical = path.join(cwd, ...CANONICAL_SKILLS_DIR.split("/"));
+  fs.mkdirSync(canonical, { recursive: true });
+  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
 
+  let st = null;
+  try { st = fs.lstatSync(linkPath); } catch { st = null; }
+
+  if (st && st.isSymbolicLink()) {
+    try {
+      if (fs.realpathSync(linkPath) === fs.realpathSync(canonical)) return "ok";
+    } catch { /* 断链 → 重建 */ }
+    fs.rmSync(linkPath, { recursive: true, force: true });
+  } else if (st && st.isDirectory()) {
+    let moved = 0;
+    let skipped = 0;
+    for (const e of fs.readdirSync(linkPath, { withFileTypes: true })) {
+      if (IGNORE_NAMES.has(e.name)) continue;
+      const from = path.join(linkPath, e.name);
+      const to = path.join(canonical, e.name);
+      if (fs.existsSync(to)) {
+        skipped++;
+        continue;
+      }
+      fs.cpSync(from, to, { recursive: true });
+      moved++;
+    }
+    fs.rmSync(linkPath, { recursive: true, force: true });
+    if (moved || skipped) {
+      console.log("↪ " + rel + " 原为实体目录：迁入正本 " + moved + " 项"
+        + (skipped ? "，同名跳过 " + skipped + " 项" : "") + "，已替换为链接");
+    }
+  } else if (st) {
+    fs.rmSync(linkPath, { force: true });
+  }
+
+  if (process.platform === "win32") {
+    fs.symlinkSync(canonical, linkPath, "junction");
+  } else {
+    fs.symlinkSync(path.relative(path.dirname(linkPath), canonical), linkPath, "dir");
+  }
+  return st ? "fixed" : "created";
+}
+
+// 植入引擎（init 与 agents add 共用）：协议文档去重植入 + multica/JASKILL +
+// common 技能拉进正本 ai/jaSkills + 各目标技能目录链接化 + gitignore
+async function plantForTargets(ctx, manifest, targets) {
   const plan = [];
   const seenDoc = new Set();
   for (const n of targets) {
@@ -830,14 +867,12 @@ async function plantForTargets(ctx, manifest, targets) {
       if (!e.isDirectory() || IGNORE_NAMES.has(e.name)) continue;
       plan.push({
         input: common.realRel + "/" + e.name,
-        dest: primaryDir + "/" + e.name,
-        mirrors: mirrorDirs.map((d) => d + "/" + e.name),
+        dest: CANONICAL_SKILLS_DIR + "/" + e.name,
       });
     }
   }
 
   const counters = newCounters();
-  let mirrored = 0;
   for (const item of plan) {
     const hit = resolveShelfPath(ctx.shelfDir, item.input);
     if (!hit) {
@@ -846,35 +881,30 @@ async function plantForTargets(ctx, manifest, targets) {
         : "✗ 货架上找不到 " + item.input + "（检查货架是否最新）");
       continue;
     }
-    const destAbs = path.resolve(process.cwd(), item.dest);
-    await pullEntry(ctx, hit.realRel, manifest, counters, safeAsk, destAbs);
-    if (item.mirrors) {
-      const entry = manifest.shelf[hit.realRel];
-      if (entry) entry.mirrors = item.mirrors.map(toPosix);
-      for (const m of item.mirrors) {
-        if (refreshMirror(destAbs, path.resolve(process.cwd(), m))) mirrored++;
-      }
-    }
+    await pullEntry(ctx, hit.realRel, manifest, counters, safeAsk, path.resolve(process.cwd(), item.dest));
+  }
+
+  let linksMade = 0;
+  for (const n of targets) {
+    if (ensureSkillsLink(process.cwd(), n) !== "ok") linksMade++;
   }
 
   const ignoreLines = [...new Set(targets.flatMap((n) => AGENT_TARGETS[n].ignore))];
   const added = ensureGitignore(process.cwd(), ignoreLines);
-  return { counters, mirrored, added };
+  return { counters, linksMade, added };
 }
 
 function printPlantResult(targets, r) {
   printSummary(r.counters);
-  if (r.mirrored) console.log("≡ 镜像刷新 " + r.mirrored + " 项");
+  if (r.linksMade) console.log("⛓ 建立/修复链接 " + r.linksMade + " 个");
   if (r.added.length) console.log("✓ .gitignore 补行: " + r.added.join(", "));
   console.log("");
   console.log("工作区已接入货架（agent 目标: " + targets.join(" + ") + "）:");
   const docs = [...new Set(targets.map((n) => AGENT_TARGETS[n].doc.dest))].join(" / ");
   console.log("  " + docs + "  工作协议（真源在货架，shelf sync 保持最新）");
   console.log("  ai/JASKILL.md  基础技能名册");
-  const mirrorText = targets.length > 1
-    ? "；镜像: " + targets.slice(1).map((n) => AGENT_TARGETS[n].skillsDir + "/").join(" ")
-    : "";
-  console.log("  " + AGENT_TARGETS[targets[0]].skillsDir + "/  common 技能正本" + mirrorText);
+  console.log("  " + CANONICAL_SKILLS_DIR + "/  技能唯一正本（改技能、拉技能都在这）");
+  console.log("  " + targets.map((n) => AGENT_TARGETS[n].skillsDir).join(" · ") + "  → 指向正本的链接");
   console.log("  .shelf.json  记账本（进项目 git，队友 clone 后 shelf init 即还原）");
 }
 
@@ -897,7 +927,7 @@ export async function cmdShelfInit(argv = []) {
       targets = parseTargetNames(agentsFlag);
     } else if (manifest.agents?.length) {
       targets = TARGET_PRIORITY.filter((n) => manifest.agents.includes(n));
-      console.log("（沿用已配置的 agent 目标: " + targets.join(", ") + "；调整用 shelf agents add 或 --agents)");
+      console.log("（沿用已配置的 agent 目标: " + targets.join(", ") + "；调整用 shelf agents add 或 --agents）");
     } else if (INTERACTIVE) {
       targets = await askTargets();
       if (!targets || !targets.length) {
@@ -926,10 +956,11 @@ export async function cmdShelfAgents(argv) {
   const sub = argv[0];
 
   if (sub === undefined) {
-    console.log("已配置: " + (current.length ? current.join(", ") : "（无——先跑 shelf init）"));
+    console.log("技能正本: " + CANONICAL_SKILLS_DIR + "/（改技能、拉技能都在这）");
+    console.log("已配置:   " + (current.length ? current.join(", ") : "（无——先跑 shelf init）"));
     for (const n of TARGET_PRIORITY) {
       const t = AGENT_TARGETS[n];
-      console.log("  " + (current.includes(n) ? "●" : "○") + " " + n + "  " + t.skillsDir + "/ · " + t.doc.dest);
+      console.log("  " + (current.includes(n) ? "●" : "○") + " " + n + "  " + t.skillsDir + "/ → 链接 · " + t.doc.dest);
     }
     console.log("添加: shelf agents add <名>");
     return;
@@ -1137,15 +1168,12 @@ export async function cmdShelfSync(argv) {
       c.pushed++;
     }
 
-    // 镜像校对（决策 #22）：正本处理完后统一核对，哈希不符即从正本重刷
-    let mirrorFixed = 0;
-    if (!dryRun) {
-      for (const [, rec] of Object.entries(manifest.shelf ?? {})) {
-        if (!rec.mirrors?.length || !rec.localPath) continue;
-        const primary = path.resolve(process.cwd(), rec.localPath);
-        for (const m of rec.mirrors) {
-          if (refreshMirror(primary, path.resolve(process.cwd(), m))) mirrorFixed++;
-        }
+    // 链接完整性（决策 #26）：已配置目标的技能目录必须是指向 ai/jaSkills 的链接
+    let linksFixed = 0;
+    if (!dryRun && manifest.agents?.length) {
+      for (const n of manifest.agents) {
+        if (!AGENT_TARGETS[n]) continue;
+        if (ensureSkillsLink(process.cwd(), n) !== "ok") linksFixed++;
       }
     }
 
@@ -1153,7 +1181,7 @@ export async function cmdShelfSync(argv) {
     console.log("");
     console.log(
       `Sync${dryRun ? "（dry-run）" : ""}: ${c.same} 一致, ${c.updated} 更新本地, ${c.pushed} 推上库, ` +
-      `${c.cleaned} 清账, ${c.skipped} 跳过, ${mirrorFixed} 镜像刷新, ${pending.length} 待决`,
+      `${c.cleaned} 清账, ${c.skipped} 跳过, ${linksFixed} 链接修复, ${pending.length} 待决`,
     );
     if (pending.length) {
       for (const x of pending) console.log(`  · ${x}`);

@@ -77,7 +77,7 @@ CLI 一律拉到当前目录，分类落点由你执行：
 
 | 拉的是什么 | 放到哪 |
 |---|---|
-| `shelf/skills/**` 下的技能 | 正本进优先级最高目标的目录（claude>.codex>.kimi），其余目标目录为自动镜像；手动单拉时：Claude `./.claude/skills/`、Codex `./.codex/skills/`、Kimi `./.kimi/skills/` |
+| `shelf/skills/**` 下的技能 | **一律拉进正本 `ai/jaSkills/`**（`--dest ai/jaSkills`）；`.claude/.codex/.kimi` 的 skills 目录是指向正本的链接，agent 自动读到 |
 | `shelf/agents/claude/CLAUDE.md` | 项目根 `CLAUDE.md`（已有则对比合并，别盲目覆盖） |
 | `shelf/agents/codex/AGENTS.md` | 项目根 `AGENTS.md` |
 | 其他文档/模板/文件 | 用户指定处，默认当前目录 |
@@ -99,10 +99,10 @@ CLI 一律拉到当前目录，分类落点由你执行：
 
 ## 典型对话 → 命令
 
-- "把 intj 技能拉到这个项目" → `shelf pull skills/common/intj --dest .claude/skills`
+- "把 intj 技能拉到这个项目" → `shelf pull skills/common/intj --dest ai/jaSkills`（agent 目录是链接，自动可见）
 - "看看货架上有什么" → 用 `ls <货架clone>/shelf` 逐层看，把目录结构转述给用户（交互浏览器留给用户手动用）
-- "我改了这个技能，同步上去" → `shelf push .claude/skills/<名字>`（自动定位，不用查它在货架哪里；先不带 --yes 看清单）
+- "我改了这个技能，同步上去" → `shelf push ai/jaSkills/<名字>`（自动定位；先不带 --yes 看清单）
 - "把这个项目的货架物品都对一遍/同步一下" → `shelf sync`（非交互会自动应用"库上新版"，其余待决转述给用户）
 - "把这份部署清单存到货架" → `shelf create deploy-checklist.md --to docs`（新东西用 create；被拒说明已有同名，改用 push 或改名）
 - "这个项目还没接货架" → 问清要接哪些 agent，然后 `shelf init --agents claude,codex`：按目标植入协议文档（CLAUDE.md / AGENTS.md，后者 codex+kimi 共用）、`multica/`（货架上有才装）、`ai/JASKILL.md`、技能正本目录 + 镜像目录、gitignore 对应行，并全部入账。幂等：重跑=补缺失+体检，已有文件绝不盲覆盖；后补目标用 `shelf agents add kimi`
-- 镜像规则：**改技能只改正本目录**（`shelf agents` 可查哪个是正本；或直接改货架真源）；其余目标目录是被动镜像，sync 每轮自动从正本重刷，别手改
+- 链接规则：项目技能唯一正本在 `ai/jaSkills/`，agent 目录（.claude/.codex/.kimi 的 skills）全是指向它的链接——**从哪个目录改都等价**；链接断了/变实体目录，sync 与 init 会自动修复迁移

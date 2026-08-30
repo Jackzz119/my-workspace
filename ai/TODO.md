@@ -28,6 +28,7 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 - [x] **ST-L**：老版技能命令清退（skills list/sync 等，删 4 个遗留模块）（2026-08-18）
 - [x] **ST-M**：`shelf init` 植入协议 + sync 镜像校对（2026-08-30，v1.1.0）
 - [x] **ST-N**：init 目标多选（claude/codex/kimi）+ `shelf agents add` + GitHub Actions 自动发版 release.yml（2026-08-30）
+- [x] **ST-O**：项目技能正本 ai/jaSkills + agent 目录链接化 + 老项目自动迁移（2026-08-30）
 - [ ] **ST-E**：macOS 侧冒烟 + README shelf 章节
 
 ## 发版策略（npm publish）

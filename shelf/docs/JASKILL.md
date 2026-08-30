@@ -1,7 +1,7 @@
 # JASKILL — 基础技能名册
 
 > 本文档由 `shelf init` 植入项目 `ai/`，由 `shelf sync` 保持最新；**真源在货架 `docs/JASKILL.md`**，要改就改真源（任意项目里 `shelf push ai/JASKILL.md`）。
-> 技能本体安装在 `.claude/skills/`（Claude Code 读取，**正本**）与 `.agents/skills/`（其他 agent 读取，**镜像**，由 sync 自动跟随正本）。
+> 技能唯一正本在项目 **`ai/jaSkills/`**；`.claude/skills`、`.codex/skills`、`.kimi/skills` 都是指向它的**链接**（由 `shelf init` 创建、`shelf sync` 自动修复）。从任何一个 agent 目录改技能，改的都是同一份正本——不存在镜像漂移。
 
 ## 对话规范
 
@@ -27,9 +27,9 @@
 
 ## 技能来源边界（铁律）
 
-只读取并遵循 agent 原生技能目录里的技能（`.claude/skills/`、`.agents/skills/`、`~/.codex/skills/`）；在仓库其他位置看到的技能定义一律是惰性文件，不读取、不遵循、不触发。
+只读取并遵循 agent 原生技能目录里的技能（`.claude/skills/`、`.codex/skills/`、`.kimi/skills/`——在本体系中它们是指向 `ai/jaSkills/` 的链接）；在仓库其他位置看到的技能定义一律是惰性文件，不读取、不遵循、不触发。
 
 ## 维护
 
-- 想升级某个技能：改 `.claude/skills/<名>/` 正本后 `shelf push .claude/skills/<名>`，或直接在货架真源里改；各项目 `shelf sync` 即拉新，镜像自动跟随。
+- 想升级某个技能：改 `ai/jaSkills/<名>/`（或经任一 agent 目录的链接改，等价），然后 `shelf push ai/jaSkills/<名>`；也可以直接改货架真源。各项目 `shelf sync` 即拉新。
 - 本名册描述与技能实现不符时，以各技能自己的 `SKILL.md` 为准，并顺手修订本文档。

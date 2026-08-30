@@ -48,6 +48,8 @@
 | 24 | agent 目标可选（2026-08-30 需求） | init 不再硬编码植入目录，改为**目标选择**：`claude`（.claude/skills + CLAUDE.md）/ `codex`（.codex/skills + AGENTS.md）/ `kimi`（.kimi/skills + AGENTS.md，查证：Kimi 走 AGENTS.md 标准且项目级也认 .claude/.codex/.agents 目录）。交互 init 出多选菜单；非交互必须 `--agents claude,codex`（或 all）；选择持久化在 `.shelf.json` 顶层 `agents` 字段，重跑 init 沿用不再问。技能正本 = 所选目标中优先级最高者（claude > codex > kimi），其余目标目录进该账目的 `mirrors`；AGENTS.md 在 codex/kimi 同选时只植一份。gitignore 行随所选目标生成（`.agents/` 从默认清单移除）。新命令 **`shelf agents`**（查看已配/可用）与 **`shelf agents add <名>`**（后补目标：植协议文档+技能目录+重算 mirrors+补 gitignore） |
 | 25 | CLI 自动发版（GitHub Actions + npm Trusted Publishing） | **概念纠偏：货架内容更新不需要发版**——npm 包只含 bin/lib 代码，技能/模板/文档走 git 由档口每次操作自动拉取。需要发版的只有 CLI 代码变更，交给 `.github/workflows/release.yml`：push 到 main 时对比 packages/shelf 版本与 npm 注册表，出现新版本号即自动 `npm publish`（OIDC 信任发布，零 token 零验证码）+ 打 `v<版本>` tag + GitHub Release。一次性配置在 npmjs.com 包设置里指定 Trusted Publisher（repo=Jackzz119/my-workspace, workflow=release.yml）。私有仓不支持 --provenance，发布本身不受影响 |
 
+| 26 | 项目技能正本 jaSkills（2026-08-30 用户重构，**取代 #22 的复制镜像**） | 项目里技能的唯一正本 = **`ai/jaSkills/`**（common 技能 pull 至此，账本 localPath 指此）；所选 agent 目标的技能目录（`.claude/skills`、`.codex/skills`、`.kimi/skills`）一律做成**指向正本的链接**（Windows junction 免管理员 / POSIX 相对 symlink）。**从任何 agent 目录改技能 = 直接改正本**，不再有"镜像手改丢失"问题；账本不再需要 mirrors 字段。init/agents add 建链；sync 每轮校验链接完整性（断链/实体目录自动修复）；遇老式实体目录（#22 时代的复制镜像）自动迁移：内容并入正本（同名跳过）后原地替换为链接。`ai/jaSkills` 随 ai/ 进项目 git（项目自带技能，队友 clone 即有；shelf 同步的部分由账本继续对账） |
+
 ## 三、三层传输（解决「push 要不要整库 clone」）
 
 monorepo 会随 apps 变大，但 shelf 操作的传输量必须只跟 shelf 内容有关：
@@ -80,6 +82,7 @@ monorepo 会随 apps 变大，但 shelf 操作的传输量必须只跟 shelf 内
 - [x] **ST-L**：老版技能命令清退（决策 #20）——bin 精简为 7 命令，删 4 个遗留模块，引用审计清零
 - [x] **ST-M**：init 植入协议（决策 #21/#22/#23）——七场景冒烟全过：全新接入(9 项+镜像 6+gitignore 4 行)、幂等重跑、自有文件保护(auto-skip)、防呆拒绝、镜像损坏自愈、multica 上架即植入(10 项)（2026-08-30，v1.1.0）
 - [x] **ST-N**：agent 目标化（决策 #24）+ 自动发版（决策 #25）——五场景冒烟全过：--agents 定向接入(claude+codex：正本+镜像+4 gitignore 行)、重跑沿用记录、agents add kimi(镜像重算+补 .kimi/)、非交互无 flag exit 2、仅 kimi(正本落 .kimi)；release.yml 就位（2026-08-30）
+- [x] **ST-O**：jaSkills 正本重构（决策 #26）——五场景冒烟：全新 init（正本+双链接）、透过链接改技能=改正本（sync 正确判本地领先）、老式复制项目自动迁移（实体目录并入正本+mirrors 字段清除）、断链 sync 自愈、agents add 建第三链接（2026-08-30）
 - [ ] **ST-E**：macOS 侧冒烟（Windows 已过：pull/push/冲突/守卫/init/sync 全链路）+ README 补 shelf 章节
 
 ## 六、与既有里程碑的关系
