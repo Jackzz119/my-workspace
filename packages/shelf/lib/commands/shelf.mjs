@@ -941,6 +941,7 @@ export async function cmdShelfInit(argv = []) {
 
     const result = await plantForTargets(ctx, manifest, targets);
     manifest.agents = targets;
+    await reconcileLocalSkills(manifest);
     saveManifest(manifest);
     printPlantResult(targets, result);
   } finally {
@@ -990,59 +991,84 @@ export async function cmdShelfAgents(argv) {
   }
 }
 
+// ---- 本地技能台账（SHELF 决策 #27 · 增量对账）----
+
+// local 段维护：在场→刷指纹；升格→移除；缺失→告警但保留记录（仅 adopt 交互提供清账）；
+// 新出现的未追踪目录→登记。init / sync / adopt 共用。
+async function reconcileLocalSkills(manifest, { allowPrune = false } = {}) {
+  const canonical = path.join(process.cwd(), ...CANONICAL_SKILLS_DIR.split("/"));
+  const tracked = new Set(
+    Object.values(manifest.shelf ?? {}).map((e) => toPosix(e.localPath ?? "")),
+  );
+  const prev = manifest.local ?? {};
+  const next = {};
+  const c = { registered: 0, refreshed: 0, missing: 0, graduated: 0 };
+
+  const dirs = fs.existsSync(canonical)
+    ? fs.readdirSync(canonical, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && !IGNORE_NAMES.has(e.name))
+        .map((e) => e.name)
+    : [];
+  const present = new Set(dirs);
+
+  for (const [name, entry] of Object.entries(prev)) {
+    if (tracked.has(CANONICAL_SKILLS_DIR + "/" + name)) {
+      c.graduated++;
+      continue;
+    }
+    if (present.has(name)) {
+      const hash = contentHash(path.join(canonical, name));
+      if (hash !== entry.contentHash) c.refreshed++;
+      next[name] = { ...entry, contentHash: hash };
+      continue;
+    }
+    c.missing++;
+    console.log("⚠ 登记过的本地技能缺失: " + name + "（登记于 " + (entry.addedAt ?? "?")
+      + "，上次指纹 " + String(entry.contentHash ?? "").slice(7, 19) + "…）——重装后跑 shelf sync 即恢复入账");
+    if (allowPrune && INTERACTIVE) {
+      const act = await choose("  [k]保留记录 / [r]清账? ", [{ key: "k" }, { key: "r" }]);
+      if (act === "r") continue;
+    }
+    next[name] = entry;
+  }
+
+  for (const name of dirs) {
+    if (next[name] || tracked.has(CANONICAL_SKILLS_DIR + "/" + name)) continue;
+    next[name] = {
+      contentHash: contentHash(path.join(canonical, name)),
+      addedAt: todayISO(),
+      origin: "adopted",
+    };
+    console.log("✚ 登记本地技能: " + name);
+    c.registered++;
+  }
+
+  manifest.local = next;
+  return c;
+}
+
 // ---- 子命令：adopt（收编外来技能，SHELF 决策 #27）----
 
 export async function cmdShelfAdopt() {
   const manifest = loadManifest();
-  const cwd = process.cwd();
-  const canonical = path.join(cwd, ...CANONICAL_SKILLS_DIR.split("/"));
 
-  // ① agent 技能目录若被外部安装器换成了实体目录：内容迁入正本，恢复链接
+  // agent 技能目录若被外部安装器换成了实体目录：内容迁入正本，恢复链接
   let relinked = 0;
   for (const n of manifest.agents ?? []) {
     if (!AGENT_TARGETS[n]) continue;
-    if (ensureSkillsLink(cwd, n) !== "ok") relinked++;
+    if (ensureSkillsLink(process.cwd(), n) !== "ok") relinked++;
   }
 
-  // ② 全量重算 local 段：正本里未被 shelf 段追踪的技能 = 本地/三方技能
-  const tracked = new Set(
-    Object.values(manifest.shelf ?? {}).map((e) => toPosix(e.localPath ?? "")),
-  );
-  const prevLocal = manifest.local ?? {};
-  const local = {};
-  let added = 0;
-  let refreshed = 0;
-  let graduated = 0;
-
-  if (fs.existsSync(canonical)) {
-    for (const e of fs.readdirSync(canonical, { withFileTypes: true })) {
-      if (!e.isDirectory() || IGNORE_NAMES.has(e.name)) continue;
-      const localPath = CANONICAL_SKILLS_DIR + "/" + e.name;
-      if (tracked.has(localPath)) continue; // 货架商品，账在 shelf 段
-      const hash = contentHash(path.join(canonical, e.name));
-      const prev = prevLocal[e.name];
-      if (!prev) {
-        local[e.name] = { contentHash: hash, addedAt: todayISO(), origin: "adopted" };
-        console.log("✚ 登记本地技能: " + e.name);
-        added++;
-      } else {
-        if (prev.contentHash !== hash) refreshed++;
-        local[e.name] = { ...prev, contentHash: hash };
-      }
-    }
-  }
-  graduated = Object.keys(prevLocal).filter((n) => !(n in local)).length;
-
-  manifest.local = local;
+  const c = await reconcileLocalSkills(manifest, { allowPrune: true });
   saveManifest(manifest);
 
   console.log("");
   console.log(
-    "Adopt: " + added + " 新登记, " + refreshed + " 指纹更新, "
-    + graduated + " 已升格/移除, " + relinked + " 目录收编重链；"
-    + "local 段共 " + Object.keys(local).length + " 个本地技能",
+    "Adopt: " + c.registered + " 新登记, " + c.refreshed + " 指纹更新, " + c.missing + " 缺失保留, "
+    + c.graduated + " 已升格/移除, " + relinked + " 目录收编重链；"
+    + "local 段共 " + Object.keys(manifest.local).length + " 个本地技能",
   );
-  if (Object.keys(local).length) {
+  if (Object.keys(manifest.local).length) {
     console.log("（本地技能不参与货架对账；想跨项目复用: shelf create " + CANONICAL_SKILLS_DIR + "/<名> --to skills/<包>）");
   }
 }
@@ -1234,11 +1260,17 @@ export async function cmdShelfSync(argv) {
       }
     }
 
+    let localStat = null;
+    if (!dryRun) localStat = await reconcileLocalSkills(manifest);
+
     if (!dryRun) saveManifest(manifest);
     console.log("");
     console.log(
       `Sync${dryRun ? "（dry-run）" : ""}: ${c.same} 一致, ${c.updated} 更新本地, ${c.pushed} 推上库, ` +
-      `${c.cleaned} 清账, ${c.skipped} 跳过, ${linksFixed} 链接修复, ${pending.length} 待决`,
+      `${c.cleaned} 清账, ${c.skipped} 跳过, ${linksFixed} 链接修复, ${pending.length} 待决` +
+      (localStat && (localStat.registered || localStat.refreshed || localStat.missing)
+        ? `；本地技能: ${localStat.registered} 新登记 / ${localStat.refreshed} 指纹更新 / ${localStat.missing} 缺失`
+        : ""),
     );
     if (pending.length) {
       for (const x of pending) console.log(`  · ${x}`);

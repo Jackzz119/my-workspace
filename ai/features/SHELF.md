@@ -50,7 +50,7 @@
 
 | 26 | 项目技能正本 jaSkills（2026-08-30 用户重构，**取代 #22 的复制镜像**） | 项目里技能的唯一正本 = **`ai/jaSkills/`**（common 技能 pull 至此，账本 localPath 指此）；所选 agent 目标的技能目录（`.claude/skills`、`.codex/skills`、`.kimi/skills`）一律做成**指向正本的链接**（Windows junction 免管理员 / POSIX 相对 symlink）。**从任何 agent 目录改技能 = 直接改正本**，不再有"镜像手改丢失"问题；账本不再需要 mirrors 字段。init/agents add 建链；sync 每轮校验链接完整性（断链/实体目录自动修复）；遇老式实体目录（#22 时代的复制镜像）自动迁移：内容并入正本（同名跳过）后原地替换为链接。`ai/jaSkills` 随 ai/ 进项目 git（项目自带技能，队友 clone 即有；shelf 同步的部分由账本继续对账） |
 
-| 27 | `shelf adopt` 收编外来技能（2026-08-30 需求） | 外来技能的常态：agent 目录是链接 → 任何下载器往 `.claude/skills/` 装技能，**实际透明落进正本 ai/jaSkills**，零处理。异常态：安装器暴力重建实体目录毁掉链接 → adopt（以及 init/sync）自动迁移并重链。**账本新增 `local` 段**：正本里未被 shelf 段追踪（localPath 不匹配）的技能 = 本地/三方技能，adopt 每次全量重算登记 `{ contentHash, addedAt, origin: "adopted" }`——不上货架（不是商品）但进唯一账本；已被 `shelf create` 升格上架的自动移出 local 段。想跨项目复用的升格路径：`shelf create ai/jaSkills/<名> --to skills/<包>` |
+| 27 | `shelf adopt` 收编外来技能（2026-08-30 需求） | 外来技能的常态：agent 目录是链接 → 任何下载器往 `.claude/skills/` 装技能，**实际透明落进正本 ai/jaSkills**，零处理。异常态：安装器暴力重建实体目录毁掉链接 → adopt（以及 init/sync）自动迁移并重链。**账本 `local` 段（2026-08-30 方案2 修订：增量对账+缺失守护）**：正本里未被 shelf 段追踪的技能登记 `{ contentHash, addedAt, origin }`。维护改为**增量**（init / sync / adopt 三处共用 reconcileLocalSkills）：在场→刷指纹；缺失→**告警并保留记录**（带上次指纹供比对，仅 adopt 交互提供 [r]清账）；升格→移除；新目录→登记。新设备流：init 重拉货架物品并告警缺失的本地技能 → 用户以通用安装器重装（经链接直落正本）→ sync 恢复入账（指纹一致原样、新版刷新）。本地技能无远端，账本以现实为准，不仲裁版本。想跨项目复用的升格路径：`shelf create ai/jaSkills/<名> --to skills/<包>` |
 
 ## 三、三层传输（解决「push 要不要整库 clone」）
 
@@ -85,7 +85,7 @@ monorepo 会随 apps 变大，但 shelf 操作的传输量必须只跟 shelf 内
 - [x] **ST-M**：init 植入协议（决策 #21/#22/#23）——七场景冒烟全过：全新接入(9 项+镜像 6+gitignore 4 行)、幂等重跑、自有文件保护(auto-skip)、防呆拒绝、镜像损坏自愈、multica 上架即植入(10 项)（2026-08-30，v1.1.0）
 - [x] **ST-N**：agent 目标化（决策 #24）+ 自动发版（决策 #25）——五场景冒烟全过：--agents 定向接入(claude+codex：正本+镜像+4 gitignore 行)、重跑沿用记录、agents add kimi(镜像重算+补 .kimi/)、非交互无 flag exit 2、仅 kimi(正本落 .kimi)；release.yml 就位（2026-08-30）
 - [x] **ST-O**：jaSkills 正本重构（决策 #26）——五场景冒烟：全新 init（正本+双链接）、透过链接改技能=改正本（sync 正确判本地领先）、老式复制项目自动迁移（实体目录并入正本+mirrors 字段清除）、断链 sync 自愈、agents add 建第三链接（2026-08-30）
-- [x] **ST-P**：`shelf adopt`（决策 #27）——四场景冒烟：透过链接安装直落正本+登记、幂等重跑、安装器毁链接自愈收编、create 升格自动移出 local 段（2026-08-30）
+- [x] **ST-P**：`shelf adopt` + local 段增量对账（决策 #27 方案2）——冒烟：透过链接安装直落正本+登记、幂等、毁链接自愈收编、create 升格移出、**账本单独迁移新设备全流程**（init 告警缺失→安装器重装→sync 恢复入账，指纹一致原样）（2026-08-30）
 - [ ] **ST-E**：macOS 侧冒烟（Windows 已过：pull/push/冲突/守卫/init/sync 全链路）+ README 补 shelf 章节
 
 ## 六、与既有里程碑的关系

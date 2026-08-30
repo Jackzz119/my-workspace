@@ -56,7 +56,8 @@ push 不接受 `--to`；create 的 `--to` 是**货架目录**（不是完整条�
 ## 外来/三方技能（adopt）
 
 - agent 技能目录是链接，所以**从网上装的技能会透明落进正本 `ai/jaSkills/`**，不需要任何处理；只是它没进账本。
-- 用户装完新技能、或某个安装器把 skills 目录换成了实体目录时 → 跑 `shelf adopt`：实体内容迁入正本并恢复链接，正本里未被货架追踪的技能登记进账本 `local` 段（`{contentHash, addedAt, origin}`）——**不上货架但有账**。
+- 用户装完新技能、或某个安装器把 skills 目录换成了实体目录时 → 跑 `shelf adopt`：实体内容迁入正本并恢复链接，正本里未被货架追踪的技能登记进账本 `local` 段——**不上货架但有账**。
+- local 段由 init / sync / adopt 自动增量维护：登记过的技能**缺失时会告警但保留记录**（带上次指纹）；转述给用户，用户用惯用安装器重装后跑 `shelf sync` 即恢复入账（无需 adopt）。
 - local 段技能不参与 sync 对账（没有远端）；用户想跨项目复用某个本地技能时 → `shelf create ai/jaSkills/<名> --to skills/<包>` 升格上架，下次 adopt 自动把它移出 local 段。
 
 ## sync 的行为（你替用户跑时）
