@@ -21,6 +21,7 @@ shelf push <本地路径> [--yes]           # 更新已有货：自动定位，�
 shelf push <本地路径> --force           # 覆盖"异机已修改"的冲突（仅限用户明确指示）
 shelf init [--agents claude,codex,kimi]  # 项目接入（幂等）；非交互必须带 --agents（或 all）
 shelf agents [add <名>]                  # 查看 / 追加 agent 目标（后补目录+文档+镜像+gitignore）
+shelf adopt                             # 收编外来技能：实体目录迁入正本重链 + 未记账技能登记 local 段
 shelf sync [--dry-run]                  # 按账本对账：库新→自动更新本地；本地改→待人决定方向
 shelf home [--update]                   # 货架在哪、什么模式；--update 立即拉最新
 ```
@@ -51,6 +52,12 @@ npm i -g @jackss119/shelf     # 装完命令就是裸 shelf；首次运行自动
 | 更新货架已有、但本工作区没拉过的东西 | `shelf push <路径>` | 按文件名全架匹配；唯一命中即视为更新它 |
 
 push 不接受 `--to`；create 的 `--to` 是**货架目录**（不是完整条目路径），条目名 = 本地文件/文件夹名。
+
+## 外来/三方技能（adopt）
+
+- agent 技能目录是链接，所以**从网上装的技能会透明落进正本 `ai/jaSkills/`**，不需要任何处理；只是它没进账本。
+- 用户装完新技能、或某个安装器把 skills 目录换成了实体目录时 → 跑 `shelf adopt`：实体内容迁入正本并恢复链接，正本里未被货架追踪的技能登记进账本 `local` 段（`{contentHash, addedAt, origin}`）——**不上货架但有账**。
+- local 段技能不参与 sync 对账（没有远端）；用户想跨项目复用某个本地技能时 → `shelf create ai/jaSkills/<名> --to skills/<包>` 升格上架，下次 adopt 自动把它移出 local 段。
 
 ## sync 的行为（你替用户跑时）
 

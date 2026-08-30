@@ -990,6 +990,63 @@ export async function cmdShelfAgents(argv) {
   }
 }
 
+// ---- 子命令：adopt（收编外来技能，SHELF 决策 #27）----
+
+export async function cmdShelfAdopt() {
+  const manifest = loadManifest();
+  const cwd = process.cwd();
+  const canonical = path.join(cwd, ...CANONICAL_SKILLS_DIR.split("/"));
+
+  // ① agent 技能目录若被外部安装器换成了实体目录：内容迁入正本，恢复链接
+  let relinked = 0;
+  for (const n of manifest.agents ?? []) {
+    if (!AGENT_TARGETS[n]) continue;
+    if (ensureSkillsLink(cwd, n) !== "ok") relinked++;
+  }
+
+  // ② 全量重算 local 段：正本里未被 shelf 段追踪的技能 = 本地/三方技能
+  const tracked = new Set(
+    Object.values(manifest.shelf ?? {}).map((e) => toPosix(e.localPath ?? "")),
+  );
+  const prevLocal = manifest.local ?? {};
+  const local = {};
+  let added = 0;
+  let refreshed = 0;
+  let graduated = 0;
+
+  if (fs.existsSync(canonical)) {
+    for (const e of fs.readdirSync(canonical, { withFileTypes: true })) {
+      if (!e.isDirectory() || IGNORE_NAMES.has(e.name)) continue;
+      const localPath = CANONICAL_SKILLS_DIR + "/" + e.name;
+      if (tracked.has(localPath)) continue; // 货架商品，账在 shelf 段
+      const hash = contentHash(path.join(canonical, e.name));
+      const prev = prevLocal[e.name];
+      if (!prev) {
+        local[e.name] = { contentHash: hash, addedAt: todayISO(), origin: "adopted" };
+        console.log("✚ 登记本地技能: " + e.name);
+        added++;
+      } else {
+        if (prev.contentHash !== hash) refreshed++;
+        local[e.name] = { ...prev, contentHash: hash };
+      }
+    }
+  }
+  graduated = Object.keys(prevLocal).filter((n) => !(n in local)).length;
+
+  manifest.local = local;
+  saveManifest(manifest);
+
+  console.log("");
+  console.log(
+    "Adopt: " + added + " 新登记, " + refreshed + " 指纹更新, "
+    + graduated + " 已升格/移除, " + relinked + " 目录收编重链；"
+    + "local 段共 " + Object.keys(local).length + " 个本地技能",
+  );
+  if (Object.keys(local).length) {
+    console.log("（本地技能不参与货架对账；想跨项目复用: shelf create " + CANONICAL_SKILLS_DIR + "/<名> --to skills/<包>）");
+  }
+}
+
 // ---- 子命令：home（查看/更新档口）----
 
 export async function cmdShelfHome(argv) {

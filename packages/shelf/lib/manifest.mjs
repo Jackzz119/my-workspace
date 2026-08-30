@@ -28,11 +28,13 @@ export function loadManifest(cwd = process.cwd()) {
       skillsDir: ".claude/skills",
       skills: {},
       shelf: {},
+      local: {},
     };
   }
   const data = JSON.parse(fs.readFileSync(file, "utf8"));
   data.skills ??= {};
   data.shelf ??= {};
+  data.local ??= {};
   return data;
 }
 

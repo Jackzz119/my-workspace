@@ -7,6 +7,7 @@ import {
   cmdShelfSync,
   cmdShelfInit,
   cmdShelfAgents,
+  cmdShelfAdopt,
   cmdShelfHome,
 } from "../lib/commands/shelf.mjs";
 
@@ -26,6 +27,8 @@ Usage:
   shelf init             项目接入（幂等）：交互多选 agent 目标，或
                          --agents claude,codex,kimi / all
   shelf agents [add <名>] 查看 / 追加 agent 目标（claude / codex / kimi）
+  shelf adopt            收编外来技能：实体目录迁入正本重链 + 未记账技能
+                         登记进账本 local 段（不上货架）
   shelf home [--update]  查看货架在哪、什么模式；--update 拉取最新
 
 货架定位：SHELF_HOME 环境变量 > 本 clone > ~/.shelfrc > 托管档口 ~/.shelf/home
@@ -59,6 +62,9 @@ try {
       break;
     case "agents":
       await cmdShelfAgents(rest);
+      break;
+    case "adopt":
+      await cmdShelfAdopt(rest);
       break;
     case "home":
       await cmdShelfHome(rest);
