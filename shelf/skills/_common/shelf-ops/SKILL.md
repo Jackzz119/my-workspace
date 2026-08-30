@@ -20,10 +20,11 @@ shelf create <本地路径> --to <货架目录>  # 上架新货；--to 目录不
 shelf push <本地路径> [--yes]           # 更新已有货：自动定位，不填地址
 shelf push <本地路径> --force           # 覆盖"异机已修改"的冲突（仅限用户明确指示）
 shelf init                              # 初始化工作区（.shelf.json + 本手册）
+shelf sync [--dry-run]                  # 按账本对账：库新→自动更新本地；本地改→待人决定方向
 shelf home [--update]                   # 货架在哪、什么模式；--update 立即拉最新
-shelf skills list                       # 技能包清单（老工作流，列 common 包）
-shelf skills sync                       # 整包同步 common 技能到 ./.claude/skills/
 ```
+
+老版 `shelf skills list/sync` 已清退：列清单用浏览器或 `ls`，装技能用 `shelf pull <路径> --dest .claude/skills`，保持最新用 `shelf sync`。
 
 - 路径里 `_` 前缀可省略：`skills/common/intj` 和 `skills/_common/intj` 等价，落盘用真实名。
 - 你（AI）在非交互环境运行：create **必须带 `--to`**；push/create 的最终确认**必须带 `--yes`**（先跑一遍不带 `--yes` 拿到变更清单转述给用户，用户同意后再加 `--yes` 重跑）。
@@ -49,6 +50,15 @@ npm i -g @jackzz119/shelf     # 装完命令就是裸 shelf；首次运行自动
 | 更新货架已有、但本工作区没拉过的东西 | `shelf push <路径>` | 按文件名全架匹配；唯一命中即视为更新它 |
 
 push 不接受 `--to`；create 的 `--to` 是**货架目录**（不是完整条目路径），条目名 = 本地文件/文件夹名。
+
+## sync 的行为（你替用户跑时）
+
+`shelf sync` 逐条核对账本里的每件物品（三哈希对比：记账 R / 库上 S / 本地 L）：
+
+- 库上有新版、本地没动过 → **自动覆盖本地**（安全，零损失），你只需转述更新清单；
+- 本地有改动（领先或双改）、库上搬家找不回、本地文件丢失 → 全部进"待决"清单并 exit 2——把每条待决和 diff 摘要转述给用户，**由用户决定方向**；用户拍板后用 `shelf push <路径>`（推上库）或 `shelf pull <路径> --dest <原位置>`（库覆盖本地）逐条执行；
+- `--dry-run` 只报告不动手，适合先给用户看全局。
+- 交互模式下（用户自己跑）sync 会当场显示逐行 diff 并提供 [p]推上库/[o]覆盖本地/[s]跳过 菜单——不需要你介入。
 
 ## 退出码（你判断下一步的依据）
 
@@ -91,5 +101,6 @@ CLI 一律拉到当前目录，分类落点由你执行：
 - "把 intj 技能拉到这个项目" → `shelf pull skills/common/intj --dest .claude/skills`
 - "看看货架上有什么" → 用 `ls <货架clone>/shelf` 逐层看，把目录结构转述给用户（交互浏览器留给用户手动用）
 - "我改了这个技能，同步上去" → `shelf push .claude/skills/<名字>`（自动定位，不用查它在货架哪里；先不带 --yes 看清单）
+- "把这个项目的货架物品都对一遍/同步一下" → `shelf sync`（非交互会自动应用"库上新版"，其余待决转述给用户）
 - "把这份部署清单存到货架" → `shelf create deploy-checklist.md --to docs`（新东西用 create；被拒说明已有同名，改用 push 或改名）
 - "这个项目还没接货架" → `shelf init`（落 manifest 和本手册）

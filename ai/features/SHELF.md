@@ -14,6 +14,7 @@
 - `shelf pull <shelf路径> [...]` — 非交互直拉，如 `shelf pull skills/common/intj agents/claude`
 - `shelf create <本地路径> [--to <货架目录>]` — **上架新货**：全架查重名（重名拒绝），交互选位浏览器（`m <名>` 建目录、`d` 放下）或 `--to` 直达
 - `shelf push <本地路径>` — **更新已有货**：按记账/名字自动定位，不接受手填地址
+- `shelf sync [--dry-run]` — **全工作区对账**：逐条核对账本，库新自动更新本地，本地有改动看 diff 定方向
 
 浏览器输入语法（零依赖 readline）：数字 `3` = 进入该目录；`p 1,3-5` = 拉取所选；`a` = 拉取当前目录全部；`..` = 返回上级；`q` = 退出。每屏显示条目类型与大小/子项数。
 
@@ -39,6 +40,8 @@
 | 16 | 免 clone 运行（快照模式） | `npx -y -p github:Jackzz119/my-workspace shelf <命令>`：npm 安装副本无 `.git`（home 判定已加 git 仓库校验），识别为**快照**——读操作直接用包内 shelf，push/create 自动转临时 sparse clone，remote 取根 package.json `repository`（或 SHELF_REMOTE）；sourceCommit 回退读 npm 注入的 `gitHead`（实测当前 npm 对 git 依赖不注入 → 快照模式下为 null，仅影响溯源字段，冲突/搬家等哈希主逻辑不受影响）。老 atk 的 npx 直跑体验回归，且这次连写都行 |
 | 17 | 托管档口（自动开档口） | 全局安装的 CLI 首次运行时，自动把内容仓 clone 到 `~/.shelf/home` 并长期使用：之后所有命令本地跑（可离线、写操作直接提交）。**保鲜策略（2026-08-18 修订，适配货架高频更新）**：读操作每次都 `git pull --ff-only`（60 秒戳记只用于去重连环命令），写操作无条件强制先拉；push 被远端拒收（non-fast-forward）时自动 `pull --rebase --autostash` 后重推一次，多设备竞写自愈。离线时拉取失败仅警告，不阻断。用户**永不需要手动 clone**。`shelf home [--update]` 查看/立即更新；`SHELF_EPHEMERAL=1` 或 `~/.shelfrc {"ephemeral": true}` 可退回一次性 clone（临时机器/CI） |
 | 18 | 工具自建 clone 的健壮性 | ①**git 身份兜底**：全新机器没配 user.name/email 时，给工具自建的 clone（档口/临时）设 `shelf <shelf@主机名>`，不碰用户自己的 clone；②**提交失败回滚**：commit 出错时把货架工作区恢复原状（reset/checkout/clean），避免半改状态被下次 push 误判成"异机修改"；③**换行符**：档口 clone 时带 `-c core.autocrlf=false`，否则 CRLF 转换让工作区永远"脏"、卡住自动更新；④**临时目录不泄漏**：`process.exit` 会跳过 finally，临时 clone 注册退出钩子兜底清理（push 失败要保留现场时用 `keep()` 解除） |
+| 19 | `shelf sync` 六情形对账 | 开跑先强制刷新货架；对账本每件物品比三哈希（记账 R/库上 S/本地 L）：①全等→静默；②S≠R,L=R→**自动覆盖本地**（零损失）+更新记账；③S=R,L≠R（本地领先）→逐行 diff（`git diff --no-index --color`）后选 [p]推上库/[o]覆盖本地/[s]跳过；④双改→同③但 push 前二次确认；⑤库上路径失效→按名字找回并迁记账，找不到报"已移除"（可清账）；⑥本地文件丢失→孤儿处理（重拉/清账/跳过）。push 分支复用 applyAndCommit 全管线；sync 内不提供 --force-secret（拦下即跳过）。非交互：仅②自动执行，其余入待决清单并 exit 2；--dry-run 全程只读 |
+| 20 | 老版技能命令清退（2026-08-18 用户指示） | `shelf skills list/sync`、`shelf list`、裸 `shelf pull` 整包同步垫、`atk shelf` 嵌套垫全部移除（打旧命令会得到指路错误）；连带删除只服务它们的 lib/commands/list.mjs、pull.mjs、frontmatter.mjs、format.mjs 与 manifest 的 skills 段写接口。老 manifest 的 `skills` 段仍可被解析但无人再写——物品重新 `shelf pull` 一次即迁入 `shelf` 段接受 sync 管理 |
 
 ## 三、三层传输（解决「push 要不要整库 clone」）
 
@@ -68,7 +71,9 @@ monorepo 会随 apps 变大，但 shelf 操作的传输量必须只跟 shelf 内
 - [x] **ST-H**：push 定位链重构（决策 #15）——移除 `--to`、搬家找回（名字匹配 + 哈希对比提示）、记账键迁移、无记录同名匹配、`shelf create` 指路
 - [x] **ST-I**：可发布形态——`packages/shelf` 独立成包（`files` 只含 bin/lib，18.5kB）、`publishConfig.access=public`、README/LICENSE；`paths.mjs` 改为向上探测（不再假设 monorepo 布局），`list`/`skills sync` 接入解析链
 - [x] **ST-J**：托管档口 + 健壮性（决策 #17/#18），六场景冒烟：全新机器读/写、ephemeral 开关、npx 快照读/写、monorepo 回归
-- [ ] **ST-E**：macOS 侧冒烟（Windows 已过：pull/push/冲突/守卫/init 全链路）+ README 补 shelf 章节
+- [x] **ST-K**：`shelf sync`（决策 #19）——混合情景冒烟：自动更新/本地领先/双改/搬家迁账/下架/孤儿 + dry-run 只读 + 非交互 exit 2
+- [x] **ST-L**：老版技能命令清退（决策 #20）——bin 精简为 7 命令，删 4 个遗留模块，引用审计清零
+- [ ] **ST-E**：macOS 侧冒烟（Windows 已过：pull/push/冲突/守卫/init/sync 全链路）+ README 补 shelf 章节
 
 ## 六、与既有里程碑的关系
 

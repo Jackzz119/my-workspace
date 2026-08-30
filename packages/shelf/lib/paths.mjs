@@ -20,22 +20,3 @@ function findLocalRoot(start) {
 }
 
 export const repoRoot = findLocalRoot(here);
-
-export const commonPackName = "_common";
-
-// 下面这些都以「当次解析出的 shelfDir」为基准，不再假设本地布局
-export function packsRootOf(shelfDir) {
-  return path.join(shelfDir, "skills");
-}
-
-export function commonPackDirOf(shelfDir) {
-  return path.join(shelfDir, "skills", commonPackName);
-}
-
-export function relPackPath(packName, skillName) {
-  return `shelf/skills/${packName}/${skillName}`;
-}
-
-export function targetSkillsDir(cwd = process.cwd()) {
-  return path.join(cwd, ".claude", "skills");
-}

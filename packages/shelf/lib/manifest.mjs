@@ -45,14 +45,6 @@ export function saveManifest(manifest, cwd = process.cwd()) {
   }
 }
 
-export function setSkillEntry(manifest, name, entry) {
-  manifest.skills[name] = entry;
-}
-
-export function removeSkillEntry(manifest, name) {
-  delete manifest.skills[name];
-}
-
 // shelf 段以 shelf 相对路径（真实名）为键，见 SHELF 决策 #6
 export function setShelfEntry(manifest, shelfPath, entry) {
   manifest.shelf ??= {};

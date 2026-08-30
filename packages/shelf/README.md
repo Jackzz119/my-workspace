@@ -7,7 +7,7 @@ npm i -g @jackzz119/shelf
 shelf init        # 在当前项目落下 manifest + 操作手册
 ```
 
-首次运行时，shelf 会自动把内容仓库 clone 到 `~/.shelf/home` 当作本地档口，之后所有命令都在本地跑（每小时自动拉一次更新）。**你不需要手动 clone 任何东西。**
+首次运行时，shelf 会自动把内容仓库 clone 到 `~/.shelf/home` 当作本地档口，之后所有命令都在本地跑（每次操作前自动拉最新）。**你不需要手动 clone 任何东西。**
 
 ## 命令
 
@@ -17,9 +17,9 @@ shelf init        # 在当前项目落下 manifest + 操作手册
 | `shelf pull <路径...> [--dest <目录>]` | 按路径拉取到当前目录 |
 | `shelf create <本地路径> [--to <货架目录>]` | 上架新内容：全架查重名，交互选位（`m <名>` 建目录 · `d` 放这里） |
 | `shelf push <本地路径>` | 更新已有内容：按记账/名字自动定位，不用填地址 |
+| `shelf sync [--dry-run]` | 按账本对账：库上新版自动更新本地；本地有改动则显示 diff 由你定方向 |
 | `shelf init` | 初始化工作区（`.shelf.json` + `shelf-ops` 操作手册） |
 | `shelf home [--update]` | 查看货架在哪、什么模式；`--update` 立即拉取最新 |
-| `shelf skills list` / `sync` | 技能包清单 / 整包同步到 `./.claude/skills/` |
 
 `atk` 是 `shelf` 的别名。
 

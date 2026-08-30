@@ -1,6 +1,6 @@
 {
   "name": "@jackzz119/shelf",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Personal content shelf CLI: browse, pull and push skills, templates, docs and snippets across every machine you work on.",
   "type": "module",
   "bin": {

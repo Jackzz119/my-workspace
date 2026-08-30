@@ -1,8 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { repoRoot } from "./paths.mjs";
 
 function walkFiles(dir, base = dir) {
   const out = [];
@@ -32,32 +30,4 @@ export function contentHash(target) {
     hash.update("\0");
   }
   return `sha256:${hash.digest("hex")}`;
-}
-
-export function lastCommitForPath(relPathInRepo, root = repoRoot) {
-  if (!root) return null;
-  try {
-    const out = execFileSync(
-      "git",
-      ["log", "-1", "--format=%H", "--", relPathInRepo],
-      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    ).trim();
-    return out || null;
-  } catch {
-    return null;
-  }
-}
-
-export function remoteOriginUrl(root = repoRoot) {
-  if (!root) return null;
-  try {
-    const out = execFileSync(
-      "git",
-      ["config", "--get", "remote.origin.url"],
-      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    ).trim();
-    return out || null;
-  } catch {
-    return null;
-  }
 }

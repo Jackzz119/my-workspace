@@ -1,11 +1,10 @@
 #!/usr/bin/env node
-import { cmdList } from "../lib/commands/list.mjs";
-import { cmdPull } from "../lib/commands/pull.mjs";
 import {
   cmdShelfBrowse,
   cmdShelfPull,
   cmdShelfPush,
   cmdShelfCreate,
+  cmdShelfSync,
   cmdShelfInit,
   cmdShelfHome,
 } from "../lib/commands/shelf.mjs";
@@ -21,66 +20,58 @@ Usage:
                          d 放下）[--to <货架目录>] [--yes]
   shelf push <本地路径>   更新已有货：按记账/名字自动定位
                          [--yes] [--force] [--force-secret]
+  shelf sync [--dry-run] 按账本对账：库上新版自动更新本地；本地有改动
+                         则显示 diff 由你决定推上库还是覆盖本地
   shelf init             初始化工作区（.shelf.json + shelf-ops 手册）
   shelf home [--update]  查看货架在哪、什么模式；--update 拉取最新
 
-  shelf skills list      技能包清单（原 atk list）
-  shelf skills sync      整包同步 common 技能到 ./.claude/skills/（原 atk pull）
-
-货架定位：SHELF_HOME 环境变量 > 本 clone > ~/.shelfrc {"home"|"remote"}
-免 clone 直跑：npx -y -p github:Jackzz119/my-workspace shelf <命令>
-（读操作用包内快照；push/create 自动走临时 clone）`);
+货架定位：SHELF_HOME 环境变量 > 本 clone > ~/.shelfrc > 托管档口 ~/.shelf/home
+免 clone 直跑：npx -y -p github:Jackzz119/my-workspace shelf <命令>`);
 }
 
 const argv = process.argv.slice(2);
 const sub = argv[0];
+const rest = argv.slice(1);
 
-async function dispatch(sub, rest) {
+try {
   switch (sub) {
     case undefined:
     case "browse":
-      return cmdShelfBrowse();
-    case "pull":
-      if (rest.length === 0) {
-        console.log("（无参数 pull = 老的整包技能同步，等价于 shelf skills sync；按路径拉取用 shelf pull <路径>）");
-        return cmdPull();
-      }
-      return cmdShelfPull(rest);
-    case "create":
-      return cmdShelfCreate(rest);
-    case "push":
-      return cmdShelfPush(rest);
-    case "init":
-      return cmdShelfInit(rest);
-    case "home":
-      return cmdShelfHome(rest);
-    case "skills": {
-      const action = rest[0];
-      if (action === "list") return cmdList();
-      if (action === "sync") return cmdPull();
-      console.error(`用法: shelf skills list | shelf skills sync`);
-      process.exit(1);
+      await cmdShelfBrowse();
       break;
-    }
-    case "list":
-      console.log("（shelf list = shelf skills list；浏览货架直接运行 shelf）");
-      return cmdList();
-    case "shelf":
-      // 旧语法 atk shelf <cmd> 兼容：剥掉一层再派发
-      return dispatch(rest[0], rest.slice(1));
+    case "pull":
+      await cmdShelfPull(rest);
+      break;
+    case "create":
+      await cmdShelfCreate(rest);
+      break;
+    case "push":
+      await cmdShelfPush(rest);
+      break;
+    case "sync":
+      await cmdShelfSync(rest);
+      break;
+    case "init":
+      await cmdShelfInit(rest);
+      break;
+    case "home":
+      await cmdShelfHome(rest);
+      break;
     case "-h":
     case "--help":
     case "help":
-      return usage();
+      usage();
+      break;
+    case "skills":
+    case "list":
+      console.error(`'shelf ${sub}' 已随老版技能命令清退：浏览用 shelf，按路径拉取用 shelf pull <路径> --dest .claude/skills，保持最新用 shelf sync`);
+      process.exit(1);
+      break;
     default:
       console.error(`Unknown command: ${sub}\n`);
       usage();
       process.exit(1);
   }
-}
-
-try {
-  await dispatch(sub, argv.slice(1));
 } catch (err) {
   console.error(err.message || err);
   process.exit(1);

@@ -24,6 +24,8 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 - [x] **ST-H**：push 定位链重构（移除 `--to`、搬家找回 + 记账迁移、无记录同名匹配）（2026-08-17）
 - [x] **ST-I**：CLI 拆成可发布的独立包（@scope/shelf，18.5kB，含 README/LICENSE）（2026-08-18）
 - [x] **ST-J**：托管档口 `~/.shelf/home` 自动开档口 + 身份兜底/提交回滚/CRLF/临时目录清理（2026-08-18）
+- [x] **ST-K**：`shelf sync` 六情形对账（库新自动更新/本地改动看 diff 定方向/搬家迁账/下架孤儿处理）（2026-08-18）
+- [x] **ST-L**：老版技能命令清退（skills list/sync 等，删 4 个遗留模块）（2026-08-18）
 - [ ] **ST-E**：macOS 侧冒烟 + README shelf 章节
 
 ## 发版策略（npm publish）
@@ -50,7 +52,7 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 - [ ] Phase 3 — 规模化（S3 / CDN / 团队账户 / 计费）
 - [ ] Phase 4 — 生态延展（IDE 插件 / Codex 适配 / 第三方 API）
 
-## Milestone 1 — Skill 双向同步 CLI（最高优先级）
+## Milestone 1 — Skill 双向同步 CLI ✅（由 Shelf 收官，2026-08-18）
 
 目标：在任何目标项目里，一条命令就能拉取/推送 skill，与 agent-toolkit 仓库双向同步。
 
@@ -63,15 +65,15 @@ Subtask 进度（详见 Feature 文档）：
 - [x] **ST-1**：搭骨架 `package.json` + `bin/atk.mjs`，实现 `atk list`
 - [x] **ST-2**：实现 `atk pull`（common 包主路径，交互菜单 u/s/q）
 - [x] **ST-3**：`.agent-toolkit.json` + per-skill 版本 + 4 情景智能菜单（contentHash 驱动）+ 文件夹分包（`skills/_common/`、`skills/<pack>/`）
-- [ ] **ST-4**：非交互 flag——`--dest` / `--mode` / `--pack`
-- [ ] **ST-5**：`shelf skills update` + `shelf skills diff` 独立命令，含孤儿 entry 清理
-- [ ] **ST-6**：README + 跨平台冒烟 + 本仓库 dogfood
+- [x] **ST-4**：非交互 flag → `--dest` 已实现；`--mode`/`--pack` 随 pack 概念废弃（shelf pull 任意路径取代）
+- [x] **ST-5**：update/diff → 被 `shelf sync` 全面覆盖（含孤儿 entry 清理）
+- [x] **ST-6**：README 已随发布形态完成（packages/shelf/README.md）；本仓库 dogfood 日常进行中；跨平台冒烟并入 ST-E
 
 后续（非本期）：
 
 - [x] `atk pull <name>` 单个拉 → 已由 `shelf pull <路径>` 覆盖
 - [x] `atk pull --pack <xxx>` 其他包 → 已由 `shelf pull <任意路径>` 覆盖
-- [ ] `atk pull --from other` 拉 `other-skills/`
+- [x] `atk pull --from other` → 废弃（other-skills 目录已不存在，任意路径由 shelf pull 覆盖）
 - [ ] Push 命令（推回主仓库）→ 已立项，设计见 [`SHELF.md`](features/SHELF.md)（注：分发方式随 monorepo 修订，`npx github:` 废弃，见 SHELF.md 决策 #7）
 
 ## Phase 2 — 仓库整理

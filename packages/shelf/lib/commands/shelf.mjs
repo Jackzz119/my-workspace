@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { spawnSync } from "node:child_process";
 import {
   resolveShelfContext,
   headCommit,
@@ -363,16 +364,23 @@ function takeFlag(args, name, hasValue = false) {
   return { args: args.filter((_, j) => j !== i && (!hasValue || j !== i + 1)), value };
 }
 
+function guardScan(localAbs) {
+  const files = listFilesRecursive(localAbs);
+  return {
+    secrets: files.filter((f) => SECRET_PATTERNS.some((re) => re.test(path.basename(f.rel)))),
+    bigs: files.filter((f) => f.size > BIG_FILE_BYTES),
+  };
+}
+
 // 凭据/大文件安全阀；违规直接退出
 function guardFiles(localAbs, forceSecret) {
-  const files = listFilesRecursive(localAbs);
-  const secrets = files.filter((f) => SECRET_PATTERNS.some((re) => re.test(path.basename(f.rel))));
+  const { secrets, bigs } = guardScan(localAbs);
   if (secrets.length > 0 && !forceSecret) {
     console.error(`✗ 疑似凭据文件，已拒绝（--force-secret 可放行）:`);
     for (const s of secrets) console.error(`    ${s.rel}`);
     process.exit(1);
   }
-  for (const b of files.filter((f) => f.size > BIG_FILE_BYTES)) {
+  for (const b of bigs) {
     console.warn(`! 大文件 ${b.rel} (${fmtSize(b.size)})，GitHub 单文件上限 100MB`);
   }
 }
@@ -779,5 +787,167 @@ export async function cmdShelfHome(argv) {
     console.log(`根分类:   ${entries.join(" · ") || "(空)"}`);
   } finally {
     ctx.cleanup();
+  }
+}
+
+// ---- 子命令：sync（按账本与货架对账，SHELF 决策 #19）----
+
+// 逐行内容 diff 直通终端（git 自带着色），方向：库上 → 本地
+function showLineDiff(shelfAbs, localAbs, shown) {
+  console.log(`—— ${shown}  diff（库上 → 本地）——`);
+  spawnSync("git", ["diff", "--no-index", "--color=always", "--", shelfAbs, localAbs], { stdio: "inherit" });
+}
+
+export async function cmdShelfSync(argv) {
+  let rest = argv;
+  let dryRun;
+  ({ args: rest, value: dryRun } = takeFlag(rest, "--dry-run"));
+
+  const ctx = resolveShelfContext({ forWrite: true }); // 对账必须对着真最新：等同写操作，强制刷新
+  let keepEphemeral = false;
+  try {
+    const manifest = loadManifest();
+    const entries = Object.entries(manifest.shelf ?? {});
+    if (entries.length === 0) {
+      console.log("账本为空（.shelf.json 没有 shelf 段记录）——先 shelf pull / create。");
+      return;
+    }
+
+    const c = { same: 0, updated: 0, pushed: 0, skipped: 0, cleaned: 0 };
+    const pending = [];
+
+    for (const [key, rec] of entries) {
+      let effKey = key;
+      let target = path.join(ctx.shelfDir, ...effKey.split("/"));
+      let shown = displayPath(effKey);
+      const localAbs = path.resolve(process.cwd(), rec.localPath ?? "");
+      const localExists = !!rec.localPath && fs.existsSync(localAbs);
+
+      // 情形 5：库上路径没了 → 按名字找回（搬家）或报告下架
+      if (!fs.existsSync(target)) {
+        const name = path.basename(effKey);
+        const hits = findByBasename(ctx.shelfDir, name);
+        if (hits.length === 1) {
+          if (dryRun) {
+            console.log(`↪ ${shown} 已被移动到 ${displayPath(hits[0])}（--dry-run，暂不改账）`);
+          } else {
+            delete manifest.shelf[effKey];
+            manifest.shelf[hits[0]] = rec;
+            console.log(`↪ ${shown} 已被移动到 ${displayPath(hits[0])}，记账已更新`);
+          }
+          effKey = hits[0];
+          target = path.join(ctx.shelfDir, ...effKey.split("/"));
+          shown = displayPath(effKey);
+        } else {
+          const label = hits.length === 0 ? "已从货架移除" : `同名多义（${hits.length} 处）`;
+          if (!INTERACTIVE || dryRun) {
+            console.log(`⚠ 待决 ${shown}：${label}`);
+            pending.push(`${shown}（${label}）`);
+            continue;
+          }
+          const act = await choose(`⚠ ${shown} ${label}。[r]清记账 / [s]跳过? `, [{ key: "r" }, { key: "s" }]);
+          if (act === "r") {
+            delete manifest.shelf[effKey];
+            console.log(`✓ 已清记账 ${shown}（本地文件未动；想重新上架用 shelf create）`);
+            c.cleaned++;
+          } else c.skipped++;
+          continue;
+        }
+      }
+
+      // 情形 6：本地文件没了 → 孤儿记账
+      if (!localExists) {
+        if (!INTERACTIVE || dryRun) {
+          console.log(`⚠ 待决 ${shown}：本地文件不存在（${rec.localPath ?? "无 localPath"}）`);
+          pending.push(`${shown}（本地文件不存在）`);
+          continue;
+        }
+        const act = await choose(
+          `⚠ ${shown} 的本地文件不存在（${rec.localPath ?? "无 localPath"}）。[p]重新拉取 / [r]清记账 / [s]跳过? `,
+          [{ key: "p" }, { key: "r" }, { key: "s" }],
+        );
+        if (act === "p") {
+          fs.mkdirSync(path.dirname(localAbs), { recursive: true });
+          copyFiltered(target, localAbs);
+          manifest.shelf[effKey] = { ...rec, contentHash: contentHash(target), sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
+          console.log(`↓ 已重新拉取 ${shown}`);
+          c.updated++;
+        } else if (act === "r") {
+          delete manifest.shelf[effKey];
+          console.log(`✓ 已清记账 ${shown}`);
+          c.cleaned++;
+        } else c.skipped++;
+        continue;
+      }
+
+      const S = contentHash(target);
+      const L = contentHash(localAbs);
+      const R = rec.contentHash;
+
+      if (S === R && L === R) { c.same++; continue; }
+
+      // 情形 2：库上有新版、本地没动 → 自动覆盖本地（零损失）
+      if (S !== R && L === R) {
+        if (dryRun) {
+          console.log(`↓ 将更新本地：${shown}`);
+          c.updated++;
+          continue;
+        }
+        fs.rmSync(localAbs, { recursive: true, force: true });
+        copyFiltered(target, localAbs);
+        manifest.shelf[effKey] = { ...rec, contentHash: S, sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
+        console.log(`↓ 已更新本地：${shown}`);
+        c.updated++;
+        continue;
+      }
+
+      // 情形 3/4：本地有改动（本地领先，或双方都改）
+      const both = S !== R;
+      const tag = both ? "双方都改过" : "本地领先";
+      if (!INTERACTIVE || dryRun) {
+        const d = diffSummary(target, localAbs);
+        console.log(`⚠ 待决 ${shown}（${tag}）：本地相对库上 新增 ${d.added.length} / 删除 ${d.removed.length} / 修改 ${d.changed.length}`);
+        pending.push(`${shown}（${tag}）`);
+        continue;
+      }
+
+      showLineDiff(target, localAbs, shown);
+      const act = await choose(`${shown}（${tag}）。[p]本地推上库 / [o]库覆盖本地 / [s]跳过? `, [{ key: "p" }, { key: "o" }, { key: "s" }]);
+      if (act === "s") { c.skipped++; continue; }
+      if (act === "o") {
+        fs.rmSync(localAbs, { recursive: true, force: true });
+        copyFiltered(target, localAbs);
+        manifest.shelf[effKey] = { ...rec, contentHash: S, sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
+        console.log(`↓ 已用库上版本覆盖本地：${shown}`);
+        c.updated++;
+        continue;
+      }
+      // p：本地推上库
+      if (both) {
+        const confirm = await choose(`库上的改动将被你的本地版本覆盖，确认? [y]es / [n]o? `, [{ key: "y" }, { key: "n" }]);
+        if (confirm === "n") { c.skipped++; continue; }
+      }
+      const { secrets } = guardScan(localAbs);
+      if (secrets.length > 0) {
+        console.log(`✗ ${shown} 含疑似凭据文件（${secrets.map((x) => x.rel).join(", ")}），sync 不代推，已跳过——确要推请单独 shelf push --force-secret`);
+        c.skipped++;
+        continue;
+      }
+      keepEphemeral = applyAndCommit(ctx, effKey, localAbs, manifest, "update") || keepEphemeral;
+      c.pushed++;
+    }
+
+    if (!dryRun) saveManifest(manifest);
+    console.log("");
+    console.log(
+      `Sync${dryRun ? "（dry-run）" : ""}: ${c.same} 一致, ${c.updated} 更新本地, ${c.pushed} 推上库, ` +
+      `${c.cleaned} 清账, ${c.skipped} 跳过, ${pending.length} 待决`,
+    );
+    if (pending.length) {
+      for (const x of pending) console.log(`  · ${x}`);
+      if (!INTERACTIVE && !dryRun) process.exit(2);
+    }
+  } finally {
+    if (!keepEphemeral) ctx.cleanup();
   }
 }
