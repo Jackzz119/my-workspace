@@ -1,5 +1,7 @@
 # Codex 工作协议
 
+> 本协议同样适用于其他读取 AGENTS.md 标准的工具（如 Kimi CLI）。技能目录对照：Codex 读 `~/.codex/skills/` 与项目 `.codex/skills/`；Kimi 读项目 `.kimi/skills/`（也能发现 `.claude`/`.codex`/`.agents` 技能目录）。
+
 ## 本文档修改规则（元规则）
 
 AGENTS.md 与 CLAUDE.md 是**跨项目通用协议**，只收跨项目规则：

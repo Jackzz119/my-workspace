@@ -19,7 +19,8 @@ shelf pull <shelf路径> --dest <目录>    # 拉到指定目录
 shelf create <本地路径> --to <货架目录>  # 上架新货；--to 目录不存在会自动新建
 shelf push <本地路径> [--yes]           # 更新已有货：自动定位，不填地址
 shelf push <本地路径> --force           # 覆盖"异机已修改"的冲突（仅限用户明确指示）
-shelf init                              # 项目接入（幂等）：CLAUDE/AGENTS、ai/JASKILL、双技能目录、gitignore
+shelf init [--agents claude,codex,kimi]  # 项目接入（幂等）；非交互必须带 --agents（或 all）
+shelf agents [add <名>]                  # 查看 / 追加 agent 目标（后补目录+文档+镜像+gitignore）
 shelf sync [--dry-run]                  # 按账本对账：库新→自动更新本地；本地改→待人决定方向
 shelf home [--update]                   # 货架在哪、什么模式；--update 立即拉最新
 ```
@@ -27,7 +28,7 @@ shelf home [--update]                   # 货架在哪、什么模式；--update
 老版 `shelf skills list/sync` 已清退：列清单用浏览器或 `ls`，装技能用 `shelf pull <路径> --dest .claude/skills`，保持最新用 `shelf sync`。
 
 - 路径里 `_` 前缀可省略：`skills/common/intj` 和 `skills/_common/intj` 等价，落盘用真实名。
-- 你（AI）在非交互环境运行：create **必须带 `--to`**；push/create 的最终确认**必须带 `--yes`**（先跑一遍不带 `--yes` 拿到变更清单转述给用户，用户同意后再加 `--yes` 重跑）。
+- 你（AI）在非交互环境运行：create **必须带 `--to`**；push/create 的最终确认**必须带 `--yes`**（先跑一遍不带 `--yes` 拿到变更清单转述给用户，用户同意后再加 `--yes` 重跑）；**首次 init 必须带 `--agents`**（先问用户要接入哪几个：claude / codex / kimi）。已 init 过的项目重跑会沿用记录的目标。
 - 版本追踪在当前目录 `.shelf.json`（`shelf` 段，按 shelf 相对路径为键），不要手改；见到旧名 `.agent-toolkit.json` / `.atk.json` 属正常，任一次 pull/push 会自动迁移。
 - **货架从哪来**：`SHELF_HOME` 环境变量 → CLI 自身所在 clone → `~/.shelfrc` 的 `home` → 托管档口 `~/.shelf/home`（全局安装场景下首次运行自动创建）。**每次操作前自动拉最新**（写操作强制拉，push 撞上别的设备刚推过会自动变基重推），所以正常情况下你永远在用最新货架；离线时用本地副本并警告。`shelf home` 一眼看清当前模式，`shelf home --update` 手动强刷。
 - 临时机器不想留档口：`SHELF_EPHEMERAL=1` 走一次性 clone，用完即删。
@@ -76,7 +77,7 @@ CLI 一律拉到当前目录，分类落点由你执行：
 
 | 拉的是什么 | 放到哪 |
 |---|---|
-| `shelf/skills/**` 下的技能 | Claude Code 项目：`./.claude/skills/<技能名>/`；Codex：`~/.codex/skills/` 或项目 `.codex/skills/` |
+| `shelf/skills/**` 下的技能 | 正本进优先级最高目标的目录（claude>.codex>.kimi），其余目标目录为自动镜像；手动单拉时：Claude `./.claude/skills/`、Codex `./.codex/skills/`、Kimi `./.kimi/skills/` |
 | `shelf/agents/claude/CLAUDE.md` | 项目根 `CLAUDE.md`（已有则对比合并，别盲目覆盖） |
 | `shelf/agents/codex/AGENTS.md` | 项目根 `AGENTS.md` |
 | 其他文档/模板/文件 | 用户指定处，默认当前目录 |
@@ -103,5 +104,5 @@ CLI 一律拉到当前目录，分类落点由你执行：
 - "我改了这个技能，同步上去" → `shelf push .claude/skills/<名字>`（自动定位，不用查它在货架哪里；先不带 --yes 看清单）
 - "把这个项目的货架物品都对一遍/同步一下" → `shelf sync`（非交互会自动应用"库上新版"，其余待决转述给用户）
 - "把这份部署清单存到货架" → `shelf create deploy-checklist.md --to docs`（新东西用 create；被拒说明已有同名，改用 push 或改名）
-- "这个项目还没接货架" → `shelf init`：植入 CLAUDE.md、AGENTS.md、`multica/`（货架上有才装）、`ai/JASKILL.md`（基础技能名册）、`.claude/skills/` 正本 + `.agents/skills/` 镜像（common 包全体）、gitignore 四行（CLAUDE.md/AGENTS.md/.agents//.claude/），并全部入账。幂等：重跑=补缺失+体检，已有文件绝不盲覆盖
-- 镜像规则：**改技能只改 `.claude/skills/` 正本**（或直接改货架真源）；`.agents/skills/` 是被动镜像，sync 每轮自动从正本重刷，别手改
+- "这个项目还没接货架" → 问清要接哪些 agent，然后 `shelf init --agents claude,codex`：按目标植入协议文档（CLAUDE.md / AGENTS.md，后者 codex+kimi 共用）、`multica/`（货架上有才装）、`ai/JASKILL.md`、技能正本目录 + 镜像目录、gitignore 对应行，并全部入账。幂等：重跑=补缺失+体检，已有文件绝不盲覆盖；后补目标用 `shelf agents add kimi`
+- 镜像规则：**改技能只改正本目录**（`shelf agents` 可查哪个是正本；或直接改货架真源）；其余目标目录是被动镜像，sync 每轮自动从正本重刷，别手改

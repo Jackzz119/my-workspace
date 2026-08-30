@@ -763,7 +763,126 @@ function refreshMirror(primaryAbs, mirrorAbs) {
 
 // ---- 子命令：init ----
 
-export async function cmdShelfInit() {
+// ---- agent 目标（SHELF 决策 #24）----
+
+const AGENT_TARGETS = {
+  claude: { skillsDir: ".claude/skills", doc: { input: "agents/claude/CLAUDE.md", dest: "CLAUDE.md" }, ignore: [".claude/", "CLAUDE.md"] },
+  codex: { skillsDir: ".codex/skills", doc: { input: "agents/codex/AGENTS.md", dest: "AGENTS.md" }, ignore: [".codex/", "AGENTS.md"] },
+  kimi: { skillsDir: ".kimi/skills", doc: { input: "agents/codex/AGENTS.md", dest: "AGENTS.md" }, ignore: [".kimi/", "AGENTS.md"] },
+};
+const TARGET_PRIORITY = ["claude", "codex", "kimi"];
+
+// "claude,codex" / "all" → 校验并按优先级排序去重
+function parseTargetNames(spec) {
+  const names = spec === "all"
+    ? [...TARGET_PRIORITY]
+    : String(spec).split(",").map((x) => x.trim()).filter(Boolean);
+  const bad = names.filter((n) => !AGENT_TARGETS[n]);
+  if (bad.length) {
+    console.error("✗ 未知 agent 目标: " + bad.join(", ") + "（可选: " + TARGET_PRIORITY.join(" / ") + " / all）");
+    process.exit(1);
+  }
+  return TARGET_PRIORITY.filter((n) => names.includes(n));
+}
+
+async function askTargets() {
+  const rl = makeLineReader();
+  try {
+    console.log("要接入哪些 agent？（决定植入哪些技能目录与协议文档）");
+    TARGET_PRIORITY.forEach((n, i) => {
+      const t = AGENT_TARGETS[n];
+      console.log("  " + (i + 1) + ". " + n + "  （" + t.skillsDir + "/ · " + t.doc.dest + "）");
+    });
+    while (true) {
+      const raw = await rl.question("选择编号，逗号分隔（如 1,2）；a=全部 > ");
+      if (raw === null) return null;
+      const ans = raw.trim().toLowerCase();
+      if (ans === "a") return [...TARGET_PRIORITY];
+      const idx = parseIndices(ans, TARGET_PRIORITY.length);
+      if (idx && idx.length) return idx.map((i) => TARGET_PRIORITY[i]);
+      console.log("  没看懂。例如: 1,2 或 a");
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+// 植入引擎（init 与 agents add 共用）：协议文档去重植入 + multica/JASKILL + common 技能
+// 正本 = 所选目标中优先级最高者，其余目标目录挂 mirrors；gitignore 行随目标生成
+async function plantForTargets(ctx, manifest, targets) {
+  const primaryDir = AGENT_TARGETS[targets[0]].skillsDir;
+  const mirrorDirs = targets.slice(1).map((n) => AGENT_TARGETS[n].skillsDir);
+
+  const plan = [];
+  const seenDoc = new Set();
+  for (const n of targets) {
+    const doc = AGENT_TARGETS[n].doc;
+    if (seenDoc.has(doc.dest)) continue; // codex/kimi 共用 AGENTS.md，只植一份
+    seenDoc.add(doc.dest);
+    plan.push({ input: doc.input, dest: doc.dest });
+  }
+  plan.push({ input: "multica", dest: "multica", optional: true });
+  plan.push({ input: "docs/JASKILL.md", dest: "ai/JASKILL.md" });
+
+  const common = resolveShelfPath(ctx.shelfDir, "skills/common");
+  if (common) {
+    for (const e of fs.readdirSync(common.abs, { withFileTypes: true })) {
+      if (!e.isDirectory() || IGNORE_NAMES.has(e.name)) continue;
+      plan.push({
+        input: common.realRel + "/" + e.name,
+        dest: primaryDir + "/" + e.name,
+        mirrors: mirrorDirs.map((d) => d + "/" + e.name),
+      });
+    }
+  }
+
+  const counters = newCounters();
+  let mirrored = 0;
+  for (const item of plan) {
+    const hit = resolveShelfPath(ctx.shelfDir, item.input);
+    if (!hit) {
+      console.log(item.optional
+        ? "- 货架上暂无 " + item.input + "，跳过"
+        : "✗ 货架上找不到 " + item.input + "（检查货架是否最新）");
+      continue;
+    }
+    const destAbs = path.resolve(process.cwd(), item.dest);
+    await pullEntry(ctx, hit.realRel, manifest, counters, safeAsk, destAbs);
+    if (item.mirrors) {
+      const entry = manifest.shelf[hit.realRel];
+      if (entry) entry.mirrors = item.mirrors.map(toPosix);
+      for (const m of item.mirrors) {
+        if (refreshMirror(destAbs, path.resolve(process.cwd(), m))) mirrored++;
+      }
+    }
+  }
+
+  const ignoreLines = [...new Set(targets.flatMap((n) => AGENT_TARGETS[n].ignore))];
+  const added = ensureGitignore(process.cwd(), ignoreLines);
+  return { counters, mirrored, added };
+}
+
+function printPlantResult(targets, r) {
+  printSummary(r.counters);
+  if (r.mirrored) console.log("≡ 镜像刷新 " + r.mirrored + " 项");
+  if (r.added.length) console.log("✓ .gitignore 补行: " + r.added.join(", "));
+  console.log("");
+  console.log("工作区已接入货架（agent 目标: " + targets.join(" + ") + "）:");
+  const docs = [...new Set(targets.map((n) => AGENT_TARGETS[n].doc.dest))].join(" / ");
+  console.log("  " + docs + "  工作协议（真源在货架，shelf sync 保持最新）");
+  console.log("  ai/JASKILL.md  基础技能名册");
+  const mirrorText = targets.length > 1
+    ? "；镜像: " + targets.slice(1).map((n) => AGENT_TARGETS[n].skillsDir + "/").join(" ")
+    : "";
+  console.log("  " + AGENT_TARGETS[targets[0]].skillsDir + "/  common 技能正本" + mirrorText);
+  console.log("  .shelf.json  记账本（进项目 git，队友 clone 后 shelf init 即还原）");
+}
+
+export async function cmdShelfInit(argv = []) {
+  let rest = argv;
+  let agentsFlag;
+  ({ args: rest, value: agentsFlag } = takeFlag(rest, "--agents", true));
+
   const ctx = resolveShelfContext();
   try {
     if (path.resolve(process.cwd()) === path.resolve(ctx.root)) {
@@ -773,57 +892,68 @@ export async function cmdShelfInit() {
     const manifest = loadManifest();
     manifest.source ??= remoteUrl(ctx.root) || toPosix(ctx.root);
 
-    // 植入清单：input=货架路径，dest=项目内落点，mirror=被动镜像，optional=货架上没有就跳过
-    const plan = [
-      { input: "agents/claude/CLAUDE.md", dest: "CLAUDE.md" },
-      { input: "agents/codex/AGENTS.md", dest: "AGENTS.md" },
-      { input: "multica", dest: "multica", optional: true },
-      { input: "docs/JASKILL.md", dest: "ai/JASKILL.md" },
-    ];
-    const common = resolveShelfPath(ctx.shelfDir, "skills/common");
-    if (common) {
-      for (const e of fs.readdirSync(common.abs, { withFileTypes: true })) {
-        if (!e.isDirectory() || IGNORE_NAMES.has(e.name)) continue;
-        plan.push({
-          input: common.realRel + "/" + e.name,
-          dest: ".claude/skills/" + e.name,
-          mirror: ".agents/skills/" + e.name,
-        });
+    let targets;
+    if (agentsFlag !== undefined) {
+      targets = parseTargetNames(agentsFlag);
+    } else if (manifest.agents?.length) {
+      targets = TARGET_PRIORITY.filter((n) => manifest.agents.includes(n));
+      console.log("（沿用已配置的 agent 目标: " + targets.join(", ") + "；调整用 shelf agents add 或 --agents)");
+    } else if (INTERACTIVE) {
+      targets = await askTargets();
+      if (!targets || !targets.length) {
+        console.log("已取消。");
+        return;
       }
+    } else {
+      console.error("✗ 非交互环境首次 init 需指定 --agents claude,codex,kimi（或 all）。已中止。");
+      process.exit(2);
     }
 
-    const counters = newCounters();
-    let mirrored = 0;
-    for (const item of plan) {
-      const hit = resolveShelfPath(ctx.shelfDir, item.input);
-      if (!hit) {
-        console.log(item.optional
-          ? "- 货架上暂无 " + item.input + "，跳过"
-          : "✗ 货架上找不到 " + item.input + "（检查货架是否最新）");
-        continue;
-      }
-      const destAbs = path.resolve(process.cwd(), item.dest);
-      await pullEntry(ctx, hit.realRel, manifest, counters, safeAsk, destAbs);
-      if (item.mirror) {
-        const entry = manifest.shelf[hit.realRel];
-        if (entry) entry.mirrors = [toPosix(item.mirror)];
-        if (refreshMirror(destAbs, path.resolve(process.cwd(), item.mirror))) mirrored++;
-      }
-    }
-
-    const added = ensureGitignore(process.cwd(), ["CLAUDE.md", "AGENTS.md", ".agents/", ".claude/"]);
+    const result = await plantForTargets(ctx, manifest, targets);
+    manifest.agents = targets;
     saveManifest(manifest);
+    printPlantResult(targets, result);
+  } finally {
+    ctx.cleanup();
+  }
+}
 
-    printSummary(counters);
-    if (mirrored) console.log("≡ 镜像刷新 " + mirrored + " 项（.agents/skills/）");
-    if (added.length) console.log("✓ .gitignore 补行: " + added.join(", "));
-    console.log("");
-    console.log("工作区已接入货架:");
-    console.log("  CLAUDE.md / AGENTS.md      工作协议（真源在货架，shelf sync 保持最新）");
-    console.log("  ai/JASKILL.md              基础技能名册");
-    console.log("  .claude/skills/            common 包技能（正本）");
-    console.log("  .agents/skills/            同步镜像（永远跟随正本）");
-    console.log("  .shelf.json                记账本（进项目 git，队友 clone 后 shelf init 即还原）");
+// ---- 子命令：agents（查看/添加 agent 目标，SHELF 决策 #24）----
+
+export async function cmdShelfAgents(argv) {
+  const manifest = loadManifest();
+  const current = TARGET_PRIORITY.filter((n) => (manifest.agents ?? []).includes(n));
+  const sub = argv[0];
+
+  if (sub === undefined) {
+    console.log("已配置: " + (current.length ? current.join(", ") : "（无——先跑 shelf init）"));
+    for (const n of TARGET_PRIORITY) {
+      const t = AGENT_TARGETS[n];
+      console.log("  " + (current.includes(n) ? "●" : "○") + " " + n + "  " + t.skillsDir + "/ · " + t.doc.dest);
+    }
+    console.log("添加: shelf agents add <名>");
+    return;
+  }
+  if (sub !== "add" || argv.length < 2) {
+    console.error("用法: shelf agents             查看已配置/可用目标");
+    console.error("      shelf agents add <名>   添加目标（claude / codex / kimi / all）");
+    process.exit(1);
+  }
+
+  const adding = parseTargetNames(argv.slice(1).join(","));
+  const targets = TARGET_PRIORITY.filter((n) => current.includes(n) || adding.includes(n));
+  if (targets.join() === current.join()) {
+    console.log("= 目标已包含，无需变更（" + current.join(", ") + "）");
+    return;
+  }
+
+  const ctx = resolveShelfContext();
+  try {
+    const result = await plantForTargets(ctx, manifest, targets);
+    manifest.agents = targets;
+    saveManifest(manifest);
+    printPlantResult(targets, result);
+    console.log("✓ agent 目标: " + (current.join(", ") || "（无）") + " → " + targets.join(", "));
   } finally {
     ctx.cleanup();
   }

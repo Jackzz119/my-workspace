@@ -27,6 +27,7 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 - [x] **ST-K**：`shelf sync` 六情形对账（库新自动更新/本地改动看 diff 定方向/搬家迁账/下架孤儿处理）（2026-08-18）
 - [x] **ST-L**：老版技能命令清退（skills list/sync 等，删 4 个遗留模块）（2026-08-18）
 - [x] **ST-M**：`shelf init` 植入协议 + sync 镜像校对（2026-08-30，v1.1.0）
+- [x] **ST-N**：init 目标多选（claude/codex/kimi）+ `shelf agents add` + GitHub Actions 自动发版 release.yml（2026-08-30）
 - [ ] **ST-E**：macOS 侧冒烟 + README shelf 章节
 
 ## 发版策略（npm publish）
@@ -38,7 +39,8 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 - [x] 补全 package.json + 写 LICENSE + README.md（2026-08-18）
 - [x] `npm pack --dry-run` 验证打包内容（18.5 kB / 15 文件，无内容混入）（2026-08-18）
 - [x] 确认 npm 用户名并改包名：jackss119 → `@jackss119/shelf`（2026-08-18）
-- [ ] `npm login` 后正式 `npm publish`（需用户执行/授权）+ GitHub Release
+- [x] 正式 `npm publish`：1.0.0 已发（2026-08-30，用户 security key 亲手发布）
+- [ ] 一次性配置 npm Trusted Publisher（npmjs.com 包设置 → GitHub Actions → Jackzz119/my-workspace/release.yml），之后发版全自动
 
 ## Milestone 2 — Shelf Server 社区平台（规划中）
 

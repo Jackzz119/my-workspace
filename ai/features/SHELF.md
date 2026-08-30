@@ -42,10 +42,11 @@
 | 18 | 工具自建 clone 的健壮性 | ①**git 身份兜底**：全新机器没配 user.name/email 时，给工具自建的 clone（档口/临时）设 `shelf <shelf@主机名>`，不碰用户自己的 clone；②**提交失败回滚**：commit 出错时把货架工作区恢复原状（reset/checkout/clean），避免半改状态被下次 push 误判成"异机修改"；③**换行符**：档口 clone 时带 `-c core.autocrlf=false`，否则 CRLF 转换让工作区永远"脏"、卡住自动更新；④**临时目录不泄漏**：`process.exit` 会跳过 finally，临时 clone 注册退出钩子兜底清理（push 失败要保留现场时用 `keep()` 解除） |
 | 19 | `shelf sync` 六情形对账 | 开跑先强制刷新货架；对账本每件物品比三哈希（记账 R/库上 S/本地 L）：①全等→静默；②S≠R,L=R→**自动覆盖本地**（零损失）+更新记账；③S=R,L≠R（本地领先）→逐行 diff（`git diff --no-index --color`）后选 [p]推上库/[o]覆盖本地/[s]跳过；④双改→同③但 push 前二次确认；⑤库上路径失效→按名字找回并迁记账，找不到报"已移除"（可清账）；⑥本地文件丢失→孤儿处理（重拉/清账/跳过）。push 分支复用 applyAndCommit 全管线；sync 内不提供 --force-secret（拦下即跳过）。非交互：仅②自动执行，其余入待决清单并 exit 2；--dry-run 全程只读 |
 | 20 | 老版技能命令清退（2026-08-18 用户指示） | `shelf skills list/sync`、`shelf list`、裸 `shelf pull` 整包同步垫、`atk shelf` 嵌套垫全部移除（打旧命令会得到指路错误）；连带删除只服务它们的 lib/commands/list.mjs、pull.mjs、frontmatter.mjs、format.mjs 与 manifest 的 skills 段写接口。老 manifest 的 `skills` 段仍可被解析但无人再写——物品重新 `shelf pull` 一次即迁入 `shelf` 段接受 sync 管理 |
-
 | 21 | `shelf init` 植入协议（2026-08-30 需求） | init = 新项目完整接入：①根目录植入 `CLAUDE.md`（←货架 agents/claude/CLAUDE.md）、`AGENTS.md`（←agents/codex/AGENTS.md）、`multica/`（货架上存在才植入，暂无则提示跳过）；②`ai/JASKILL.md`（←货架 docs/JASKILL.md，common 包基础技能名册）；③`.claude/skills/` 与 `.agents/skills/` 各放 common 包全部技能（.claude 为正本，.agents 为镜像）；④确保 .gitignore 含 CLAUDE.md / AGENTS.md / .agents/ / .claude/ 四行（缺哪行补哪行，其余不动）；⑤全部经 pullEntry 入账 `.shelf.json` → **init 幂等 = 接入+体检**：重跑补缺失、报冲突，永不盲覆盖已有文件 |
 | 22 | 镜像规则 | 一件货一条账（key→localPath 不变），`.agents/skills/<名>` 作为账目的 `mirrors` 字段挂在 `.claude` 正本上：init 植入时写入，sync 每轮结束后校对全部镜像（哈希不符即从正本重刷）。**改技能只改正本或直接 push**，镜像永远被动跟随 |
 | 23 | init 防呆 | 在货架 home 本体（cwd==货架根）里跑 init 直接拒绝——防止把 gitignore 规则误写进 my-workspace 自己 |
+| 24 | agent 目标可选（2026-08-30 需求） | init 不再硬编码植入目录，改为**目标选择**：`claude`（.claude/skills + CLAUDE.md）/ `codex`（.codex/skills + AGENTS.md）/ `kimi`（.kimi/skills + AGENTS.md，查证：Kimi 走 AGENTS.md 标准且项目级也认 .claude/.codex/.agents 目录）。交互 init 出多选菜单；非交互必须 `--agents claude,codex`（或 all）；选择持久化在 `.shelf.json` 顶层 `agents` 字段，重跑 init 沿用不再问。技能正本 = 所选目标中优先级最高者（claude > codex > kimi），其余目标目录进该账目的 `mirrors`；AGENTS.md 在 codex/kimi 同选时只植一份。gitignore 行随所选目标生成（`.agents/` 从默认清单移除）。新命令 **`shelf agents`**（查看已配/可用）与 **`shelf agents add <名>`**（后补目标：植协议文档+技能目录+重算 mirrors+补 gitignore） |
+| 25 | CLI 自动发版（GitHub Actions + npm Trusted Publishing） | **概念纠偏：货架内容更新不需要发版**——npm 包只含 bin/lib 代码，技能/模板/文档走 git 由档口每次操作自动拉取。需要发版的只有 CLI 代码变更，交给 `.github/workflows/release.yml`：push 到 main 时对比 packages/shelf 版本与 npm 注册表，出现新版本号即自动 `npm publish`（OIDC 信任发布，零 token 零验证码）+ 打 `v<版本>` tag + GitHub Release。一次性配置在 npmjs.com 包设置里指定 Trusted Publisher（repo=Jackzz119/my-workspace, workflow=release.yml）。私有仓不支持 --provenance，发布本身不受影响 |
 
 ## 三、三层传输（解决「push 要不要整库 clone」）
 
@@ -78,6 +79,7 @@ monorepo 会随 apps 变大，但 shelf 操作的传输量必须只跟 shelf 内
 - [x] **ST-K**：`shelf sync`（决策 #19）——混合情景冒烟：自动更新/本地领先/双改/搬家迁账/下架/孤儿 + dry-run 只读 + 非交互 exit 2
 - [x] **ST-L**：老版技能命令清退（决策 #20）——bin 精简为 7 命令，删 4 个遗留模块，引用审计清零
 - [x] **ST-M**：init 植入协议（决策 #21/#22/#23）——七场景冒烟全过：全新接入(9 项+镜像 6+gitignore 4 行)、幂等重跑、自有文件保护(auto-skip)、防呆拒绝、镜像损坏自愈、multica 上架即植入(10 项)（2026-08-30，v1.1.0）
+- [x] **ST-N**：agent 目标化（决策 #24）+ 自动发版（决策 #25）——五场景冒烟全过：--agents 定向接入(claude+codex：正本+镜像+4 gitignore 行)、重跑沿用记录、agents add kimi(镜像重算+补 .kimi/)、非交互无 flag exit 2、仅 kimi(正本落 .kimi)；release.yml 就位（2026-08-30）
 - [ ] **ST-E**：macOS 侧冒烟（Windows 已过：pull/push/冲突/守卫/init/sync 全链路）+ README 补 shelf 章节
 
 ## 六、与既有里程碑的关系

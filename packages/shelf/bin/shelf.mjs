@@ -6,6 +6,7 @@ import {
   cmdShelfCreate,
   cmdShelfSync,
   cmdShelfInit,
+  cmdShelfAgents,
   cmdShelfHome,
 } from "../lib/commands/shelf.mjs";
 
@@ -22,8 +23,9 @@ Usage:
                          [--yes] [--force] [--force-secret]
   shelf sync [--dry-run] 按账本对账：库上新版自动更新本地；本地有改动
                          则显示 diff 由你决定推上库还是覆盖本地
-  shelf init             项目接入（幂等）：CLAUDE/AGENTS 协议、ai/JASKILL 名册、
-                         .claude+.agents 双技能目录、gitignore、记账本
+  shelf init             项目接入（幂等）：交互多选 agent 目标，或
+                         --agents claude,codex,kimi / all
+  shelf agents [add <名>] 查看 / 追加 agent 目标（claude / codex / kimi）
   shelf home [--update]  查看货架在哪、什么模式；--update 拉取最新
 
 货架定位：SHELF_HOME 环境变量 > 本 clone > ~/.shelfrc > 托管档口 ~/.shelf/home
@@ -54,6 +56,9 @@ try {
       break;
     case "init":
       await cmdShelfInit(rest);
+      break;
+    case "agents":
+      await cmdShelfAgents(rest);
       break;
     case "home":
       await cmdShelfHome(rest);

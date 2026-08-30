@@ -1,0 +1,64 @@
+name: release
+
+# CLI 自动发版（SHELF 决策 #25）：
+# packages/shelf 的版本号变了才发布；货架内容（shelf/）更新不触发也不需要发版。
+# npm 侧一次性配置 Trusted Publisher（GitHub Actions / 本仓库 / 本工作流）后，
+# 发布走 OIDC，零 token、零验证码。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/shelf/**"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      # 信任发布需要较新的 npm（OIDC 支持）
+      - run: npm install -g npm@latest
+
+      - name: detect new version
+        id: v
+        run: |
+          LOCAL=$(node -p "require('./packages/shelf/package.json').version")
+          PUBLISHED=$(npm view @jackss119/shelf version 2>/dev/null || echo "0.0.0")
+          echo "local=$LOCAL" >> "$GITHUB_OUTPUT"
+          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+          if [ "$LOCAL" = "$PUBLISHED" ]; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "版本未变（$LOCAL），跳过发布"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+            echo "发现新版本: $PUBLISHED -> $LOCAL"
+          fi
+
+      - name: publish to npm (trusted publishing / OIDC)
+        if: steps.v.outputs.new == 'true'
+        working-directory: packages/shelf
+        run: npm publish
+
+      - name: tag and github release
+        if: steps.v.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.v.outputs.local }}"
+          git tag "$TAG" 2>/dev/null || true
+          git push origin "$TAG" 2>/dev/null || true
+          gh release create "$TAG" --title "shelf $TAG" \
+            --notes "shelf CLI ${{ steps.v.outputs.local }} — auto-published via trusted publishing" \
+            2>/dev/null || true
