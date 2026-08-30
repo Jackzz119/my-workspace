@@ -36,7 +36,7 @@ shelf home [--update]                   # 货架在哪、什么模式；--update
 ## 这台机器还没装 shelf？
 
 ```bash
-npm i -g @jackzz119/shelf     # 装完命令就是裸 shelf；首次运行自动开档口，无需手动 clone
+npm i -g @jackss119/shelf     # 装完命令就是裸 shelf；首次运行自动开档口，无需手动 clone
 ```
 
 免安装临时用：`npx -y -p github:Jackzz119/my-workspace shelf <命令>`（读走包内快照，写走临时 clone）。

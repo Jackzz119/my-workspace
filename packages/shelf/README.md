@@ -3,7 +3,7 @@
 个人内容货架 CLI：把技能、模板、文档、代码片段放在一个 git 仓库里，在任何设备上取用和回传。
 
 ```bash
-npm i -g @jackzz119/shelf
+npm i -g @jackss119/shelf
 shelf init        # 在当前项目落下 manifest + 操作手册
 ```
 

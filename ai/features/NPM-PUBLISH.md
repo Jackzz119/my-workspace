@@ -43,7 +43,7 @@
 | 方案 | 包名 | 命令 | 评价 |
 |---|---|---|---|
 | **A. 无 scope** | `agent-toolkit` | `npx agent-toolkit list` | 最短最美，但要求 `agent-toolkit` 在 npm 上空闲 |
-| **B. 个人 scope** | `@jackzz119/agent-toolkit` | `npx @jackzz119/agent-toolkit list` | 一定可用，但命令更长 |
+| **B. 个人 scope** | `@jackss119/shelf`（历史草案原写 @jackzz119/agent-toolkit，用户名与品牌均已修正） | `npx @jackss119/shelf` | 一定可用，但命令更长 |
 | **C. 组织 scope** | `@anthropic-ish/agent-toolkit` | 同 B | M2 上线后或注册组织后可走 |
 
 **前置检查**：

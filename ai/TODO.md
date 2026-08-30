@@ -36,7 +36,7 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 - [x] 查名字可用性：`shelf`/`atk` 均被占 → 走 scoped `@<npm用户名>/shelf`（命令名仍是裸 `shelf`）（2026-08-18）
 - [x] 补全 package.json + 写 LICENSE + README.md（2026-08-18）
 - [x] `npm pack --dry-run` 验证打包内容（18.5 kB / 15 文件，无内容混入）（2026-08-18）
-- [ ] 确认 npm 用户名并改包名（当前假设 `@jackzz119/shelf`）
+- [x] 确认 npm 用户名并改包名：jackss119 → `@jackss119/shelf`（2026-08-18）
 - [ ] `npm login` 后正式 `npm publish`（需用户执行/授权）+ GitHub Release
 
 ## Milestone 2 — Shelf Server 社区平台（规划中）
