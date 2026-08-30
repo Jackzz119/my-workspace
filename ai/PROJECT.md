@@ -40,6 +40,14 @@
 - **`.claude/skills/` 是指向真源的链接**（Windows junction / POSIX symlink，git 忽略），由 `node scripts/setup-links.mjs` 生成；通过链接改技能 = 直接改真源，不存在第二份拷贝
 - 新 clone 后跑一次 `node scripts/setup-links.mjs`；shelf 里增删 skill 后重跑即可（幂等）
 
+## Shelf 发版规则（2026-08-30 用户定规）
+
+- **加新功能 / 新增文件**（新命令、新植入物、新真源文档）→ 次版本 +1：`1.0.0 → 1.1.0`
+- **小改动、无新功能**（修 bug、文案、内部重构）→ 补丁位 +1：`1.0.0 → 1.0.1`
+- 破坏兼容（命令语义变更）→ 主版本 +1
+- 同一版本号永不重发（npm 铁律）；`packages/shelf` 与仓库根的 `package.json` 版本保持同步
+- 发布方式：`cd packages/shelf; npm publish`（账号 2FA 为 security key，浏览器验证，由用户执行）
+
 ## 功能文档
 
 详细设计沉淀在 `ai/features/`，PROJECT.md 仅作索引：
