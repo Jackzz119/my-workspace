@@ -941,9 +941,27 @@ export async function cmdShelfInit(argv = []) {
 
     const result = await plantForTargets(ctx, manifest, targets);
     manifest.agents = targets;
+
+    // 账本还原（2026-08-30 用户确认）：标准植入清单之外、账上有而本地缺失的货架物品一并补拉，
+    // 换设备后一条 init 全就位，无需再跑 sync
+    let restored = 0;
+    for (const [key, rec] of Object.entries(manifest.shelf ?? {})) {
+      if (!rec.localPath) continue;
+      const destAbs = path.resolve(process.cwd(), rec.localPath);
+      if (fs.existsSync(destAbs)) continue;
+      const hit = resolveShelfPath(ctx.shelfDir, key);
+      if (!hit) {
+        console.log("⚠ 账上物品 " + displayPath(key) + " 在货架上已不在原位——跑 shelf sync 处理搬家/下架");
+        continue;
+      }
+      await pullEntry(ctx, hit.realRel, manifest, result.counters, safeAsk, destAbs);
+      restored++;
+    }
+
     await reconcileLocalSkills(manifest);
     saveManifest(manifest);
     printPlantResult(targets, result);
+    if (restored) console.log("↺ 按账本补还原 " + restored + " 项（标准清单之外）");
   } finally {
     ctx.cleanup();
   }
