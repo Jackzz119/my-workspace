@@ -42,7 +42,7 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 - [x] `npm pack --dry-run` 验证打包内容（18.5 kB / 15 文件，无内容混入）（2026-08-18）
 - [x] 确认 npm 用户名并改包名：jackss119 → `@jackss119/shelf`（2026-08-18）
 - [x] 正式 `npm publish`：1.0.0 已发（2026-08-30，用户 security key 亲手发布）
-- [ ] 一次性配置 npm Trusted Publisher（npmjs.com 包设置 → GitHub Actions → Jackzz119/my-workspace/release.yml），之后发版全自动
+- [x] 一次性配置 npm Trusted Publisher ✅ 已验证全自动链路：2026-08-30 09:44 首次 run 即发布 1.1.0（npm + tag v1.1.0 + GitHub Release，16 秒），后续版本号不变的 push 正确跳过
 
 ## Milestone 2 — Shelf Server 社区平台（规划中）
 
