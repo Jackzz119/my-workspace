@@ -112,5 +112,5 @@ CLI 一律拉到当前目录，分类落点由你执行：
 - "我改了这个技能，同步上去" → `shelf push ai/jaSkills/<名字>`（自动定位；先不带 --yes 看清单）
 - "把这个项目的货架物品都对一遍/同步一下" → `shelf sync`（非交互会自动应用"库上新版"，其余待决转述给用户）
 - "把这份部署清单存到货架" → `shelf create deploy-checklist.md --to docs`（新东西用 create；被拒说明已有同名，改用 push 或改名）
-- "这个项目还没接货架" → 问清要接哪些 agent，然后 `shelf init --agents claude,codex`：按目标植入协议文档（CLAUDE.md / AGENTS.md，后者 codex+kimi 共用）、`multica/`（货架上有才装）、`ai/JASKILL.md`、技能正本目录 + 镜像目录、gitignore 对应行，并全部入账。幂等：重跑=补缺失+体检，已有文件绝不盲覆盖；后补目标用 `shelf agents add kimi`
+- "这个项目还没接货架" → 问清要接哪些 agent，然后 `shelf init --agents claude,codex`：按目标植入协议文档（CLAUDE.md / AGENTS.md，后者 codex+kimi 共用）、`multica/`（货架上有才装）、`ai/JASKILL.md`、技能正本目录 + 镜像目录、gitignore 对应行，并全部入账。幂等：重跑=补缺失+体检，已有文件绝不盲覆盖；**账上有而本地缺的货架物品（含标准清单之外的）也会一并补拉**——换设备后一条 init 全就位；后补目标用 `shelf agents add kimi`
 - 链接规则：项目技能唯一正本在 `ai/jaSkills/`，agent 目录（.claude/.codex/.kimi 的 skills）全是指向它的链接——**从哪个目录改都等价**；链接断了/变实体目录，sync 与 init 会自动修复迁移
