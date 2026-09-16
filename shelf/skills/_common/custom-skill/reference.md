@@ -34,7 +34,7 @@ allowed-tools: Read, Edit, Bash   # 可选，预批准工具列表
 !git status --short
 
 当前 skill 列表：
-!for f in .claude/skills/*/SKILL.md; do echo $(basename $(dirname $f)); done
+!for f in ai/jaSkill/*/SKILL.md; do echo $(basename $(dirname $f)); done
 ```
 
 注意：`!` 命令在 skill **加载时**执行，结果直接嵌入上下文。适合注入"当前状态"类信息。
@@ -90,8 +90,8 @@ allowed-tools: Read, Edit, Bash   # 可选，预批准工具列表
 
 | 类型 | 存放位置 | 示例 |
 |------|----------|------|
-| 通用 skill | `.claude/skills/` (项目内) 或 `~/.claude/skills/` (全局) | vc, custom-skill |
-| 项目特定 skill | `.claude/skills/` (项目内) | feature (含项目文档路径) |
+| 通用 skill | `ai/jaSkill/` (项目内) 或 `~/.claude/skills/` (全局) | vc, custom-skill |
+| 项目特定 skill | `ai/jaSkill/` (项目内) | feature (含项目文档路径) |
 
 通用 skill 未来可以发布到 GitHub skill 库供复用。
 

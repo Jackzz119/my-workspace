@@ -6,13 +6,22 @@ allowed-tools: Read, Glob, Bash
 
 # Skill 主管
 
-你是本项目的 **Skill 主管**，负责管理 `.claude/skills/` 下所有 skill 的生命周期。
+你是本项目的 **Skill 主管**，负责管理 `ai/jaSkill/` 下所有 skill 的生命周期。
+
+**真源只有一份**：`ai/jaSkill/<name>/`（入库）。`.claude/skills/` 与 `.agents/skills/` 都是指向它的 symlink，
+读得到、但**不要往那两处写**——写进去会变成挡住 symlink 的真目录。
+登记分两处：**通用技能**（不含项目特定内容、换个项目照样用）登记在本机 `CLAUDE.md` / `AGENTS.md`
+的「Skill 系统」节；**本项目专属技能**登记在 `ai/JASKILL.md`。
+
+🔴 **创建规范的唯一出处是这个 skill**（2026-09-10 收口）：目录结构、frontmatter 字段、动态特性、
+最佳实践、落地三步，全在本文件与 `${CLAUDE_SKILL_DIR}/reference.md`。协议文档只登记「有哪些技能、
+什么场景触发」，不再抄一份创建规范——两份规范并存时，改了一份忘另一份是迟早的事。
 
 ---
 
 ## 当前可用 Skills
 
-!for f in .claude/skills/*/SKILL.md; do name=$(basename $(dirname $f)); desc=$(grep "^description:" "$f" | head -1 | sed 's/^description: //'); echo "• [$name] $desc"; done
+!for f in ai/jaSkill/*/SKILL.md; do name=$(basename $(dirname $f)); desc=$(grep "^description:" "$f" | head -1 | sed 's/^description: //'); echo "• [$name] $desc"; done
 
 ---
 
@@ -52,13 +61,33 @@ allowed-tools: Read, Glob, Bash
 - 展示 SKILL.md 草稿给用户确认
 - 等用户批准后再写入文件
 
-**Step 5 — 写入文件**
+**Step 5 — 落地三步（少一步就等于没这个技能）**
+
+**① 写文件**——目录结构固定为：
 
 ```
-.claude/skills/<skill-name>/
-├── SKILL.md        # 必需：入口指令 + frontmatter
-└── reference.md    # 可选：详细规范（按需加载）
+ai/jaSkill/<skill-name>/
+├── SKILL.md        # 必需：入口指令 + frontmatter，控制在 500 行以内
+├── reference.md    # 可选：详细规范，需要时才加载
+└── examples.md     # 可选：示例（多种调用方式、复杂输出格式时才建）
 ```
+
+reference.md / examples.md 什么时候该建，见 `${CLAUDE_SKILL_DIR}/reference.md`「文件结构决策」。
+frontmatter 字段与 `allowed-tools` 的授权原则见同文件「Frontmatter 字段说明」，
+`!命令` / `$ARGUMENTS` / `${CLAUDE_SKILL_DIR}` 三个动态特性的写法见「动态特性用法」。
+
+**② 建链接**——跑一次 `bash scripts/skills-link.sh`，给 `.claude/skills/` 与 `.agents/skills/`
+各补一条 symlink。这两个目录整体 gitignore，链接进不了仓库，每个检出、每个 worktree 都要本地建一次；
+不建的话文件在仓库里躺着，但两个 agent 都发现不了它。
+
+**③ 登记**——落点看它是哪一类：
+
+| 类型 | 登记到 | 判据 |
+|---|---|---|
+| 通用技能 | `CLAUDE.md` 与 `AGENTS.md` 的「通用技能」「Skill 触发规范」两张表（**两份都要**，等义改写） | 把它原样搬到另一个项目，还成不成立 |
+| 项目专属技能 | `ai/JASKILL.md` §一 / §二 | 写死了本项目的路径、字段值、基础设施 |
+
+写完对着 `${CLAUDE_SKILL_DIR}/reference.md`「质量检查清单」逐条自检再交付。
 
 ### 3. 修改 & 迭代已有 Skill
 
