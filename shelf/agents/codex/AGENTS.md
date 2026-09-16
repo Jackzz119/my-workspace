@@ -38,7 +38,7 @@
 
 ### 真源与落点
 
-技能本体只有一份，在 **`ai/jaSkills/`**，随仓库入库。两个 agent 的读取目录都是指向它的 symlink：
+技能本体只有一份，在 **`ai/jaSkills/`**，随仓库入库。两个 agent 的技能目录**各是一条指向它的整目录 symlink**（不是按件链接）：
 
 ```text
 ai/jaSkills/<skill>/          ← 唯一真源，改这里
@@ -46,20 +46,26 @@ ai/jaSkills/<skill>/          ← 唯一真源，改这里
 ├── reference.md             可选：详细规范，需要时才加载
 └── references/ · rules/     可选：分篇资料
 
-.agents/skills/<skill>  →  ../../ai/jaSkills/<skill>     Codex 从这里发现技能
-.claude/skills/<skill>  →  ../../ai/jaSkills/<skill>     Claude Code 从这里发现技能
+.agents/skills  →  ../ai/jaSkills     Codex 从这里发现技能
+.claude/skills  →  ../ai/jaSkills     Claude Code 从这里发现技能
 ```
 
-`.agents/` 与 `.claude/` 整个目录都在 `.gitignore` 里，**symlink 本身进不了仓库**——
-每个新检出、每个新 worktree 都要本地重建一次，否则一个技能都看不见：
+`.claude/` `.agents/` 和根目录 `CLAUDE.md` `AGENTS.md` 都在 `.gitignore` 里，**链接和协议都进不了仓库**，
+新检出、新 worktree 里默认不存在。Claude Code / Codex 桌面版建的 worktree 会按仓库根 `.worktreeinclude`
+把两份协议复制过来，但技能链接谁都不带；Multica、Codex CLI `--worktree`、手动 `git worktree add` 则什么都不带。
+
+**worktree 开工第一步，先跑保底脚本**（归 `custom-skill` 管，重复执行安全）：
 
 ```bash
-bash scripts/skills-link.sh            # 建链接；遇到真目录挡路只报告不动手
-bash scripts/skills-link.sh --adopt    # 把挡路的真目录先收编进 ai/jaSkills/ 再换成 symlink
+bash ai/jaSkills/custom-skill/scripts/sync-worktree.sh            # 补技能链接 + 协议文档，两个 agent 都补
+bash ai/jaSkills/custom-skill/scripts/sync-worktree.sh --dry-run  # 只报告不动手
 ```
 
-**要改技能就改 `ai/jaSkills/`，别往那两个目录里写**——写进去会变成挡住 symlink 的真目录，
-两个 agent 从此各读各的。
+它做三件事：技能目录不存在就建整目录链接，已是非空真目录就按件追加（同名才替换）；根目录没有协议文档就从
+主检出复制一份，已有就把主检出的内容追加在原文下面（再跑只更新那一块）；`ai/jaSkills/` 不在则报错停下，
+把错误原文反馈给用户。
+
+**要改技能就改 `ai/jaSkills/`**——技能目录是链接，从哪边改都是同一份；改完 `shelf push ai/jaSkills/<名>` 同步到货架。
 
 ### 调用方式（Codex 侧）
 
@@ -121,7 +127,7 @@ Codex 没有技能调用工具，“触发某个技能”就是**完整读取 `.
 | 需要 Codex 出图 / 审图 / 比稿 / 第二意见——通常由 `monet` / `ui-tailor` 在设计流程中委派；用户直接点名（“让 codex 看一眼”）时也走这里 | `codex-visual` |
 | 从货架拉取、推送、上架技能与模板（“货架”“shelf”“拉技能”“推上去”） | `shelf-ops` |
 
-**重要**：任何对技能文件（`ai/jaSkills/` 下的一切）、`ai/JASKILL.md` 或 `scripts/skills-link.sh`
+**重要**：任何对技能文件（`ai/jaSkills/` 下的一切）、`ai/JASKILL.md` 或 `ai/jaSkills/custom-skill/scripts/`
 的读写，都必须先触发 `custom-skill`，不得绕过技能规范直接修改。
 
 ### 本项目专属技能
