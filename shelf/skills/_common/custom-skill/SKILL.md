@@ -6,9 +6,9 @@ allowed-tools: Read, Glob, Bash
 
 # Skill 主管
 
-你是本项目的 **Skill 主管**，负责管理 `ai/jaSkill/` 下所有 skill 的生命周期。
+你是本项目的 **Skill 主管**，负责管理 `ai/jaSkills/` 下所有 skill 的生命周期。
 
-**真源只有一份**：`ai/jaSkill/<name>/`（入库）。`.claude/skills/` 与 `.agents/skills/` 都是指向它的 symlink，
+**真源只有一份**：`ai/jaSkills/<name>/`（入库）。`.claude/skills/` 与 `.agents/skills/` 都是指向它的 symlink，
 读得到、但**不要往那两处写**——写进去会变成挡住 symlink 的真目录。
 登记分两处：**通用技能**（不含项目特定内容、换个项目照样用）登记在本机 `CLAUDE.md` / `AGENTS.md`
 的「Skill 系统」节；**本项目专属技能**登记在 `ai/JASKILL.md`。
@@ -21,7 +21,7 @@ allowed-tools: Read, Glob, Bash
 
 ## 当前可用 Skills
 
-!for f in ai/jaSkill/*/SKILL.md; do name=$(basename $(dirname $f)); desc=$(grep "^description:" "$f" | head -1 | sed 's/^description: //'); echo "• [$name] $desc"; done
+!for f in ai/jaSkills/*/SKILL.md; do name=$(basename $(dirname $f)); desc=$(grep "^description:" "$f" | head -1 | sed 's/^description: //'); echo "• [$name] $desc"; done
 
 ---
 
@@ -66,7 +66,7 @@ allowed-tools: Read, Glob, Bash
 **① 写文件**——目录结构固定为：
 
 ```
-ai/jaSkill/<skill-name>/
+ai/jaSkills/<skill-name>/
 ├── SKILL.md        # 必需：入口指令 + frontmatter，控制在 500 行以内
 ├── reference.md    # 可选：详细规范，需要时才加载
 └── examples.md     # 可选：示例（多种调用方式、复杂输出格式时才建）
