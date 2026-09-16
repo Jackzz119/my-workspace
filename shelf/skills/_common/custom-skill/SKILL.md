@@ -76,9 +76,9 @@ reference.md / examples.md 什么时候该建，见 `${CLAUDE_SKILL_DIR}/referen
 frontmatter 字段与 `allowed-tools` 的授权原则见同文件「Frontmatter 字段说明」，
 `!命令` / `$ARGUMENTS` / `${CLAUDE_SKILL_DIR}` 三个动态特性的写法见「动态特性用法」。
 
-**② 建链接**——跑一次 `bash scripts/skills-link.sh`，给 `.claude/skills/` 与 `.agents/skills/`
-各补一条 symlink。这两个目录整体 gitignore，链接进不了仓库，每个检出、每个 worktree 都要本地建一次；
-不建的话文件在仓库里躺着，但两个 agent 都发现不了它。
+**② 确认链接在**——`.claude/skills` 与 `.agents/skills` 各是一条指向 `ai/jaSkills/` 的整目录 symlink，
+新技能放进真源即自动可见，不用逐个建链接。链接不在（新检出、新 worktree）就跑本技能自带的保底脚本：
+`bash ai/jaSkills/custom-skill/scripts/sync-worktree.sh`（同时补根目录协议文档；用法与三种行为见脚本头部注释）。
 
 **③ 登记**——落点看它是哪一类：
 
