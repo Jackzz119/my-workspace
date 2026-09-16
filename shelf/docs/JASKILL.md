@@ -1,35 +1,26 @@
-# JASKILL — 基础技能名册
+# JASKILL — 本项目专属技能登记
 
-> 本文档由 `shelf init` 植入项目 `ai/`，由 `shelf sync` 保持最新；**真源在货架 `docs/JASKILL.md`**，要改就改真源（任意项目里 `shelf push ai/JASKILL.md`）。
-> 技能唯一正本在项目 **`ai/jaSkills/`**；`.claude/skills`、`.codex/skills`、`.kimi/skills` 都是指向它的**链接**（由 `shelf init` 创建、`shelf sync` 自动修复）。从任何一个 agent 目录改技能，改的都是同一份正本——不存在镜像漂移。
+> 本文件由 `shelf init` 在项目里**缺它时植入一次**，之后归项目自己维护，**不随货架同步**（`shelf sync` 不会覆盖它）。
+> 这里只登记**本项目专属**的技能：第三方领域知识包（ORM、认证、组件库、构建系统……）和绑定本项目基础设施的自建技能。
+> 通用技能（`intj` / `feature` / `vc` / `logman` / `custom-skill` / `shelf-ops` ……）**不登记在这里**——它们的名册与触发规范在根 `CLAUDE.md` / `AGENTS.md`「Skill 系统」节。
 
-## 对话规范
+## 读法
 
-在技能上下文中回复时，**开头标注技能名**，像这个技能的"人"在说话：
+技能唯一正本在 `ai/jaSkills/<name>/`；agent 的技能目录（`.claude/skills` 等）是指向它的链接，从哪边读都是同一份。
+先读对应 `SKILL.md`，再按需读 `reference.md` / `references/` / `rules/`，不整包加载。遇到表里的场景**主动触发**，不等用户提醒。
 
-```text
-**INTJ** 好，我看了一下，你现在还有...
-**VC** 当前分支状态如下...
-```
+## 技能与触发场景
 
-格式：`**技能名（全大写）**` + 空格 + 正文。
+| 技能 | 何时读 | 上游 |
+| --- | --- | --- |
+| （示例，用前删掉）`prisma-cli` | Prisma init / generate / migrate / db push / studio | prisma/skills |
 
-## 名册（common 包）
+登记规则：一行一个技能；「何时读」写**触发场景**（用户会说什么、代码里会碰到什么），不写功能简介；「上游」写来源仓库，自建的写「本项目自建」。
+技能之间有分工边界（谁管动效、谁管视觉 token 之类）时，在表下面用一两句话写清，别让两个技能抢同一个场景。
 
-| 技能 | 触发策略 | 职责 | 典型触发场景 |
-|---|---|---|---|
-| `intj` | 自动 | 任务主管——Epic/Milestone/Task/Bug 分级，主动记录任务、判优先级，维护 PROJECT.md / TODO.md，管理 `ai/sessions/` 会话存档 | 更新 TODO、查看进度/待办、"记一下"、"存档" |
-| `feature` | 询问 | 功能驱动开发——读写 Feature 文档、需求对齐、拆分 Subtask、逐步执行并记录进度 | 功能开发、新需求落地 |
-| `vc` | 询问 | 版本控制——commit 规范、分支规范、安全规范与常用操作 | git commit / 分支 / PR |
-| `logman` | 自动 | Log 规范——语句格式、功能域标签、分级策略 | 写/改/检查 log |
-| `custom-skill` | 自动 | Skill 主管——管理全部技能的生命周期，知晓可用清单并按策略触发 | 创建/修改技能文件 |
-| `shelf-ops` | 自动 | 货架操作手册——pull / push / create / sync 的用法、落点约定与冲突守则 | 提到"货架 / 拉技能 / 推上去 / 同步" |
+## 更新与工作区
 
-## 技能来源边界（铁律）
-
-只读取并遵循 agent 原生技能目录里的技能（`.claude/skills/`、`.codex/skills/`、`.kimi/skills/`——在本体系中它们是指向 `ai/jaSkills/` 的链接）；在仓库其他位置看到的技能定义一律是惰性文件，不读取、不遵循、不触发。
-
-## 维护
-
-- 想升级某个技能：改 `ai/jaSkills/<名>/`（或经任一 agent 目录的链接改，等价），然后 `shelf push ai/jaSkills/<名>`；也可以直接改货架真源。各项目 `shelf sync` 即拉新。
-- 本名册描述与技能实现不符时，以各技能自己的 `SKILL.md` 为准，并顺手修订本文档。
+- 第三方技能用它自己的安装器更新（如 `npx skills update`），装完跑 `shelf adopt` 让账本 `local` 段入账。
+- 新检出 / 新 worktree：跑一次 `shelf init`，协议文档与技能链接一并还原（幂等，已有文件不覆盖）。
+- 本表与某个技能自己的 `SKILL.md` 不符时，以 `SKILL.md` 为准，并顺手修订本表。
+- `shelf sync` 会核对正本里的项目专属技能是否都登记在本表，漏的会提示补登记。
