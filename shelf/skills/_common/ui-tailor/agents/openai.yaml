@@ -1,0 +1,6 @@
+interface:
+  display_name: "UI Tailor · UI 裁缝"
+  short_description: "统一负责游戏与应用的 UI/UX：概念模型、流程、命名、界面和可用性"
+  default_prompt: "请用 $ui-tailor 读取项目常驻设计系统，完成 UI/UX 设计、展示与验证，并更新 ai 中的 uiux 文档。"
+policy:
+  allow_implicit_invocation: true
