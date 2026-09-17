@@ -1,0 +1,6 @@
+interface:
+  display_name: "Monet · 主美与概念设计师"
+  short_description: "统筹游戏与应用美术，维护常驻设计系统，调动 UI 裁缝并审核整体视觉"
+  default_prompt: "请用 $monet 读取当前 design-system.md 及相关领域图文规范，完成本次美术设计与审核，并更新项目常驻文档。"
+policy:
+  allow_implicit_invocation: true
