@@ -30,10 +30,11 @@ description: UI Tailor（UI 裁缝），统一负责游戏与应用的 UI 和 UX
 
 ## `uiux` 是项目资料，不是技能附件
 
-- 在项目设计系统中维护 **`uiux` 常驻 Markdown 总览**，链接每套当前主题/组件规范，并由全局 `design-system.md` 链入；没有时按项目约定建立。README 只说明目录。
+- 在项目设计系统中维护 **`uiux` 常驻 Markdown 总览**，只登记已敲定的主题/组件/交互规范及其展示，并由全局 `design-system.md` 链入；已批准但未实现须明确标注实现状态。README 只说明目录。
 - 每个已采用 UI 都要能从总览找到：实际截图/动图或预览、风格与布局、控件状态、使用流程、响应式/动效、实现与素材来源。主题 HTML 可展示实时参数，Markdown 仍是可随时阅读的设计规范。
-- 素材实际目录首次查到后登记在项目 design system；决策、来源、资产地址、组件文档全部放项目 `ai` 区，UI 专属内容归 `uiux`，**不在 skill 目录创建或更新 decisions.md 或项目资料**。
-- 新增/更改/批准/否决时同步当前文档与链接；研究和比稿进 uiux 的 research，想法/否决理由进概念档案，当前规则不藏在回合报告里。具体维护见 [references/maintenance.md](references/maintenance.md)。
+- 素材实际目录首次查到后登记在项目 design system；项目资料放项目 `ai` 区，已定稿的 UI 专属规范归 `uiux`，**不在 skill 目录创建或更新 decisions.md 或项目资料**。
+- 调研、候选、比稿、待确认原型及原始视觉产物统一进设计系统根下的 `codex-visual/`，不放 `uiux/`；自行制作与工具委派遵循相同归档规则。技能本体不迁入设计系统。
+- 批准后只把最终规范与选定展示晋升到 `uiux/`，保留所需来源链接；赞同方向不等于批准所有细节。更改/否决同步候选状态，想法/否决理由可链接 concept，当前规则不藏在回合报告里。具体维护见 [references/maintenance.md](references/maintenance.md)。
 - 每次相关更新与阶段收尾清理陈旧附属资料：提取有效结论、处理引用后删除重复/无用报告与临时文件。保留仍有价值的研究；默认在 session 汇报验证，不往项目逐轮写报告。
 - 用户要看整体 UI 时直接打开常驻总览。需要跨设备网页时与 Monet 从当前 Markdown 更新同一展示版，按授权更新发布；不要只做一次性 mood board。
 
