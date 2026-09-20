@@ -63,6 +63,8 @@ node "${CLAUDE_SKILL_DIR}/scripts/codex-visual.mjs" run [flags] "<brief>"
 
 ## 消费结果
 
+归档以项目设计系统为中心：调研、比稿、候选图、待确认 HTML/交互原型统一放其根目录下的 `codex-visual/`。这条规则也适用于调用者自行制作的比较页；技能本体保持在技能目录。`uiux/` 只放已定稿的 UI/UX 规范与选定展示，用户仅认可方向时不得把所有候选晋升为定稿。普通报告默认在 session 汇报；包装器必需的原始日志/报告留批次目录，长期保留与临时忽略规则由项目登记。
+
 包装脚本会打印机器可读行：
 
 - `CODEX_VISUAL_MODE: <mode>`
@@ -86,4 +88,4 @@ node "${CLAUDE_SKILL_DIR}/scripts/codex-visual.mjs" run [flags] "<brief>"
 - 图片必须是本地已存在的文件；网页截图可用 headless Chrome 落盘：
   `chrome.exe --headless=new --disable-gpu --window-size=W,H --screenshot="<out.png>" "<url>"`
 - 一次委派只解决一个问题；范围过大时先拆
-- 产物默认落 `ai/design_system/codex-visual/<时间戳>/`（cwd 下有 `ai/design_system/` 时；否则 `./codex-visual/`），可用 `--out <dir>` 或 `CODEX_VISUAL_OUT` 改。原始批次是过程材料，有复用价值的才搬进项目的 research
+- 产物默认落 `ai/design_system/codex-visual/<时间戳>/`（cwd 下有 `ai/design_system/` 时；否则 `./codex-visual/`），可用 `--out <dir>` 或 `CODEX_VISUAL_OUT` 改。有价值的比稿留在设计系统的 `codex-visual/`；定稿后仅晋升最终规范和选定展示，不搬整批日志进 `uiux/`。
