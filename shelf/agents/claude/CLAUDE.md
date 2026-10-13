@@ -85,6 +85,7 @@ bash ai/jaSkills/custom-skill/scripts/sync-worktree.sh --dry-run  # 只报告不
 | `ui-tailor` | UI 裁缝——UI 与 UX 统一负责：界面视觉、概念模型、用户流程、信息架构、术语命名、导航交互、可用性、动效；维护 uiux 常驻文档，视觉完成件交 `monet` 审核 | 自动（UI/UX 场景，含纯 UX 讨论） |
 | `codex-visual` | **工具，不是设计师**——把一个视觉任务委派给 Codex CLI 并拿回报告与图；由 `monet` / `ui-tailor` 在需要出图、审图、比稿时调用 | 询问后触发（消耗外部额度） |
 | `shelf-ops` | 货架（shelf）操作手册——拉取/推送/上架技能与模板，落点约定、退出码语义、冲突处理 | 用户点名时 |
+| `annotated-report` | 可批注的报告页——给「写给用户读、等用户表态」的 HTML 页面（调研报告、方案提案、比稿看板、评审页）内联批注层，规定页面怎么写、怎么发布成 Artifact、批注回来怎么处理 | 自动（出这类页面 / 被批注唤醒 / 用户说"看批注"） |
 
 ### Skill 触发规范
 
@@ -104,6 +105,7 @@ bash ai/jaSkills/custom-skill/scripts/sync-worktree.sh --dry-run  # 只报告不
 | 任何 UI / UX 工作：界面视觉、概念模型、用户流程、信息架构、术语命名、导航交互、可用性、动效，包括纯 UX 讨论（"这个流程顺不顺"、"这屏怎么排"、"命名统一吗"） | `ui-tailor` |
 | 需要 Codex 出图 / 审图 / 比稿 / 第二意见——通常由 `monet` / `ui-tailor` 在设计流程中委派；用户直接点名（"让 codex 看一眼"）时也走这里 | `codex-visual` |
 | 从货架拉取/推送/上架技能与模板（"货架"、"shelf"、"拉技能"、"推上去"） | `shelf-ops` |
+| 产出要用户读完再逐处表态的 HTML 页面（调研报告、方案提案、比稿看板、设计 / UX 评审页、阶段总结）并发布；会话被页面上「发给 Claude」的批注唤醒；用户说"看批注"、"处理批注" | `annotated-report` |
 
 **重要**：任何对技能文件（`ai/jaSkills/` 下的一切）的读写，都必须先触发 `custom-skill`，
 不得直接用 Read/Edit 工具操作。
