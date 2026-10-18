@@ -1,20 +1,18 @@
 # Shelf — 通用内容货架 + push/pull
 
-> 最后更新：2026-08-16
-> 状态：已实现（Windows 全链路冒烟通过），余 macOS 冒烟 + README
-> 关系：SKILL-SYNC-CLI 的「后续扩展：Push / 单个拉」在 monorepo 语境下的落地形态
+`shelf` CLI 与 `shelf/` 内容货架的设计与实现现状；命令用法与退出码的对外说明在 `packages/shelf/README.md`，待办在 `ai/TODO.md`。
 
 ---
 
 ## 一、功能目标
 
-`shelf/` 是 monorepo 里的**内容货架**（唯一真源）：技能包、工作协议模板、以及任何想跨项目取用的文件/文件夹。`shelf` 在任意项目目录下提供三个动作：
+`shelf/` 是 monorepo 里的**内容货架**（唯一真源）：技能包、工作协议模板、以及任何想跨项目取用的文件/文件夹。git 仓库就是数据库，`shelf` CLI 是它的增删改查与同步入口，主要调用方是 agent（经 Bash、非交互），人也直接用：
 
-- `shelf` — **交互浏览器**：从 `shelf/` 根开始按目录导航，任意层级可继续下钻、选择条目拉取、或拉取当前目录全部
-- `shelf pull <shelf路径> [...]` — 非交互直拉，如 `shelf pull skills/common/intj agents/claude`
-- `shelf create <本地路径> [--to <货架目录>]` — **上架新货**：全架查重名（重名拒绝），交互选位浏览器（`m <名>` 建目录、`d` 放下）或 `--to` 直达
-- `shelf push <本地路径>` — **更新已有货**：按记账/名字自动定位，不接受手填地址
-- `shelf sync [--dry-run]` — **全工作区对账**：逐条核对账本，库新自动更新本地，本地有改动看 diff 定方向
+- **接入**：`shelf init` — 新项目一条命令装好协议、通用技能、技能链接、gitignore 和 ai 资料区脚手架；重跑 = 补缺失 + 体检
+- **查**：`shelf status`（只读对账）· `shelf diff`（三方对比）· `shelf ls`（列货架）· `shelf`（交互浏览器，给人用）· `shelf home`
+- **同步**：`shelf sync` — 货架新版且本地没动自动更新，本地改过的列为待决并给出下一步命令；双改走 `shelf merge` 三方合并
+- **改 / 增 / 删**：`shelf push`（更新已有货，自动定位）· `shelf create`（上架新货，全架查重名）· `shelf pull`（拉取 / `--force` 覆盖）· `shelf forget`（清记账）· `shelf mirror`（入库副本登记）
+- 所有命令接受 `--json`，退出码固定（0 成功 / 1 错误 / 2 待确认 / 3 冲突 / 4 提交失败）
 
 浏览器输入语法（零依赖 readline）：数字 `3` = 进入该目录；`p 1,3-5` = 拉取所选；`a` = 拉取当前目录全部；`..` = 返回上级；`q` = 退出。每屏显示条目类型与大小/子项数。
 
@@ -30,27 +28,36 @@
 | 6 | 版本记录 | manifest 更名 **`.shelf.json`**（跟 CLI 命令走，与全局 `~/.shelfrc` 成对；旧名 `.agent-toolkit.json` 读取兼容、存盘自动迁移）。新增 `shelf` 段，**以 shelf 相对路径为键**：`"skills/common/intj": { sourceCommit, contentHash, pulledAt, localPath }` |
 | 7 | 分发方式 | `npx github:` 模式随单仓库废弃；短期 = 本机 workspace clone 里 `npm link`（或 node 直跑），长期 = npm publish（挂 NPM-PUBLISH） |
 | 8 | 结构解耦 | pull/push **不硬编码任何目录名**（common、skills 等都只是普通目录），纯文件系统导航；shelf 结构可随时重排，CLI 不用改 |
-| 9 | 落点规则（修订） | CLI 一律拉到 `./<真实名>`（`--dest` 可覆盖），**不做分类特判**——货架分类会增多，逐类落点逻辑即冗余；「技能放 `.claude/skills/`」这类智能放在 shelf-ops 手册里由 agent 执行 |
+| 9 | 落点规则（修订，现行规则见 #36） | 不按货架分类特判落点——货架分类会增多，逐类落点逻辑即冗余；只按两条与分类无关的事实定：记过账的回账上的位置，带 `SKILL.md` 的技能在已接入项目里进技能正本，其余落 `./<真实名>`（`--dest` 可覆盖） |
 | 10 | 链接模式 | 同机引用真源用**链接**（本仓库 `.claude/skills` 即此模式，见 `scripts/setup-links.mjs`）；跨机用**复制** + manifest 版本追踪。远期可给 shelf 加 `pull --link` |
 | 11 | `_` 前缀 | 文件系统**保留**（置顶用），CLI 显示层过滤：`common` ⇄ `_common` 输入双向解析，落盘与 manifest 永远用真实名 |
 | 12 | `shelf init` | 在任意工作区落两样东西：`.shelf.json` manifest + shelf-ops 操作手册（→ `.claude/skills/shelf-ops`）；操作智能在手册，CLI 保持哑传输 |
-| 13 | 非交互守卫 | 非 TTY（agent 经 Bash 驱动）：pull 冲突自动选安全项（skip/keep）；push 确认要求 `--yes`、异机冲突打印差异后中止（exit 3）要求 `--force`——杜绝 agent 挂死在交互提问上 |
+| 13 | 非交互守卫 | 非 TTY / `--json` / `SHELF_NONINTERACTIVE=1`（agent 经 Bash 驱动）：pull 只自动做零损失的更新，本地改过的保留并退出 2；push / create 确认要求 `--yes`（否则打印清单退出 2）、异机冲突打印差异后退出 3 要求 `diff` → `merge`（人明示才 `--force`）——杜绝 agent 挂死在交互提问上 |
 | 14 | 名字即 ID | **货物名（basename）全架唯一**：`shelf create` 上架前全架扫描重名，命中即拒绝并列出位置（想更新→push；想另起→改名）。这使名字成为可靠 ID，无需注册表 |
 | 15 | push 定位链 | push **不接受 `--to`**（误传给迁移提示）。定位顺序：①记账原位；②原位失效→按名字全架找回（对比记账哈希提示纯搬家/有差异），确认后推新位置**并更新记账键**；③无记账→同名唯一匹配视为更新；④找不到→指路 `shelf create`。人与 AI 都不需要记忆或翻查远程路径 |
 | 16 | 免 clone 运行（快照模式） | `npx -y -p github:Jackzz119/my-workspace shelf <命令>`：npm 安装副本无 `.git`（home 判定已加 git 仓库校验），识别为**快照**——读操作直接用包内 shelf，push/create 自动转临时 sparse clone，remote 取根 package.json `repository`（或 SHELF_REMOTE）；sourceCommit 回退读 npm 注入的 `gitHead`（实测当前 npm 对 git 依赖不注入 → 快照模式下为 null，仅影响溯源字段，冲突/搬家等哈希主逻辑不受影响）。老 atk 的 npx 直跑体验回归，且这次连写都行 |
 | 17 | 托管档口（自动开档口） | 全局安装的 CLI 首次运行时，自动把内容仓 clone 到 `~/.shelf/home` 并长期使用：之后所有命令本地跑（可离线、写操作直接提交）。**保鲜策略（2026-08-18 修订，适配货架高频更新）**：读操作每次都 `git pull --ff-only`（60 秒戳记只用于去重连环命令），写操作无条件强制先拉；push 被远端拒收（non-fast-forward）时自动 `pull --rebase --autostash` 后重推一次，多设备竞写自愈。离线时拉取失败仅警告，不阻断。用户**永不需要手动 clone**。`shelf home [--update]` 查看/立即更新；`SHELF_EPHEMERAL=1` 或 `~/.shelfrc {"ephemeral": true}` 可退回一次性 clone（临时机器/CI） |
 | 18 | 工具自建 clone 的健壮性 | ①**git 身份兜底**：全新机器没配 user.name/email 时，给工具自建的 clone（档口/临时）设 `shelf <shelf@主机名>`，不碰用户自己的 clone；②**提交失败回滚**：commit 出错时把货架工作区恢复原状（reset/checkout/clean），避免半改状态被下次 push 误判成"异机修改"；③**换行符**：档口 clone 时带 `-c core.autocrlf=false`，否则 CRLF 转换让工作区永远"脏"、卡住自动更新；④**临时目录不泄漏**：`process.exit` 会跳过 finally，临时 clone 注册退出钩子兜底清理（push 失败要保留现场时用 `keep()` 解除） |
-| 19 | `shelf sync` 六情形对账 | 开跑先强制刷新货架；对账本每件物品比三哈希（记账 R/库上 S/本地 L）：①全等→静默；②S≠R,L=R→**自动覆盖本地**（零损失）+更新记账；③S=R,L≠R（本地领先）→逐行 diff（`git diff --no-index --color`）后选 [p]推上库/[o]覆盖本地/[s]跳过；④双改→同③但 push 前二次确认；⑤库上路径失效→按名字找回并迁记账，找不到报"已移除"（可清账）；⑥本地文件丢失→孤儿处理（重拉/清账/跳过）。push 分支复用 applyAndCommit 全管线；sync 内不提供 --force-secret（拦下即跳过）。非交互：仅②自动执行，其余入待决清单并 exit 2；--dry-run 全程只读 |
+| 19 | `shelf sync` 对账 | 开跑先强制刷新货架并体检（#30 / #32）；对账本每件物品比三哈希（记账 R/库上 S/本地 L）：①全等→静默；②L=S≠R（内容已一致、账本落后）→只刷新账本；③S≠R,L=R→**自动覆盖本地**（零损失，有入库副本两处一起写）；④S=R,L≠R（本地领先）→待决，下一步 `push`；⑤双改→待决，下一步 `diff` → `merge`；⑥merge 过且货架没再变→待决「已合并待推送」（冲突标记没删干净的标「合并后还有冲突」）；⑦库上路径失效→按名字找回并迁记账，找不到报「已移除」（下一步 `forget`）；⑧本地文件丢失→待决（`pull --force` 或 `forget`）；⑨正本与入库副本不一致→待决；植入物不对账，单列「植入，不对账」。交互模式（人在终端）④⑤当场看逐行 diff 选 [p]推上库 / [o]覆盖本地 / [m]三方合并 / [s]跳过；sync 内不提供 --force-secret（拦下即跳过）。非交互只自动做②③，有待决退出 2；`--dry-run` / `status` 全程只读，有待决同样退出 2 |
 | 20 | 老版技能命令清退（2026-08-18 用户指示） | `shelf skills list/sync`、`shelf list`、裸 `shelf pull` 整包同步垫、`atk shelf` 嵌套垫全部移除（打旧命令会得到指路错误）；连带删除只服务它们的 lib/commands/list.mjs、pull.mjs、frontmatter.mjs、format.mjs 与 manifest 的 skills 段写接口。老 manifest 的 `skills` 段仍可被解析但无人再写——物品重新 `shelf pull` 一次即迁入 `shelf` 段接受 sync 管理 |
-| 21 | `shelf init` 植入协议（2026-08-30 需求） | init = 新项目完整接入：①根目录植入 `CLAUDE.md`（←货架 agents/claude/CLAUDE.md）、`AGENTS.md`（←agents/codex/AGENTS.md）、`multica/`（货架上存在才植入，暂无则提示跳过）；②`ai/JASKILL.md`（←货架 docs/JASKILL.md，common 包基础技能名册）；③`.claude/skills/` 与 `.agents/skills/` 各放 common 包全部技能（.claude 为正本，.agents 为镜像）；④确保 .gitignore 含 CLAUDE.md / AGENTS.md / .agents/ / .claude/ 四行（缺哪行补哪行，其余不动）；⑤全部经 pullEntry 入账 `.shelf.json` → **init 幂等 = 接入+体检**：重跑补缺失、报冲突，永不盲覆盖已有文件；⑥**账本还原（2026-08-30 用户确认）**：标准清单之外、账上有而本地缺失的货架物品 init 一并补拉（货架路径失效的指路 sync）——换设备带上「账本 + ai 文件夹」一条 init 全就位（local 技能随 ai/ 的 git 到场，shelf 物品从货架补拉），无需再跑 sync |
+| 21 | `shelf init` 植入协议（2026-08-30 需求） | init = 新项目完整接入：①根目录植入 `CLAUDE.md`（←货架 agents/claude/CLAUDE.md）、`AGENTS.md`（←agents/codex/AGENTS.md）、`multica/`（货架上存在才植入，暂无则提示跳过）；②`ai/JASKILL.md`（←货架 docs/JASKILL.md，common 包基础技能名册）；③common 包全部技能进技能正本（落点与链接现行规则见 #26 / #32 / #33）；④.gitignore 补行（现行规则见 #35）；⑤全部经 pullEntry 入账 `.shelf.json` → **init 幂等 = 接入+体检**：重跑补缺失、报冲突，永不盲覆盖已有文件；⑥**账本还原（2026-08-30 用户确认）**：标准清单之外、账上有而本地缺失的货架物品 init 一并补拉（货架路径失效的指路 sync）——换设备带上「账本 + ai 文件夹」一条 init 全就位（local 技能随 ai/ 的 git 到场，shelf 物品从货架补拉），无需再跑 sync |
 | 22 | 镜像规则 | 一件货一条账（key→localPath 不变），`.agents/skills/<名>` 作为账目的 `mirrors` 字段挂在 `.claude` 正本上：init 植入时写入，sync 每轮结束后校对全部镜像（哈希不符即从正本重刷）。**改技能只改正本或直接 push**，镜像永远被动跟随 |
 | 23 | init 防呆 | 在货架 home 本体（cwd==货架根）里跑 init 直接拒绝——防止把 gitignore 规则误写进 my-workspace 自己 |
-| 24 | agent 目标可选（2026-08-30 需求） | init 不再硬编码植入目录，改为**目标选择**：`claude`（.claude/skills + CLAUDE.md）/ `codex`（.codex/skills + AGENTS.md）/ `kimi`（.kimi/skills + AGENTS.md，查证：Kimi 走 AGENTS.md 标准且项目级也认 .claude/.codex/.agents 目录）。交互 init 出多选菜单；非交互必须 `--agents claude,codex`（或 all）；选择持久化在 `.shelf.json` 顶层 `agents` 字段，重跑 init 沿用不再问。技能正本 = 所选目标中优先级最高者（claude > codex > kimi），其余目标目录进该账目的 `mirrors`；AGENTS.md 在 codex/kimi 同选时只植一份。gitignore 行随所选目标生成（`.agents/` 从默认清单移除）。新命令 **`shelf agents`**（查看已配/可用）与 **`shelf agents add <名>`**（后补目标：植协议文档+技能目录+重算 mirrors+补 gitignore） |
+| 24 | agent 目标可选（2026-08-30 需求） | init 不再硬编码植入目录，改为**目标选择**：`claude`（.claude/skills + CLAUDE.md）/ `codex`（.agents/skills + AGENTS.md，见 #32）/ `kimi`（.kimi/skills + AGENTS.md，查证：Kimi 走 AGENTS.md 标准且项目级也认 .claude/.codex/.agents 目录）。交互 init 出多选菜单；非交互必须 `--agents claude,codex`（或 all）；选择持久化在 `.shelf.json` 顶层 `agents` 字段，重跑 init 沿用不再问。各目标的技能目录都是指向技能正本的链接（#26）；AGENTS.md 在 codex/kimi 同选时只植一份。gitignore 行随所选目标生成（#35）。新命令 **`shelf agents`**（查看已配/可用）与 **`shelf agents add <名>`**（后补目标：植协议文档+建技能目录链接+补 gitignore） |
 | 25 | CLI 自动发版（GitHub Actions + npm Trusted Publishing） | **概念纠偏：货架内容更新不需要发版**——npm 包只含 bin/lib 代码，技能/模板/文档走 git 由档口每次操作自动拉取。需要发版的只有 CLI 代码变更，交给 `.github/workflows/release.yml`：push 到 main 时对比 packages/shelf 版本与 npm 注册表，出现新版本号即自动 `npm publish`（OIDC 信任发布，零 token 零验证码）+ 打 `v<版本>` tag + GitHub Release。一次性配置在 npmjs.com 包设置里指定 Trusted Publisher（repo=Jackzz119/my-workspace, workflow=release.yml）。私有仓不支持 --provenance，发布本身不受影响 |
 
-| 26 | 项目技能正本 jaSkills（2026-08-30 用户重构，**取代 #22 的复制镜像**） | 项目里技能的唯一正本 = **`ai/jaSkills/`**（common 技能 pull 至此，账本 localPath 指此）；所选 agent 目标的技能目录（`.claude/skills`、`.codex/skills`、`.kimi/skills`）一律做成**指向正本的链接**（Windows junction 免管理员 / POSIX 相对 symlink）。**从任何 agent 目录改技能 = 直接改正本**，不再有"镜像手改丢失"问题；账本不再需要 mirrors 字段。init/agents add 建链；sync 每轮校验链接完整性（断链/实体目录自动修复）；遇老式实体目录（#22 时代的复制镜像）自动迁移：内容并入正本（同名跳过）后原地替换为链接。`ai/jaSkills` 随 ai/ 进项目 git（项目自带技能，队友 clone 即有；shelf 同步的部分由账本继续对账） |
+| 26 | 项目技能正本 jaSkills（2026-08-30 用户重构，**取代 #22 的复制镜像**） | 项目里技能的唯一正本 = **`<ai>/jaSkills/`**（`<ai>` 按 #33 定；common 技能 pull 至此，账本 localPath 指此）；所选 agent 目标的技能目录（`.claude/skills`、`.agents/skills`、`.kimi/skills`）一律做成**指向正本的链接**（Windows junction 免管理员 / POSIX 相对 symlink；删链接只删链接本身，绝不递归进正本）。**从任何 agent 目录改技能 = 直接改正本**，不再有"镜像手改丢失"问题；账本不再需要 mirrors 字段（改写条目时顺手清掉）。init/agents add 建链；sync / adopt 每轮校验链接完整性（断链/实体目录自动修复）；遇实体目录（#22 时代的复制镜像、外部安装器重建的）自动并入正本后原地替换为链接——**同名但内容不同时停下、什么都不删**，提示人工合并。技能正本随 ai 区进项目 git（项目自带技能，队友 clone 即有；shelf 同步的部分由账本继续对账） |
 
-| 27 | `shelf adopt` 收编外来技能（2026-08-30 需求） | 外来技能的常态：agent 目录是链接 → 任何下载器往 `.claude/skills/` 装技能，**实际透明落进正本 ai/jaSkills**，零处理。异常态：安装器暴力重建实体目录毁掉链接 → adopt（以及 init/sync）自动迁移并重链。**账本 `local` 段（2026-08-30 方案2 修订：增量对账+缺失守护）**：正本里未被 shelf 段追踪的技能登记 `{ contentHash, addedAt, origin }`。维护改为**增量**（init / sync / adopt 三处共用 reconcileLocalSkills）：在场→刷指纹；缺失→**告警并保留记录**（带上次指纹供比对，仅 adopt 交互提供 [r]清账）；升格→移除；新目录→登记。新设备流：init 重拉货架物品并告警缺失的本地技能 → 用户以通用安装器重装（经链接直落正本）→ sync 恢复入账（指纹一致原样、新版刷新）。本地技能无远端，账本以现实为准，不仲裁版本。想跨项目复用的升格路径：`shelf create ai/jaSkills/<名> --to skills/<包>` |
+| 27 | `shelf adopt` 收编外来技能（2026-08-30 需求） | 外来技能的常态：agent 目录是链接 → 任何下载器往 `.claude/skills/` 装技能，**实际透明落进正本 ai/jaSkills**，零处理。异常态：安装器暴力重建实体目录毁掉链接 → adopt（以及 init/sync）自动迁移并重链。**账本 `local` 段（2026-08-30 方案2 修订：增量对账+缺失守护）**：正本里未被 shelf 段追踪的技能登记 `{ contentHash, addedAt, origin }`。维护改为**增量**（init / sync / adopt 三处共用 reconcileLocalSkills）：在场→刷指纹；缺失→**告警并保留记录**（带上次指纹供比对，仅 adopt 交互提供 [r]清账）；升格→移除；新目录→登记。新设备流：init 重拉货架物品并告警缺失的本地技能 → 用户以通用安装器重装（经链接直落正本）→ sync 恢复入账（指纹一致原样、新版刷新）。本地技能无远端，账本以现实为准，不仲裁版本。想跨项目复用的升格路径：`shelf create ai/jaSkills/<名> --to skills/<包>`。sync 顺带核对 local 段技能是否都登记在 JASKILL.md（按名字整词匹配），漏的提示补一行 |
+| 28 | `shelf diff` 三方对比（1.3.0） | 只读。三个版本：账本 `sourceCommit` 那一版（上次拉取的）、货架 HEAD、本地。默认两段统一 diff：① 货架在上次拉取之后改了什么（sourceCommit → HEAD）② 推上去会改成什么（HEAD → 本地）；`--stat` 只出统计。基准从货架 git 历史重建：`ls-tree` 列文件 + `cat-file --filters` 按工作区换行规则还原（与当初 pull 从工作区拷到本地的字节一致，自建 clone 开 autocrlf 也不会整篇飘红），并用账本指纹核对；浅克隆缺那个提交时按 sha 补取一次（完整克隆不加 `--depth`），还取不到就退回只出 ② 并说明。diff 是自带的 Myers 行 diff（零依赖，标签写在 `---`/`+++` 行的制表符后）。有差异退出 2，一致退出 0。输入可以是货架路径或本地路径（含入库副本路径、Windows 反斜杠） |
+| 29 | `shelf merge` 三方合并（1.3.0） | 给「双方都改过」的物品用：以 sourceCommit 版为基准合并货架 HEAD 与本地。逐文件：只一边改的取改的那边（新增 / 删除同理）；两边都改的文本用 `git merge-file`（标签 `本地` / `货架 <sha>`，标准冲突标记）；一边删一边改 → 工作区留改过的那份并列为冲突（与 git 一致）；二进制两边都改 → 留本地并列为冲突。结果写回本地（有入库副本两处一起写）；有冲突退出 3 并列文件。**账本不动**：merge 在本机 `~/.shelf/state/merges.json` 记「本地已合进货架哪一版」，push 据此放行（不要 `--force`），但冲突标记没删干净就退出 3；push 成功才改写账本并清掉标记。再次 merge 以上次合进来的那一版为基准（merge base 前移）；货架在 merge 后又变了，push 退出 3 提示再 merge |
+| 30 | 植入物不对账（1.3.0） | init 植入、之后归项目维护的文件（目前是 `docs/JASKILL.md` → `<ai>/JASKILL.md`）账本标 `planted: true`：sync / status 列为「植入，不对账」，push / merge 拒绝（退出 1）；init 已有就不覆盖。要重新植入：`shelf pull docs/JASKILL.md --force`（保留 planted）。已有账本里的 docs/JASKILL.md 条目在 init / sync 体检时自动补标记（status 只读，只当作 planted 显示） |
+| 31 | 入库副本 mirror（1.3.0） | 根目录协议常被 gitignore，有的项目另存一份进 git（如 `ai/jaAgents/CLAUDE.md`）。账本条目可选 `mirror: "<相对路径>"`：pull / sync 自动更新 / merge 两处一起写；push / merge 前核对两处一致，不一致就列出差异停下（退出 1，下一步给 `git diff --no-index`），不替人选；sync 里不一致的列为待决。`shelf mirror <本地> <副本>` 登记（副本不存在就按正本建出，存在且不同就拒绝）、`--off` 取消；登记时副本被 gitignore 忽略会提醒（多半是写了裸 `CLAUDE.md`）。sync 发现 `<ai>/jaAgents/<同名>` 却没登记时给出登记命令 |
+| 32 | Codex 技能目录 `.agents/skills`（1.3.0） | Codex 从 cwd 到仓库根逐级扫描 `.agents/skills`（支持链接），从不读 `.codex/skills`。codex 目标改为 `.agents/skills` + gitignore `/.agents/skills`。老项目的 `.codex/skills`：链接直接拆、实体目录内容并入正本，`.codex/` 空了一并删（里面有别的配置就留着），再建 `.agents/skills` 链接——init / sync / adopt / agents add 体检时自动做并提示一句 |
+| 33 | init 的 ai 资料区：命名规范 + 脚手架（1.3.0，用户 2026-10-18 需求） | **ai 区目录名**：项目里已有 `ai`（不分大小写）就沿用磁盘上的名字；否则 .NET / C# 项目（根目录或一层子目录有 `.sln/.slnx/.csproj/.fsproj/.vbproj`、`Directory.Build.props`，或 Unity 工程）用 `AI`，其余（JS / TS / Java…）用 `ai`；`--ai-dir` 可指定；记进账本顶层 `aiDir`，之后不再变（换名要手动搬家，init 拒绝悄悄改）。技能正本 `<ai>/jaSkills`、JASKILL `<ai>/JASKILL.md` 都跟着走。**脚手架**（只补缺，已有不碰，目录放 `.gitkeep`）：协议要的 `PROJECT.md` / `TODO.md` 骨架（按 intj 的结构）+ 已装技能要用的目录：`features`（feature / intj）、`sessions`（intj）、`design_system`（monet / ui-tailor / codex-visual，名字跟 codex-visual 的探测路径一致）、`project-audit`（project-audit）；技能也可在 `SKILL.md` frontmatter 的 `metadata` 里写 `shelf-scaffold: a, b/c`（相对 ai 区，只建目录，绝对路径与 `..` 丢弃），新技能要文件夹不必改 CLI |
+| 34 | agent 友好的输出与调用约定（1.3.0） | 调研结论落地（machine-readable、非交互、稳定退出码、给出下一步、可内省）：①全局 `--json`：stdout 只有一份 `{ok, command, exitCode, cliVersion, schemaVersion, data, next, warnings?, error?}`，人读叙述不输出，隐含非交互；②退出码固定 0/1/2/3/4（README 与 `shelf help` 有表），一次处理多件物品时取最重的（4 > 1 > 3 > 2）；③每个待决 / 要确认的场景都给出可直接执行的下一步命令（`next`，多条是并列选项）；④未知参数直接退出 1（agent 编造的参数不被悄悄忽略），`<命令> --help` 出该命令用法与例子，`help --json` 出命令表与退出码；⑤新增 `status`（= sync --dry-run）、`ls`（非交互列货架）、`forget`（清记账，让「下架 / 本地丢失」非交互可解）、`version` / `--version` / `-v`；⑥`fail()` 抛异常代替 `process.exit`，finally 照常执行、临时 clone 照常清理 |
+| 35 | gitignore 只忽略 shelf 放进来的东西（1.3.0，取代 #21④ 的四行） | 写根锚定的精确行：`/CLAUDE.md`、`/AGENTS.md`、`/.claude/skills`、`/.agents/skills`、`/.kimi/skills`。不写裸 `CLAUDE.md`（按文件名匹配任意层级，会把 `ai/jaAgents/CLAUDE.md` 这类入库副本一起忽略）；不再忽略整个 `.claude/`（项目可能要提交 settings.json、launch.json）；链接行不带结尾 `/`（链接在 git 眼里不是目录，带 `/` 匹配不上）。已被更宽的规则盖住就不补：项目是 git 仓库时问 `git check-ignore --no-index`，否则认常见的父目录写法；文件原本是 CRLF 就按 CRLF 追加 |
+| 36 | pull 的落点与覆盖（1.3.0） | 输入可以是货架路径或本地路径。记过账的回账上的 localPath（`--dest` 可改），新技能（带 `SKILL.md`）在已接入的项目里默认进技能正本，其余落当前目录。非交互：只有货架变了、本地没动 → 直接更新；本地改过（本地领先 / 双改 / 没记过账的同名文件）→ 保留本地、退出 2，下一步给 `push` / `pull --force` 或 `diff` / `merge`；内容一致只补记账。`--force` 用货架版本覆盖（含植入物重新植入），写入时带上入库副本 |
 
 ## 三、三层传输（解决「push 要不要整库 clone」）
 
@@ -86,9 +93,17 @@ monorepo 会随 apps 变大，但 shelf 操作的传输量必须只跟 shelf 内
 - [x] **ST-N**：agent 目标化（决策 #24）+ 自动发版（决策 #25）——五场景冒烟全过：--agents 定向接入(claude+codex：正本+镜像+4 gitignore 行)、重跑沿用记录、agents add kimi(镜像重算+补 .kimi/)、非交互无 flag exit 2、仅 kimi(正本落 .kimi)；release.yml 就位（2026-08-30）
 - [x] **ST-O**：jaSkills 正本重构（决策 #26）——五场景冒烟：全新 init（正本+双链接）、透过链接改技能=改正本（sync 正确判本地领先）、老式复制项目自动迁移（实体目录并入正本+mirrors 字段清除）、断链 sync 自愈、agents add 建第三链接（2026-08-30）
 - [x] **ST-P**：`shelf adopt` + local 段增量对账（决策 #27 方案2）——冒烟：透过链接安装直落正本+登记、幂等、毁链接自愈收编、create 升格移出、**账本单独迁移新设备全流程**（init 告警缺失→安装器重装→sync 恢复入账，指纹一致原样）（2026-08-30）
-- [ ] **ST-E**：macOS 侧冒烟（Windows 已过：pull/push/冲突/守卫/init/sync 全链路）+ README 补 shelf 章节
+- [x] **ST-Q**：1.3.0（决策 #28–#36）——`diff` / `merge` / 植入物 / 入库副本 / Codex `.agents/skills` / `version` / `sync --dry-run` 退出码；init 的 ai 区命名规范与脚手架；agent 友好化（`--json`、`next`、`status` / `ls` / `forget` / `mirror`、未知参数拒绝、命令级 help）。代码拆出 `lib/output.mjs`（输出与退出码）、`spec.mjs`（命令表与参数校验）、`textdiff.mjs`、`threeway.mjs`、`scaffold.mjs`；首套自动化测试（见下节）+ release.yml 测试闸门（2026-10-18）
+- [ ] **ST-E**：macOS 侧冒烟（Windows 已过全套测试与验收流程；Linux 由 release.yml 的测试闸门覆盖）
 
-## 六、与既有里程碑的关系
+## 六、测试
+
+- `cd packages/shelf && npm test`：`node:test`，零依赖，29 个用例（单元 8 + init 5 + sync/pull/push/mirror 8 + diff/merge 7 + 验收 1）。每个用例自建临时 bare 仓库当货架、把 CLI 拷到临时目录当已安装的包（不会把 monorepo 认成货架）、每台「设备」独立 HOME 与托管档口、git 配置隔离——不碰真货架。Windows 上额外断言技能目录是 junction（`dir /AL`），并覆盖反斜杠路径输入与 autocrlf 自建 clone
+- `.github/workflows/release.yml` 发布前在 Ubuntu 跑同一套测试（POSIX 相对软链分支），不过不发
+- 2026-10-18 · 验收流程（npm pack 出的 1.3.0 包 + 本仓库的临时 bare 克隆当货架，两台设备、JS 项目 `ai/` 与 .NET 项目 `AI/`）：init → 改技能 → 另一处改同一技能并推 → sync 报双改（2）→ diff（2）→ merge（0）→ push（无需 --force，0）→ 两处 sync 全一致（0）· 通过 · 记录在会话报告
+- 2026-10-18 · 老项目升级（lovelei 账本与技能的副本）：JASKILL 自动补 planted、技能链接修成 junction、11 个第三方技能登记进 local 段、`ai/jaAgents/` 两份协议给出登记副本的命令 · 通过
+
+## 七、与既有里程碑的关系
 
 - SKILL-SYNC-CLI 的 ST-4/5/6（非交互 flag、update/diff、README）不受影响，顺序可与本 feature 交叉
 - SHELF-SERVER（M2）：shelf 未来就是 server 上的一种资源类型，本期 git 版不白做

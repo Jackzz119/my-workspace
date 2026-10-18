@@ -1,0 +1,22 @@
+{
+    "skipped": ["^shelf/", "^ai/sessions/", "^node_modules/"],
+    "ignoredTargets": [
+        "^CLAUDE\\.md$",
+        "^AGENTS\\.md$",
+        "^ai/jaSkills(/|$)",
+        "^\\.claude/skills",
+        "^\\.agents/",
+        "^ai/sessions(/|$)",
+        "^node_modules(/|$)"
+    ],
+    "accepted": [
+        "ai/features/SHELF.md:ai/jaAgents/CLAUDE.md",
+        "ai/features/SHELF.md:ai/jaAgents/",
+        "packages/shelf/README.md:ai/jaAgents/CLAUDE.md"
+    ],
+    "budgets": {
+        "ai/PROJECT.md": 9000,
+        "ai/TODO.md": 6000,
+        "ai/JASKILL.md": 4000
+    }
+}

@@ -1,48 +1,12 @@
 # TODO
 
-## Milestone 0 — Monorepo 迁移 ✅（2026-08-16）
+## Shelf — 通用内容货架 CLI
 
-agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/atk/`（后更名 `packages/shelf/`），`skills/` + `agents/` → `shelf/`，工作协议与 ai/ 文档升级为工作区级。原独立仓库保留为历史。
+> 设计文档：[`ai/features/SHELF.md`](features/SHELF.md)（1.3.0 已实现）
 
-- [x] 目录迁移 + `paths.mjs` 适配（repoRoot = monorepo 根，packsRoot = `shelf/skills/`）
-- [x] monorepo 脚手架：根 `package.json`（workspaces）+ `.gitignore`
-- [x] `.claude/skills` 从拷贝改为链接引用真源（`scripts/setup-links.mjs`，junction/symlink，幂等）；`_common` 包更名 `common`
-- [x] 迁移遗留核实（2026-08-17）：旧工作副本 `D:\Repo\agent-toolkit` 工作区干净、无未推提交、无 stash——TODO Phase 2 所记的未提交改动已在迁移前入库（随 GitHub HEAD 并入）或被舍弃，无需找回；全局 `atk` 命令已从旧副本改指 monorepo（npm link -w shelf）
-- [x] 在 GitHub 创建 `my-workspace` 私有仓库并 push（2026-08-17，https://github.com/Jackzz119/my-workspace）
-
-## Shelf — 通用内容 push/pull
-
-> 设计文档：[`ai/features/SHELF.md`](features/SHELF.md)
-> 状态：已实现（2026-08-16，Windows 全链路冒烟通过）
-
-- [x] **ST-A**：transport 层（SHELF_HOME → 自身 clone → ~/.shelfrc → 临时 sparse clone）
-- [x] **ST-B**：`shelf` 交互浏览器（导航 + 多选 + 管道输入安全）
-- [x] **ST-C**：`shelf pull`（展示名解析 + manifest shelf 段 + 四情景菜单）
-- [x] **ST-D**：`shelf push`（异机冲突保护 + 变更清单 + 凭据拦截 + 非交互守卫）
-- [x] **ST-F**：`shelf init` + `shelf-ops` 操作手册 skill
-- [x] **ST-G**：`shelf create` 上架新货（全架重名检查 + 选位浏览器 + `--to` 直达）（2026-08-17）
-- [x] **ST-H**：push 定位链重构（移除 `--to`、搬家找回 + 记账迁移、无记录同名匹配）（2026-08-17）
-- [x] **ST-I**：CLI 拆成可发布的独立包（@scope/shelf，18.5kB，含 README/LICENSE）（2026-08-18）
-- [x] **ST-J**：托管档口 `~/.shelf/home` 自动开档口 + 身份兜底/提交回滚/CRLF/临时目录清理（2026-08-18）
-- [x] **ST-K**：`shelf sync` 六情形对账（库新自动更新/本地改动看 diff 定方向/搬家迁账/下架孤儿处理）（2026-08-18）
-- [x] **ST-L**：老版技能命令清退（skills list/sync 等，删 4 个遗留模块）（2026-08-18）
-- [x] **ST-M**：`shelf init` 植入协议 + sync 镜像校对（2026-08-30，v1.1.0）
-- [x] **ST-N**：init 目标多选（claude/codex/kimi）+ `shelf agents add` + GitHub Actions 自动发版 release.yml（2026-08-30）
-- [x] **ST-O**：项目技能正本 ai/jaSkills + agent 目录链接化 + 老项目自动迁移（2026-08-30）
-- [x] **ST-P**：`shelf adopt` 收编外来技能 + 账本 local 段（2026-08-30）
-- [ ] **ST-E**：macOS 侧冒烟 + README shelf 章节
-
-## 发版策略（npm publish）
-
-> 设计文档：[`ai/features/NPM-PUBLISH.md`](features/NPM-PUBLISH.md)
-> 触发条件：M1 完成 + M2 品牌敲定
-
-- [x] 查名字可用性：`shelf`/`atk` 均被占 → 走 scoped `@<npm用户名>/shelf`（命令名仍是裸 `shelf`）（2026-08-18）
-- [x] 补全 package.json + 写 LICENSE + README.md（2026-08-18）
-- [x] `npm pack --dry-run` 验证打包内容（18.5 kB / 15 文件，无内容混入）（2026-08-18）
-- [x] 确认 npm 用户名并改包名：jackss119 → `@jackss119/shelf`（2026-08-18）
-- [x] 正式 `npm publish`：1.0.0 已发（2026-08-30，用户 security key 亲手发布）
-- [x] 一次性配置 npm Trusted Publisher ✅ 已验证全自动链路：2026-08-30 09:44 首次 run 即发布 1.1.0（npm + tag v1.1.0 + GitHub Release，16 秒），后续版本号不变的 push 正确跳过
+- [ ] **ST-E**：macOS 侧冒烟（Windows 已过全套测试与验收流程；Linux 由 release.yml 的测试闸门覆盖）
+- [ ] 货架 `shelf-ops` 手册跟上 1.3.0：diff / merge / forget / mirror / ls / status、`--json` 与退出码表、Codex 改用 `.agents/skills`（由在用它的项目改完 push 上来，本仓库不直接改 `shelf/`）
+- [ ] 协议与技能里写死的 `ai/` 路径照顾 .NET 项目的 `AI/`：custom-skill 的 `sync-worktree.sh` 按账本 `aiDir` 找技能正本（大小写敏感的文件系统上 `ai/jaSkills` 找不到 `AI/jaSkills`）
 
 ## Milestone 2 — Shelf Server 社区平台（规划中）
 
@@ -56,30 +20,6 @@ agent-toolkit 按 GitHub HEAD 并入 my-workspace monorepo：CLI → `packages/a
 - [ ] Phase 2 — 社区互动（评论 / star / 关注 / changelog / 全局 skill）
 - [ ] Phase 3 — 规模化（S3 / CDN / 团队账户 / 计费）
 - [ ] Phase 4 — 生态延展（IDE 插件 / Codex 适配 / 第三方 API）
-
-## Milestone 1 — Skill 双向同步 CLI ✅（由 Shelf 收官，2026-08-18）
-
-目标：在任何目标项目里，一条命令就能拉取/推送 skill，与 agent-toolkit 仓库双向同步。
-
-> 设计文档：[`ai/features/SKILL-SYNC-CLI.md`](features/SKILL-SYNC-CLI.md)（本期聚焦 Pull · common 包）
-
-**需求对齐已完成 ✅**：6 个决策点全部锁定（CLI=Node 脚本 + npx github、落点默认 `.claude/skills/`、common 包 = 全部 `skills/`、pull 已存在报错、版本双轨）。
-
-Subtask 进度（详见 Feature 文档）：
-
-- [x] **ST-1**：搭骨架 `package.json` + `bin/atk.mjs`，实现 `atk list`
-- [x] **ST-2**：实现 `atk pull`（common 包主路径，交互菜单 u/s/q）
-- [x] **ST-3**：`.agent-toolkit.json` + per-skill 版本 + 4 情景智能菜单（contentHash 驱动）+ 文件夹分包（`skills/_common/`、`skills/<pack>/`）
-- [x] **ST-4**：非交互 flag → `--dest` 已实现；`--mode`/`--pack` 随 pack 概念废弃（shelf pull 任意路径取代）
-- [x] **ST-5**：update/diff → 被 `shelf sync` 全面覆盖（含孤儿 entry 清理）
-- [x] **ST-6**：README 已随发布形态完成（packages/shelf/README.md）；本仓库 dogfood 日常进行中；跨平台冒烟并入 ST-E
-
-后续（非本期）：
-
-- [x] `atk pull <name>` 单个拉 → 已由 `shelf pull <路径>` 覆盖
-- [x] `atk pull --pack <xxx>` 其他包 → 已由 `shelf pull <任意路径>` 覆盖
-- [x] `atk pull --from other` → 废弃（other-skills 目录已不存在，任意路径由 shelf pull 覆盖）
-- [ ] Push 命令（推回主仓库）→ 已立项，设计见 [`SHELF.md`](features/SHELF.md)（注：分发方式随 monorepo 修订，`npx github:` 废弃，见 SHELF.md 决策 #7）
 
 ## Phase 2 — 仓库整理
 
@@ -102,9 +42,3 @@ Subtask 进度（详见 Feature 文档）：
 ## Bug
 
 - （暂无）
-
-## Done
-
-- [x] Milestone 1 需求对齐：6 个决策点拍板（2026-05-17）
-- [x] 重命名 skill creator，泛化 AI 协议（commit 3233c46）
-- [x] 为 codex 适配所有 skill（commit b10e317）
