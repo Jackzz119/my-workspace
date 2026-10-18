@@ -1,0 +1,376 @@
+<title>{title}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<style>
+/* Layout: one reading column beside a sticky contents rail; on phones the contents fold into a block under the
+   summary. Code and diffs wrap in place; only tables scroll, each inside its own box.
+   Palette: graphite neutrals leaning blue, one ink-blue accent for numbers, links and the current place; green and
+   red belong to diffs, and the P1-P3 chips keep their own hues. Page content only: the host adds the document. */
+:root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --code: #eceef2;
+    --ink: #1b1e25;
+    --muted: #596070;
+    --rule: #d8dce3;
+    --accent: #2a55b8;
+    --add-bg: #e2f1e6;
+    --add-ink: #1c5a2f;
+    --del-bg: #fae5e2;
+    --del-ink: #8f2a21;
+    --hunk: #5f4fae;
+    --p1: #b42318;
+    --p2: #975a00;
+    --p3: #4a5c77;
+    --font-body: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, "PingFang SC", "Microsoft YaHei", monospace;
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --bg: #111318;
+        --surface: #181b21;
+        --code: #1e2229;
+        --ink: #e4e6ea;
+        --muted: #9aa2b0;
+        --rule: #2c313a;
+        --accent: #93b1f7;
+        --add-bg: #13281a;
+        --add-ink: #a2d9b0;
+        --del-bg: #321a18;
+        --del-ink: #f3a99f;
+        --hunk: #b5a8f0;
+        --p1: #f28b80;
+        --p2: #e7b35e;
+        --p3: #a3b4cf;
+        color-scheme: dark;
+    }
+}
+:root[data-theme="dark"] {
+    --bg: #111318;
+    --surface: #181b21;
+    --code: #1e2229;
+    --ink: #e4e6ea;
+    --muted: #9aa2b0;
+    --rule: #2c313a;
+    --accent: #93b1f7;
+    --add-bg: #13281a;
+    --add-ink: #a2d9b0;
+    --del-bg: #321a18;
+    --del-ink: #f3a99f;
+    --hunk: #b5a8f0;
+    --p1: #f28b80;
+    --p2: #e7b35e;
+    --p3: #a3b4cf;
+    color-scheme: dark;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 1rem/1.8 var(--font-body); }
+::selection { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+[id] { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 16px); }
+
+.page { max-width: 70rem; margin: 0 auto; padding-inline: 16px; padding-block: 24px 128px; }
+@media (min-width: 640px) { .page { padding-inline: 28px; } }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2.5rem; }
+.rail { display: none; }
+@media (min-width: 1000px) {
+    .layout { grid-template-columns: 14rem minmax(0, 1fr); gap: 3.5rem; }
+    .rail { display: block; }
+    details.toc-mobile { display: none; }
+}
+.rail nav {
+    position: sticky;
+    top: calc(env(safe-area-inset-top, 0px) + 20px);
+    max-height: calc(100vh - 40px);
+    overflow: auto;
+    padding-block: 8px;
+}
+main { min-width: 0; max-width: 46rem; overflow-wrap: break-word; }
+
+/* Masthead */
+.masthead { padding-block: 8px 22px; border-bottom: 1px solid var(--rule); }
+.eyebrow {
+    margin: 0;
+    font: 600 0.75rem/1.4 var(--font-mono);
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+h1 {
+    margin: 0.3em 0 0.35em;
+    font: 700 clamp(1.75rem, 5.5vw, 2.5rem)/1.25 var(--font-body);
+    text-wrap: balance;
+}
+.meta { margin: 0; font-size: 0.8125rem; color: var(--muted); }
+.meta:has(code:empty) { display: none; }
+
+/* Text */
+h2 {
+    margin: 3rem 0 1rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--rule);
+    font: 700 clamp(1.35rem, 3.8vw, 1.625rem)/1.4 var(--font-body);
+    text-wrap: balance;
+}
+h3 { margin: 2.4rem 0 0.75rem; font: 700 1.125rem/1.5 var(--font-body); text-wrap: balance; }
+h4 { margin: 1.8rem 0 0.5rem; font: 600 1rem/1.5 var(--font-body); }
+.num { font-family: var(--font-mono); font-weight: 600; color: var(--accent); }
+p { margin: 0.85em 0; }
+ul, ol { margin: 0.6em 0; padding-left: 1.4em; }
+li { margin: 0.3em 0; }
+li > ul, li > ol { margin: 0.25em 0 0.4em; }
+li::marker { color: var(--muted); }
+strong { font-weight: 700; }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+code {
+    padding: 0.08em 0.35em;
+    border-radius: 4px;
+    background: var(--code);
+    font: 0.86em/1.5 var(--font-mono);
+    overflow-wrap: anywhere;
+}
+h2 code, h3 code { font-size: 0.82em; }
+
+/* The summary, above the contents */
+.lead {
+    margin-top: 1.5rem;
+    padding: 2px 20px 10px;
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    background: var(--surface);
+}
+.lead-title { margin: 1rem 0 0.25rem; padding-top: 0; border-top: 0; font-size: 1.25rem; }
+.callout {
+    margin: 1.2rem 0;
+    padding: 2px 16px;
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--rule));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+
+/* Code: one row per diff line, wrapped rather than scrolled */
+figure.code {
+    margin: 1rem 0 1.3rem;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--code);
+    overflow: hidden;
+}
+figure.code figcaption {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--rule);
+    background: color-mix(in srgb, var(--surface) 60%, var(--code));
+    font: 0.75rem/1.45 var(--font-mono);
+    color: var(--muted);
+}
+figcaption .path { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+figcaption .lang { font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; }
+figure.code pre {
+    margin: 0;
+    font: 0.8125rem/1.7 var(--font-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    tab-size: 4;
+}
+figure.code code { display: block; padding: 0; border-radius: 0; background: none; font: inherit; }
+pre.plain { padding: 10px 14px; }
+pre.diff { padding: 8px 0; }
+.ln { display: block; padding: 0 14px 0 calc(14px + 1ch); text-indent: -1ch; }
+.ln.add { background: var(--add-bg); color: var(--add-ink); }
+.ln.del { background: var(--del-bg); color: var(--del-ink); }
+.ln.hunk { color: var(--hunk); }
+.ln.file { color: var(--accent); font-weight: 600; }
+button.copy {
+    min-height: 28px;
+    padding: 2px 10px;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--accent);
+    font: 600 0.75rem/1.3 var(--font-body);
+    cursor: pointer;
+}
+button.copy:hover { border-color: var(--accent); }
+
+/* Tables scroll inside their own box */
+.table-wrap {
+    margin: 1rem 0 1.3rem;
+    overflow-x: auto;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--surface);
+}
+table { width: 100%; border-collapse: collapse; font-size: 0.9375rem; line-height: 1.65; }
+caption { padding: 10px 14px 4px; caption-side: top; text-align: left; font-size: 0.8125rem; color: var(--muted); }
+th, td { padding: 9px 14px; border-top: 1px solid var(--rule); text-align: left; vertical-align: top; }
+thead th { border-top: 0; font-size: 0.8125rem; font-weight: 600; color: var(--muted); }
+td { font-variant-numeric: tabular-nums; }
+
+/* Findings: a severity chip beside each entry */
+ul.bugs { margin: 0.75rem 0 1.4rem; padding: 0; list-style: none; }
+ul.bugs > li {
+    display: grid;
+    grid-template-columns: 2.4rem minmax(0, 1fr);
+    gap: 12px;
+    margin: 0;
+    padding: 12px 0;
+    border-top: 1px solid var(--rule);
+}
+ul.bugs > li:last-child { border-bottom: 1px solid var(--rule); }
+ul.bugs.p1 { --sev: var(--p1); }
+ul.bugs.p2 { --sev: var(--p2); }
+ul.bugs.p3 { --sev: var(--p3); }
+.sev {
+    align-self: start;
+    justify-self: start;
+    margin-top: 0.3em;
+    padding: 3px 6px;
+    border: 1px solid color-mix(in srgb, var(--sev, var(--muted)) 40%, transparent);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--sev, var(--muted)) 12%, transparent);
+    color: var(--sev, var(--muted));
+    font: 600 0.75rem/1.2 var(--font-mono);
+}
+.bug-body { min-width: 0; }
+.bug-body > strong:first-child { margin-right: 0.5em; font-family: var(--font-mono); font-weight: 600; }
+.bug-body ul { margin: 0.35em 0 0; }
+
+/* Decisions waiting for the reader */
+.card.decision {
+    margin: 1rem 0 1.3rem;
+    padding: 2px 20px 14px;
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    background: var(--surface);
+}
+.card.decision h3 { margin-top: 1rem; }
+.card.decision li.item { margin: 0.45em 0; }
+.card.decision li::marker { color: var(--accent); }
+
+/* Contents */
+.toc-title {
+    margin: 0 0 10px;
+    font: 600 0.75rem/1 var(--font-mono);
+    letter-spacing: 0.08em;
+    color: var(--muted);
+}
+.toc ol { margin: 0; padding: 0; list-style: none; }
+.toc li { margin: 0; }
+.toc ol ol { margin: 2px 0 6px 10px; padding-left: 6px; border-left: 1px solid var(--rule); }
+.toc a {
+    display: block;
+    padding: 4px 10px;
+    border-radius: 6px;
+    color: var(--muted);
+    font-size: 0.875rem;
+    line-height: 1.45;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+}
+.toc ol ol a { padding-block: 3px; font-size: 0.8125rem; }
+.toc a:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink); }
+.toc a[aria-current="true"],
+.toc li:has(> ol a[aria-current="true"]) > a { color: var(--ink); }
+.toc a[aria-current="true"] { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+details.toc-mobile {
+    margin: 22px 0 0;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--surface);
+}
+details.toc-mobile summary { padding: 10px 14px; font-weight: 700; cursor: pointer; }
+details.toc-mobile nav { max-height: 60vh; overflow: auto; padding: 0 8px 10px; }
+
+.foot {
+    margin-top: 4rem;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+    font-size: 0.8125rem;
+    color: var(--muted);
+}
+</style>
+
+<div class="page">
+    <div class="layout">
+        <aside class="rail">
+            <nav class="toc" aria-label="目录"><p class="toc-title">目录</p>{toc}</nav>
+        </aside>
+        <main>
+            <header class="masthead">
+                <p class="eyebrow"><time>{date}</time></p>
+                <h1>{title}</h1>
+                <p class="meta">源稿 <code>{source}</code></p>
+            </header>
+            {lead}
+            <details class="toc-mobile"><summary>目录</summary><nav class="toc" aria-label="目录">{toc}</nav></details>
+            {body}
+            <footer class="foot">
+                <p>批注：选中文字点「批注这段」，或点右下角「批注」再点内容，也可以直接「留言」。写完在「清单」里「复制全部」，粘贴到对话里。</p>
+            </footer>
+        </main>
+    </div>
+</div>
+
+<script>
+(() => {
+    // Mark the contents entry for the part being read, in the rail and in the phone contents.
+    const links = new Map();
+    for (const a of document.querySelectorAll('.toc a[href^="#"]')) {
+        const id = decodeURIComponent(a.getAttribute('href').slice(1));
+        if (!links.has(id)) links.set(id, []);
+        links.get(id).push(a);
+    }
+    let current = null;
+    const mark = (id) => {
+        if (id === current) return;
+        for (const a of links.get(current) || []) a.removeAttribute('aria-current');
+        current = id;
+        for (const a of links.get(id) || []) a.setAttribute('aria-current', 'true');
+    };
+    if ('IntersectionObserver' in window) {
+        const watcher = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) if (entry.isIntersecting) mark(entry.target.id);
+            },
+            { rootMargin: '-12% 0px -78% 0px' }
+        );
+        for (const id of links.keys()) {
+            const el = document.getElementById(id);
+            if (el) watcher.observe(el);
+        }
+    }
+
+    // Copy a shell command; where the clipboard is refused, select it for a manual copy.
+    for (const button of document.querySelectorAll('button.copy')) {
+        button.addEventListener('click', () => {
+            const code = button.closest('figure').querySelector('code');
+            const settle = (label) => {
+                button.textContent = label;
+                setTimeout(() => (button.textContent = '复制'), 1800);
+            };
+            const select = () => {
+                const range = document.createRange();
+                range.selectNodeContents(code);
+                getSelection().removeAllRanges();
+                getSelection().addRange(range);
+                settle('已选中，请手动复制');
+            };
+            try {
+                navigator.clipboard.writeText(code.textContent).then(() => settle('已复制'), select);
+            } catch {
+                select();
+            }
+        });
+    }
+
+    // Close the phone contents after a jump.
+    const phoneToc = document.querySelector('details.toc-mobile');
+    if (phoneToc) phoneToc.addEventListener('click', (event) => event.target.closest('a') && (phoneToc.open = false));
+})();
+</script>

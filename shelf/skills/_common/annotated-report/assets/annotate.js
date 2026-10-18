@@ -1,40 +1,44 @@
-// annotate.js — annotation layer for HTML report pages (ES2020, no dependencies; inline it with ./inline.mjs). In
-// claude.ai (capabilities: {comments: {}}) notes go to Claude or stay comments; elsewhere they are kept and exported.
+// annotate.js — annotation layer for HTML report pages (ES2020, no dependencies; inline it with ./inline.mjs, which
+// drops whole-line comments and indentation, so multi-line strings here hold neither). Note selected text, a tapped
+// element or nothing (留言); notes stay marked on the page, live in localStorage (keyed by data-source and title) and
+// copy out as one compact list to paste into any agent's chat.
 (() => {
     'use strict';
     if (window.__annotate) return;
     const tag = document.currentScript || document.querySelector('script[data-annotate]');
     const opt = (name, fallback) => (tag && tag.getAttribute('data-' + name)) || fallback;
-    const cfg = { source: opt('source', ''), agent: opt('agent', 'claude'), label: opt('label', '批注') };
-    const LIMIT = 4096; // UTF-8 bytes
-    const CTRL = /[\0-\x08\v\f\x0e-\x1f\x7f]/g; // rejected by the platform; newline and tab pass
-    const HEADS = 'h1,h2,h3,h4,h5,h6';
-    const BLOCK = `[data-anchor],[data-comment-target],figure,img,video,svg,tr,li,p,pre,blockquote,${HEADS}`;
+    const cfg = { source: opt('source', ''), label: opt('label', '批注') };
+    const HEADS = 'h2,h3,h4,h5,h6'; // the h1 is the page title
+    const BLOCK = `[data-anchor],figure,img,video,svg,tr,li,p,pre,blockquote,h1,${HEADS}`;
     const CARD = /(^|\s)[\w-]*(card|decision|item)(\s|$)/i;
     const TOP = /^(html|body|main)$/;
-    const WHY = { writers_only: '只有能编辑这页的人能发给 Claude', no_session: '现在没有在线的 Claude 会话' };
-    const KIND = { local: '存在本机', claude: '已发给 Claude', comment: '已留批注' };
-    const S = { mode: 'local', why: '', local: [], sent: [] };
-    let root, ring, pins, chip, banner, pill, badge, list, scrim, toastEl, hovered, raf, timer;
+    const NUM = /^(?:§\s*)?(\d+(?:\.\d+)*|[一二三四五六七八九十百]+(?=、)|[A-Z]{1,3}-?\d+(?:\.\d+)*)/; // 4.1 三 E1 PA-071
+    const HL = !!(window.CSS && CSS.highlights && window.Highlight); // text marks; without it the block gets a pin
+    const S = { notes: [], marks: new Map(), maps: new Map(), pinned: [], marked: [] };
+    let root, ring, pins, chip, banner, pill, list, badge, scrim, toastEl, hovered, raf, timer;
 
+    const DARK = `--ann-bg:#27242c;--ann-fg:#f3eee6;--ann-mute:#aea6b4;--ann-line:#ffffff2e;--ann-soft:#35313b;--ann-hi:#f2a65e;
+--ann-ink:#24170b;--ann-ring:#f6a55c;--ann-wash:#f6a55c24;--ann-bad:#ff8f86;--ann-sh:0 12px 32px -10px #000d;color-scheme:dark`;
     const STYLE = `[data-annotate-ui]{all:revert;box-sizing:border-box;font:inherit;-webkit-tap-highlight-color:transparent}
 [data-annotate-ui][hidden]{display:none!important}
 [data-annotate-ui]:focus-visible{outline:2px solid var(--ann-ring);outline-offset:2px}
-.ann-root{position:absolute;left:0;top:0;z-index:2147483000;color-scheme:light dark;--ann-bg:#fffdf9;--ann-fg:#25222a;--ann-mute:#68626e;
+.ann-root{position:absolute;left:0;top:0;z-index:2147483000;color-scheme:light;--ann-bg:#fffdf9;--ann-fg:#25222a;--ann-mute:#68626e;
 --ann-line:#25222a29;--ann-soft:#f2ede5;--ann-hi:#b8551a;--ann-ink:#fff;--ann-ring:#e8742a;--ann-wash:#e8742a1f;--ann-bad:#b3261e;
 --ann-sh:0 12px 32px -10px #0007;--ann-b:max(14px,env(safe-area-inset-bottom));color:var(--ann-fg);
 font:15px/1.55 system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif}
-@media (prefers-color-scheme:dark){.ann-root{--ann-bg:#27242c;--ann-fg:#f3eee6;--ann-mute:#aea6b4;--ann-line:#ffffff2e;--ann-soft:#35313b;
---ann-hi:#f2a65e;--ann-ink:#24170b;--ann-ring:#f6a55c;--ann-wash:#f6a55c24;--ann-bad:#ff8f86;--ann-sh:0 12px 32px -10px #000d}}
-.ann-btn,.ann-pill,.ann-list,.ann-panel,.ann-ta,.ann-item{border:1px solid var(--ann-line);background:var(--ann-bg);color:var(--ann-fg)}
-.ann-btn,.ann-pill,.ann-list,.ann-chip,.ann-pin,.ann-x,.ann-link{cursor:pointer;touch-action:manipulation}
-.ann-pill,.ann-list,.ann-panel,.ann-banner,.ann-toast,.ann-chip{box-shadow:var(--ann-sh)}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .ann-root{${DARK}}}
+:root[data-theme=dark] .ann-root{${DARK}}
+::highlight(ann){background-color:#ffbf0047}
+::highlight(ann-now){background-color:#ff8c00a6}
+[data-ann-mark]{outline:2px dashed #e8742ab3;outline-offset:3px}
+.ann-btn,.ann-panel,.ann-ta,.ann-item{border:1px solid var(--ann-line);background:var(--ann-bg);color:var(--ann-fg)}
+.ann-btn,.ann-chip,.ann-pin,.ann-x,.ann-link,.ann-jump{cursor:pointer;touch-action:manipulation}
+.ann-dock .ann-btn,.ann-panel,.ann-banner,.ann-toast,.ann-chip{box-shadow:var(--ann-sh)}
 .ann-dock{position:fixed;right:max(14px,env(safe-area-inset-right));bottom:var(--ann-b);display:flex;gap:8px}
-.ann-btn,.ann-pill,.ann-list{min-height:40px;padding:0 16px;border-radius:22px;font-weight:600}
-.ann-pill,.ann-list{display:inline-flex;align-items:center;gap:6px;min-width:44px;min-height:44px}
-.ann-pill[aria-pressed=true],.ann-badge,.ann-primary,.ann-pin{border-color:transparent;background:var(--ann-hi);color:var(--ann-ink)}
+.ann-btn{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 16px;border-radius:22px;font-weight:600}
+.ann-dock .ann-btn{min-width:44px;min-height:44px}
+.ann-pill[aria-pressed=true],.ann-primary,.ann-pin,.ann-badge{border-color:transparent;background:var(--ann-hi);color:var(--ann-ink)}
 .ann-badge{min-width:20px;padding:0 6px;border-radius:10px;font-size:12px;line-height:20px;text-align:center}
-.ann-pill[aria-pressed=true] .ann-badge{background:var(--ann-ink);color:var(--ann-hi)}
 .ann-banner,.ann-toast,.ann-chip{position:fixed;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 24px);
 padding:8px 14px;border:0;border-radius:18px;background:var(--ann-fg);color:var(--ann-bg);font-size:14px;text-align:center}
 .ann-banner,.ann-toast,.ann-ring{pointer-events:none}
@@ -42,7 +46,7 @@ padding:8px 14px;border:0;border-radius:18px;background:var(--ann-fg);color:var(
 .ann-toast{z-index:1;bottom:calc(var(--ann-b) + 58px)}
 .ann-chip{position:absolute;transform:none;min-height:40px;padding:0 16px;font-weight:600}
 .ann-ring{position:absolute;border:2px solid var(--ann-ring);border-radius:8px;background:var(--ann-wash)}
-.ann-flash{animation:ann-flash .9s ease-out forwards}
+.ann-flash{animation:ann-flash .8s ease-out 2}
 @keyframes ann-flash{from{box-shadow:0 0 0 0 var(--ann-ring)}to{box-shadow:0 0 0 14px transparent;opacity:0}}
 .ann-pin{position:absolute;width:24px;height:24px;padding:0;border:2px solid var(--ann-bg);border-radius:12px;font-size:12px;
 font-weight:700;line-height:20px}
@@ -53,42 +57,37 @@ font-weight:700;line-height:20px}
 .ann-sheet{position:fixed;left:0;right:0;bottom:0;max-height:80vh;border-radius:16px 16px 0 0;padding-bottom:var(--ann-b)}
 .ann-head,.ann-row,.ann-meta{display:flex;align-items:center;gap:8px}
 .ann-row{flex-wrap:wrap;justify-content:flex-end}
-.ann-meta{justify-content:space-between}
-.ann-head>:first-child,.ann-count{flex:1}
-.ann-loc,.ann-meta,.ann-hint,.ann-count{margin:0;font-size:13px;color:var(--ann-mute)}
+.ann-head>:first-child,.ann-meta>:first-child{flex:1}
+.ann-loc,.ann-hint{margin:0;font-size:13px;color:var(--ann-mute)}
 .ann-loc,.ann-quote,.ann-note{overflow-wrap:anywhere}
 .ann-hint:empty{display:none}
-.ann-bad{color:var(--ann-bad)}
 .ann-x{width:36px;height:36px;margin:-8px -10px -8px 0;border:0;background:none;color:var(--ann-mute);font-size:17px}
+.ann-jump{display:block;width:100%;padding:0;border:0;background:none;color:inherit;text-align:left}
 .ann-quote{margin:0;padding:6px 10px;border-left:3px solid var(--ann-ring);border-radius:4px;background:var(--ann-soft);font-size:14px;
 display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden}
 .ann-ta{display:block;width:100%;min-height:96px;padding:10px 12px;border-radius:10px;font-size:16px;resize:vertical}
 .ann-btn:disabled{opacity:.45;cursor:default}
 .ann-items{display:grid;gap:10px;margin:0;padding:0;list-style:none}
-.ann-item{display:grid;gap:6px;padding:10px 12px;border-radius:10px}
+.ann-item{display:grid;gap:6px;padding:6px 12px 10px;border-radius:10px}
+.ann-on{border-color:var(--ann-ring);box-shadow:0 0 0 3px var(--ann-wash)}
 .ann-note{white-space:pre-wrap}
 .ann-drawer>.ann-acts{position:sticky;bottom:0;padding-top:8px;background:var(--ann-bg);box-shadow:0 40px var(--ann-bg)}
-.ann-link{padding:6px 4px;border:0;background:none;color:var(--ann-bad)}
+.ann-link{min-height:36px;padding:0 8px;border:0;background:none;color:var(--ann-hi);font-size:14px}
+.ann-bad{color:var(--ann-bad)}
 html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
 @media (pointer:coarse){html[data-annotating] body :not([data-annotate-ui]){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-.ann-btn,.ann-chip{min-height:44px}}
+.ann-btn,.ann-chip,.ann-link{min-height:44px}}
 @media (prefers-reduced-motion:reduce){.ann-flash{animation:none}}`;
     // static markup; page and reader text goes in through textContent only
     const X = '<button type="button" class="ann-x" aria-label="关闭">✕</button>';
-    const ROOT = `<div class="ann-root" data-uncommentable><style>${STYLE}</style><div class="ann-pins"></div><div class="ann-ring" hidden></div><button type="button" class="ann-chip" hidden>批注这段</button><div class="ann-banner" hidden></div><div class="ann-dock"><button type="button" class="ann-list" hidden>清单</button><button type="button" class="ann-pill" aria-pressed="false"><span></span><span class="ann-badge" hidden></span></button></div><div class="ann-toast" role="status" hidden></div><div class="ann-scrim" hidden></div></div>`;
-    const COMPOSER = `<div class="ann-panel ann-composer" role="dialog" aria-label="写批注"><div class="ann-head"><span class="ann-loc"></span>${X}</div><blockquote class="ann-quote"></blockquote><textarea class="ann-ta" rows="4" placeholder="写下你的意见…" aria-label="批注内容"></textarea><p class="ann-hint" aria-live="polite"></p><div class="ann-row"><span class="ann-count"></span><span class="ann-row ann-acts"></span></div></div>`;
-    const DRAWER = `<div class="ann-panel ann-drawer" role="dialog" aria-label="批注清单"><div class="ann-head"><strong></strong>${X}</div><p class="ann-hint" aria-live="polite"></p><ol class="ann-items"></ol><textarea class="ann-ta" readonly hidden aria-label="导出的批注"></textarea><div class="ann-row ann-acts"></div></div>`;
-    const ITEM = `<li class="ann-item"><div class="ann-loc"></div><div class="ann-quote"></div><div class="ann-note"></div><div class="ann-meta"><span></span></div></li>`;
+    const ROOT = `<div class="ann-root"><style>${STYLE}</style><div class="ann-pins"></div><div class="ann-ring" hidden></div><button type="button" class="ann-chip" hidden>批注这段</button><div class="ann-banner" hidden></div><div class="ann-dock"><button type="button" class="ann-btn ann-free">留言</button><button type="button" class="ann-btn ann-list" hidden>清单<span class="ann-badge"></span></button><button type="button" class="ann-btn ann-pill" aria-pressed="false"></button></div><div class="ann-toast" role="status" hidden></div><div class="ann-scrim" hidden></div></div>`;
+    const COMPOSER = `<div class="ann-panel ann-composer" role="dialog" aria-label="写批注"><div class="ann-head"><span class="ann-loc"></span>${X}</div><blockquote class="ann-quote"></blockquote><textarea class="ann-ta" rows="4" enterkeyhint="done" placeholder="写下你的意见…（回车存下，Shift+回车换行）" aria-label="批注内容"></textarea><p class="ann-hint" aria-live="polite"></p><div class="ann-row"><button type="button" class="ann-btn ann-primary">存下来</button></div></div>`;
+    const DRAWER = `<div class="ann-panel ann-drawer" role="dialog" aria-label="批注清单"><div class="ann-head"><strong></strong>${X}</div><p class="ann-hint" aria-live="polite"></p><ol class="ann-items"></ol><textarea class="ann-ta" readonly hidden aria-label="批注清单全文"></textarea><div class="ann-row ann-acts"></div></div>`;
+    const ITEM = `<li class="ann-item"><div class="ann-meta"><span class="ann-loc"></span></div><button type="button" class="ann-jump" title="跳到原处"><span class="ann-quote"></span></button><div class="ann-note"></div></li>`;
 
     const squash = (s) => (s ? String(s) : '').replace(/\s+/g, ' ').trim();
-    const key = (s) => s.replace(/[\s§·]/g, '');
     const clip = (s, n, chars = Array.from(s)) => (chars.length > n ? chars.slice(0, n - 1).join('') + '…' : s);
-    const bytes = (s) => new TextEncoder().encode(s).length;
-    const clean = (s) => s.replace(/\r\n?/g, '\n').replace(CTRL, '').trim();
-    const two = (n) => String(n).padStart(2, '0');
-    const stamp = (d = new Date()) =>
-        `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
-    const safe = (fn, fallback) => new Promise((resolve) => resolve(fn())).catch(() => fallback);
+    const clean = (s) => s.replace(/\r\n?/g, '\n').trim();
     const attempt = (fn, fallback) => {
         try {
             return fn();
@@ -96,27 +95,31 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
             return fallback;
         }
     };
-    // local notes in localStorage; copies of what was sent this visit in sessionStorage
-    const load = (area, key) =>
-        [].concat(attempt(() => JSON.parse(window[area].getItem(key)), []) || []).filter((n) => n && n.at && n.note);
-    const persist = () => {
-        S.volatile = !attempt(() => (localStorage.setItem(S.key, JSON.stringify(S.local)), true), false);
-        attempt(() => sessionStorage.setItem(S.key + ':sent', JSON.stringify(S.sent)));
-    };
-    const all = () => [...S.sent, ...S.local].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-    const exportMarkdown = () => {
-        const lines = [`# 页面批注：${squash(document.title) || '无标题'}`];
-        lines.push(`来源：${cfg.source || location.href}  ·  ${stamp()}`);
-        lines.push('请逐条处理下面的批注（位置 + 原文 + 我的意见）；改完一条在回复里说改了什么。', '');
-        all().forEach((n, i) => {
-            const pad = ' '.repeat(String(i + 1).length + 2);
-            lines.push(`${i + 1}. 位置：${n.label}`, `${pad}原文：「${clip(n.quote, 300)}」`);
-            lines.push(`${pad}批注：${n.note.split('\n').join('\n' + pad)}`, '');
+    // storage can be missing or throw (private mode, blocked site data): the notes then live for this visit only
+    const load = () =>
+        []
+            .concat(attempt(() => JSON.parse(localStorage.getItem(S.key)), []) || [])
+            .flatMap((n) =>
+                n && n.id && n.note ? [{ ...n, kind: /^[ten]$/.test(n.kind) ? n.kind : 'e', loc: n.loc || '' }] : []
+            );
+    const save = () =>
+        (S.volatile = !attempt(() => (localStorage.setItem(S.key, JSON.stringify(S.notes)), true), false));
+    // the copied list: a two-line header, then per note its number, [place]「quote」 and the note verbatim below
+    const exportText = () => {
+        const items = S.notes.map((n, i) => {
+            const at =
+                n.kind === 'n' ? '[留言]' : (n.loc ? `[${n.loc}]` : '') + (n.quote ? `「${clip(n.quote, 100)}」` : '');
+            return `${i + 1}. ${at || '[页面]'}\n${n.note}`;
         });
-        return lines.join('\n');
+        const title = squash(document.title) || '无标题';
+        const head = `批注｜${title}${cfg.source ? `（${cfg.source}）` : ''}\n逐条处理，回复按编号说改了什么。`;
+        return `${head}\n\n${items.join('\n\n')}\n`;
     };
-    const api = { mode: S.mode, notes: () => all().map((n) => ({ ...n })), exportMarkdown };
-    window.__annotate = Object.assign(api, { clear: () => ((S.local = []), (S.sent = []), persist(), paint()) });
+    window.__annotate = {
+        notes: () => S.notes.map((n) => ({ ...n })),
+        exportText,
+        clear: () => ((S.notes = []), S.marks.clear(), save(), paint())
+    };
 
     const make = (html) => {
         const box = document.createElement('div');
@@ -124,19 +127,45 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         for (const e of box.querySelectorAll('*')) e.setAttribute('data-annotate-ui', '');
         return box.firstElementChild;
     };
-    const $ = (el, ...selectors) => selectors.map((s) => el.querySelector(s));
-    const fill = (el, texts) => {
-        for (const [selector, text] of Object.entries(texts)) el.querySelector(selector).textContent = text;
-        return el;
-    };
+    const $ = (el, selectors) => selectors.split(' ').map((s) => el.querySelector(s));
     const button = (text, cls, onclick) =>
         Object.assign(make(`<button type="button" class="${cls}"></button>`), { textContent: text, onclick });
+    // acts on a second tap within 3 s: window.confirm does nothing inside artifacts
+    const twice = (text, armed, cls, act) => {
+        const b = button(text, cls, () => {
+            if (b.dataset.armed) return act();
+            Object.assign(b, { textContent: armed }).dataset.armed = 1;
+            setTimeout(() => (delete b.dataset.armed, (b.textContent = text)), 3000);
+        });
+        return b;
+    };
+    // a note field: Enter saves, Shift+Enter breaks the line, and an Enter that commits an IME candidate does neither;
+    // Escape runs `cancel` when given. Listeners, not on* properties: an on* handler that returns false cancels the key
+    const field = (ta, save, cancel) => {
+        let composing = false;
+        ta.addEventListener('compositionstart', () => (composing = true));
+        ta.addEventListener('compositionend', () => setTimeout(() => (composing = false)));
+        ta.addEventListener('keydown', (e) => {
+            if (composing || e.isComposing || e.keyCode === 229) return;
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                save();
+            } else if (e.key === 'Escape' && cancel) {
+                e.stopPropagation();
+                cancel();
+            }
+        });
+        return ta;
+    };
     const inUI = (n) => !!(n && n.nodeType && root.contains(n));
     const place = (el, x, y) => Object.assign(el.style, { left: `${x}px`, top: `${y}px` });
+    // outline `el` with `box`, kept inside the viewport's width so it never widens the page
     const frame = (box, el) => {
         const [r, o] = [el.getBoundingClientRect(), root.getBoundingClientRect()];
-        place(box, r.left - o.left - 4, r.top - o.top - 4);
-        Object.assign(box.style, { width: `${r.width + 8}px`, height: `${r.height + 8}px` });
+        const left = Math.max(r.left - 4, 2);
+        const right = Math.min(r.right + 4, document.documentElement.clientWidth - 2);
+        place(box, left - o.left, r.top - o.top - 4);
+        Object.assign(box.style, { width: `${Math.max(right - left, 8)}px`, height: `${r.height + 8}px` });
     };
 
     const isBlock = (e) => e.matches(BLOCK) || CARD.test(e.getAttribute('class') || '');
@@ -145,45 +174,23 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         for (let e = start; e && !TOP.test(e.localName); e = e.parentElement) if (isBlock(e)) return e;
         return start && !TOP.test(start.localName) ? start : null;
     };
-    const boxOf = (e) => {
-        for (e = e.parentElement; e && !TOP.test(e.localName); e = e.parentElement) if (isBlock(e)) return e;
-    };
-    // preceding headings h1 › h2 › h3; a heading inside another card is that card's title
-    const chainOf = (el) => {
-        const stack = [];
-        for (const hd of document.querySelectorAll(HEADS)) {
-            if (hd !== el && !(hd.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) break;
-            const box = boxOf(hd);
-            if (box && !box.contains(el)) continue;
-            while (stack.length && stack[stack.length - 1][0] >= hd.localName[1]) stack.pop();
-            stack.push([hd.localName[1], clip(squash(hd.textContent), 40)]);
+    const headingOf = (el) => {
+        let last = null;
+        for (const h of document.querySelectorAll(HEADS)) {
+            if (h !== el && !(h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) break;
+            if (!inUI(h)) last = h;
         }
-        const [title, h1] = [squash(document.title), stack[0] && stack[0][0] === '1' && stack[0][1]];
-        if (h1 && title && (title.includes(h1) || h1.includes(title))) stack.shift();
-        return stack.map((x) => x[1]).filter(Boolean);
+        return last;
     };
-    const labelOf = (el) => {
-        const out = chainOf(el);
-        const n = out.length;
-        // names compare without spaces and § · marks, so a heading and its own data-anchor count once
-        const add = (node, s = node && node.textContent) => {
-            s = clip(squash(s), 40);
-            const k = s && key(s);
-            if (!k) return;
-            const same = out.findIndex((x) => key(x) === k);
-            if (same >= 0) return void (s.length > out[same].length && (out[same] = s));
-            if (out.some((x) => key(x).includes(k))) return;
-            for (let i = out.length - 1; i >= n; i--) if (k.includes(key(out[i]))) out.splice(i, 1);
-            if (out.length < n + 2) out.push(s);
-        };
-        const [anchored, figure, table] = [el.closest('[data-anchor]'), el.closest('figure'), el.closest('table')];
-        add(anchored, anchored && anchored.getAttribute('data-anchor'));
-        add(el, el.getAttribute('aria-label'));
-        add(figure && figure.querySelector(':scope > figcaption'));
-        add(table && table.caption);
-        add(el.querySelector(HEADS) || (boxOf(el) || el).querySelector(HEADS)); // or its card's title
-        if (out.length === n && el.id) add(el, '#' + el.id);
-        return out.join(' › ') || squash(document.title) || '页面';
+    // the shortest name to find the place by in the source: the nearest data-anchor, the element's id, else the
+    // number (or the start) of its own or the preceding heading
+    const locOf = (el) => {
+        const anchored = el.closest('[data-anchor]');
+        if (anchored) return clip(squash(anchored.getAttribute('data-anchor')), 24);
+        if (el.id) return '#' + el.id;
+        const text = squash((el.querySelector(HEADS) || headingOf(el) || {}).textContent);
+        const m = text.match(NUM);
+        return m ? m[1] : clip(text, 16);
     };
     const summary = (el) => {
         const name = el.localName;
@@ -201,7 +208,17 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         }
         return ['body', ...parts].join(' > ');
     };
-    const target = (el, quote) => ({ el, quote, label: labelOf(el), path: pathOf(el) });
+    // a note's target; a text one also keeps where its quote starts in the block, to find the same words again
+    const target = (el, quote, range) => {
+        const t = { kind: range ? 't' : 'e', el, quote, range, loc: locOf(el), path: pathOf(el) };
+        if (range) {
+            const before = document.createRange();
+            before.setStart(el, 0);
+            before.setEnd(range.startContainer, range.startOffset);
+            t.off = before.toString().replace(/\s/g, '').length;
+        }
+        return t;
+    };
     const selInfo = () => {
         const sel = getSelection();
         const range = sel && !sel.isCollapsed && sel.rangeCount && sel.getRangeAt(0);
@@ -211,108 +228,135 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         if (!el || !text || inUI(el) || inUI(document.activeElement)) return null;
         return el.closest('input,textarea,[contenteditable]') ? null : { range: range.cloneRange(), text, el };
     };
-    const fromSelection = (s) => target(blockOf(s.el) || blockOf(s.range.startContainer) || s.el, clip(s.text, 1000));
+    const fromSelection = (s) => target(blockOf(s.el) || s.el, clip(s.text, 1000), s.range);
     const below = (r) => ({ x: r.left, y: r.bottom });
 
-    // modes: claude (send to Claude), comments (comment only), local (this device)
-    const setMode = (mode, why = '') => {
-        const changed = mode !== S.mode || why !== S.why; // a fresh answer must not wipe an error on screen
-        Object.assign(S, { mode, why });
-        api.mode = mode;
-        if (S.refresh) S.refresh(changed);
-        paint();
+    // Marks. A text note is found again by its words (whitespace ignored; the hit nearest its old offset), in its
+    // block first and then anywhere on the page. An element note, or text no longer found, outlines its element.
+    const textMap = (el) => {
+        let map = S.maps.get(el);
+        if (map) return map;
+        map = { flat: '', nodes: [], offs: [] };
+        const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+            if (inUI(n) || n.parentElement.closest('script,style,noscript,template')) continue;
+            for (let i = 0; i < n.data.length; i++)
+                if (!/\s/.test(n.data[i])) ((map.flat += n.data[i]), map.nodes.push(n), map.offs.push(i));
+        }
+        S.maps.set(el, map);
+        return map;
     };
-    // claude.ai's own answer goes on screen as a code: the reasons differ by view and are not all documented
-    const recheck = async (ns = S.ns) => {
-        const can = String(await safe(() => ns.canSendToClaude(), 'error'));
-        const why = `${WHY[can] || 'claude.ai 说这里发不到 Claude'}（${can}）。会留成这页的评论，回聊天说「看批注」就行`;
-        if (S.ns === ns) setMode(can === 'available' ? 'claude' : 'comments', can === 'available' ? '' : why);
+    const findText = (el, quote, near) => {
+        const needle = quote.replace(/…$/, '').replace(/\s/g, '');
+        const map = needle && textMap(el);
+        let at = -1;
+        for (let i = needle ? map.flat.indexOf(needle) : -1; i >= 0; i = map.flat.indexOf(needle, i + 1))
+            if (at < 0 || Math.abs(i - near) < Math.abs(at - near)) at = i;
+        if (at < 0) return null;
+        const [end, range] = [at + needle.length - 1, document.createRange()];
+        range.setStart(map.nodes[at], map.offs[at]);
+        range.setEnd(map.nodes[end], map.offs[end] + 1);
+        return range;
     };
-    const detect = async () => {
-        if (cfg.agent !== 'claude' || !window.claude || typeof window.claude.use !== 'function') return;
-        // use() never answers synchronously and may hang: after 10 s the page stays local
-        const wait = new Promise((resolve) => setTimeout(resolve, 1e4));
-        const ns = await Promise.race([safe(() => window.claude.use('comments')), wait]);
-        if (ns && !S.off) recheck((S.ns = ns));
+    const markOf = (n) => {
+        let m = S.marks.get(n.id);
+        if (m && m.el.isConnected && (!m.range || m.range.startContainer.isConnected)) return m;
+        const el = n.kind !== 'n' && attempt(() => document.querySelector(n.path), null);
+        const range =
+            n.kind === 't' && ((el && findText(el, n.quote, n.off || 0)) || findText(document.body, n.quote, 0));
+        m = { el: el || (range && blockOf(range.startContainer)), range: range || null };
+        if (m.el) S.marks.set(n.id, m);
+        return m;
+    };
+    const paint = () => {
+        if (!root) return;
+        S.maps = new Map();
+        for (const el of S.marked) el.removeAttribute('data-ann-mark');
+        const ranges = [];
+        [S.pinned, S.marked] = [[], []];
+        S.notes.forEach((n, i) => {
+            const m = markOf(n);
+            if (m.range && HL) return ranges.push(m.range);
+            if (!m.el) return;
+            S.pinned.push([m.el, n, i]);
+            if (!TOP.test(m.el.localName)) S.marked.push(m.el);
+        });
+        for (const el of S.marked) el.setAttribute('data-ann-mark', '');
+        if (HL) CSS.highlights.set('ann', new Highlight(...ranges));
+        badge.textContent = S.notes.length;
+        list.hidden = !S.notes.length;
+        renderPins();
+    };
+    const renderPins = () => {
+        pins.textContent = '';
+        const [o, w] = [root.getBoundingClientRect(), document.documentElement.clientWidth];
+        for (const [el, n, i] of S.pinned) {
+            const r = el.getBoundingClientRect();
+            if (!r.width && !r.height) continue;
+            const pin = button(String(i + 1), 'ann-pin', () => openDrawer(n.id));
+            pin.setAttribute('aria-label', `第 ${i + 1} 条批注`);
+            place(pin, Math.min(r.right - 18, w - 28) - o.left, r.top - 10 - o.top);
+            pins.append(pin);
+        }
+    };
+    const later = () => {
+        if (raf) return;
+        raf = requestAnimationFrame(() => {
+            raf = 0;
+            renderPins();
+            if (hovered && !ring.hidden) frame(ring, hovered);
+        });
+    };
+    const flash = (m) => {
+        if (m && m.range && HL) {
+            CSS.highlights.set('ann-now', new Highlight(m.range));
+            clearTimeout(flash.timer);
+            flash.timer = setTimeout(() => CSS.highlights.delete('ann-now'), 1600);
+        } else if (m && m.el && m.el.isConnected) {
+            const f = root.appendChild(make('<div class="ann-ring ann-flash"></div>'));
+            frame(f, m.el);
+            setTimeout(() => f.remove(), 1600);
+        }
+    };
+    const jump = (n) => {
+        const m = markOf(n);
+        const node = m.range && m.range.startContainer;
+        const el = (node && (node.nodeType === 1 ? node : node.parentElement)) || m.el;
+        if (!el) return toast('页面上找不到这一处了');
+        closePanel();
+        const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+        el.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' });
+        flash(m);
     };
 
     const openComposer = (t, pt) => {
         closePanel();
         hideChip();
-        const ns = (S.t = t) && S.ns;
-        if (ns) t.anchor = safe(() => ns.anchorFor(t.el)); // geometry read at the reader's gesture
-        const head = `〔${t.label}〕\n「${clip(t.quote, 200)}」\n\n`;
-        const room = LIMIT - bytes(head);
-        const panel = fill(make(COMPOSER), { '.ann-loc': t.label, '.ann-quote': t.quote });
-        const [ta, hint, count, acts] = $(panel, 'textarea', '.ann-hint', '.ann-count', '.ann-acts');
-        const say = (msg, bad) => (hint.classList.toggle('ann-bad', !!bad), (hint.textContent = msg || ''));
-        const act = (text, kind, primary, off) => {
-            const b = button(text, primary ? 'ann-btn ann-primary' : 'ann-btn', () => submit(kind));
-            return Object.assign(b, { disabled: !!(off || S.busy || bytes(clean(ta.value)) > room) });
-        };
-        const refresh = (withHint) => {
-            const [used, send] = [bytes(clean(ta.value)), !t.noSend];
-            count.textContent = `${used} / ${room} 字节`;
-            count.classList.toggle('ann-bad', used > room);
-            if (S.mode !== 'claude') acts.replaceChildren(act(S.mode === 'local' ? '存下来' : '留批注', S.mode, true));
-            else acts.replaceChildren(act('只留批注', 'comments', !send), act('发给 Claude', 'claude', send, !send));
-            const why = S.why || (S.mode === 'local' ? '存在本机，可在「清单」里复制给 agent' : '');
-            if (withHint) say(S.mode === 'claude' ? '' : why);
-        };
-        const submit = async (kind, ns = S.ns) => {
-            const note = clean(ta.value);
-            if (!note || bytes(note) > room) return say(note ? '太长了' : '先写点什么', true);
-            if (kind === 'local' || !ns) return done(t, note, 'local');
-            S.busy = true;
-            refresh();
-            let code = '';
-            try {
-                const anchor = (await t.anchor) || (await ns.anchorFor(t.el));
-                const text = head + note;
-                await (kind === 'claude' ? ns.sendToClaude({ anchor, text }) : ns.create({ anchor, text }));
-            } catch (error) {
-                code = String((error && error.code) || 'upstream_error');
-            }
-            S.busy = false;
-            if (code) fail(t, note, kind, code);
-            else done(t, note, kind === 'claude' ? kind : 'comment');
-            if (S.refresh) S.refresh();
-        };
-        ta.oninput = () => refresh();
-        Object.assign(S, { ta, say, refresh });
-        refresh(true);
+        const panel = make(COMPOSER);
+        const [loc, quote, ta, hint, store] = $(panel, '.ann-loc .ann-quote textarea .ann-hint .ann-primary');
+        loc.textContent = t.kind === 'n' ? '留言' : t.loc || '批注';
+        Object.assign(quote, { textContent: t.quote || '', hidden: !t.quote });
+        if (S.volatile) hint.textContent = '这里存不住，刷新就会丢，写完记得在「清单」里复制';
+        store.onclick = () => (clean(ta.value) ? add(t, clean(ta.value)) : (hint.textContent = '先写点什么'));
+        field(ta, () => store.click());
+        Object.assign(S, { t, ta });
         show(panel, pt);
-        frame(ring, t.el);
-        ring.hidden = !(hovered = t.el);
+        if (t.el) frame(ring, t.el);
+        ring.hidden = !(hovered = t.el || null);
         ta.focus({ preventScroll: true });
-        if (ns) recheck();
     };
-    const done = (t, note, kind) => {
+    const add = (t, note) => {
         const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-        const item = { id, at: new Date().toISOString(), kind, label: t.label, quote: t.quote, note, path: t.path };
-        S[kind === 'local' ? 'local' : 'sent'].push(item);
-        persist();
-        if (S.t === t) closePanel();
-        flash(t.el);
+        const n = { id, at: new Date().toISOString(), kind: t.kind, loc: t.loc || '', quote: t.quote || '', note };
+        if (t.kind !== 'n') Object.assign(n, { path: t.path, off: t.off });
+        if (t.el) S.marks.set(id, { el: t.el, range: t.range || null });
+        S.notes.push(n);
+        save();
+        closePanel();
+        if (t.range) getSelection().removeAllRanges();
         paint();
-        toast(kind === 'claude' ? '已发给 Claude' : kind === 'local' ? '存好了' : '批注已留下');
-    };
-    // never retried: a rejected write may still have landed, so only a fresh tap sends again
-    const fail = (t, note, kind, code) => {
-        let msg = `没发出去（${code}），草稿还在`;
-        if (code === 'consent_required') msg = '没有授权这页代你评论，可以在 claude.ai 的评论面板里允许';
-        else if (code === 'rate_limited') msg = '发得太快了，稍后再试';
-        else if (code === 'claude_unavailable') msg = '现在发不到 Claude，可以只留批注';
-        else if (/^(forbidden|not_granted|capability_)/.test(code)) {
-            const why = '这页不能代你评论，批注先存在本机';
-            Object.assign(S, { ns: null, off: true });
-            setMode('local', why);
-            msg = `${why}（${code}），草稿还在`;
-        }
-        t.noSend = t.noSend || code === 'claude_unavailable';
-        if (S.t !== t) return toast(msg);
-        S.refresh(true);
-        S.say(msg, true);
+        flash(S.marks.get(id));
+        toast(S.volatile ? '记下了，但这里存不住，刷新前记得复制' : '记下了');
     };
 
     const show = (panel, pt) => {
@@ -321,6 +365,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         panel.classList.add(narrow ? 'ann-sheet' : pt ? 'ann-pop' : 'ann-side');
         panel.querySelector('.ann-x').onclick = closePanel;
         root.append((S.panel = panel));
+        S.shown = Date.now();
         if (narrow || !pt) return fit();
         const [o, w, h] = [root.getBoundingClientRect(), panel.offsetWidth, panel.offsetHeight];
         let y = pt.y + 14 + h > innerHeight - 8 ? pt.y - 14 - h : pt.y + 14;
@@ -337,97 +382,89 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
     const typed = () => S.ta && clean(S.ta.value);
     const closePanel = () => {
         if (S.panel) S.panel.remove();
-        Object.assign(S, { panel: null, t: null, ta: null, refresh: null });
+        Object.assign(S, { panel: null, t: null, ta: null });
         scrim.hidden = ring.hidden = !(hovered = null);
     };
 
-    const openDrawer = () => {
+    // the list, in writing order: a quote jumps to its place; each note can be edited or deleted
+    const openDrawer = (focus) => {
         closePanel();
-        const items = all();
+        hideChip();
         const panel = make(DRAWER);
-        const [hint, ol, manual, acts, title] = $(panel, '.ann-hint', 'ol', 'textarea', '.ann-acts', 'strong');
-        title.textContent = `批注清单（${items.length}）`;
+        const [title, hint, ol, manual, acts] = $(panel, 'strong .ann-hint ol textarea .ann-acts');
+        title.textContent = `批注清单（${S.notes.length}）`;
         hint.textContent = S.volatile
             ? '这里存不住，刷新就会丢，记得复制'
-            : S.mode === 'comments' && S.sent.length
-              ? '留成评论的批注在 claude.ai 的评论里，回聊天说「看批注」Claude 就能读到'
-              : '';
-        items.forEach((n, i) => {
-            const li = fill(make(ITEM), { '.ann-loc': `${i + 1}. ${n.label}`, '.ann-quote': n.quote });
-            fill(li, { '.ann-note': n.note, span: `${KIND[n.kind]} · ${stamp(new Date(n.at)).slice(5)}` });
-            if (n.kind === 'local') li.lastChild.append(button('删除', 'ann-link', (e) => remove(n, e.currentTarget)));
+            : S.notes.length
+              ? ''
+              : '还没有批注：选中文字点「批注这段」，点「批注」再点内容，或者直接「留言」';
+        let on = null;
+        S.notes.forEach((n, i) => {
+            const li = make(ITEM);
+            const [meta, where, jumper, quote, text] = $(li, '.ann-meta .ann-loc .ann-jump .ann-quote .ann-note');
+            where.textContent = `${i + 1} · ${n.kind === 'n' ? '留言' : n.loc || '页面'}`;
+            if (n.kind === 'n' || !n.quote) jumper.remove();
+            else {
+                jumper.onclick = () => jump(n);
+                quote.textContent = `「${n.quote}」`;
+            }
+            text.textContent = n.note;
+            const del = twice('删', '确认删除', 'ann-link ann-bad', () => drop(n));
+            meta.append(
+                button('改', 'ann-link', () => edit(li, n)),
+                del
+            );
             ol.append(li);
+            if (n.id === focus) on = li;
         });
-        acts.append(button('下载 .md', 'ann-btn', download));
-        acts.append(button('复制给 agent', 'ann-btn ann-primary', () => copy(manual, hint)));
+        if (S.notes.length) acts.append(twice('清空', '确认清空全部', 'ann-link ann-bad', () => drop()));
+        acts.append(button('留言', 'ann-btn', () => openComposer({ kind: 'n' })));
+        const copyAll = button('复制全部', 'ann-btn ann-primary', () => copy(manual, hint));
+        acts.append(Object.assign(copyAll, { disabled: !S.notes.length }));
         show(panel);
+        if (!on) return;
+        on.classList.add('ann-on');
+        on.scrollIntoView({ block: 'nearest' });
+        setTimeout(() => on.classList.remove('ann-on'), 1600);
     };
-    const remove = (n, b) => {
-        if (!b.dataset.armed) {
-            Object.assign(b, { textContent: '确认删除' }).dataset.armed = 1;
-            return setTimeout(() => Object.assign(b, { textContent: '删除' }).removeAttribute('data-armed'), 3000);
-        }
-        S.local = S.local.filter((x) => x.id !== n.id);
-        persist();
+    const edit = (li, n) => {
+        const ta = make('<textarea class="ann-ta" rows="3" enterkeyhint="done" aria-label="改批注"></textarea>');
+        const row = make('<div class="ann-row"></div>');
+        const back = () => openDrawer(n.id);
+        const keep = () => {
+            if (!clean(ta.value)) return ta.focus();
+            n.note = clean(ta.value);
+            save();
+            back();
+            toast('改好了');
+        };
+        field(ta, keep, back).value = n.note;
+        row.append(button('取消', 'ann-btn', back), button('保存', 'ann-btn ann-primary', keep));
+        for (const b of li.querySelectorAll('.ann-meta button')) b.remove();
+        li.querySelector('.ann-note').replaceWith(ta, row);
+        ta.focus();
+    };
+    // one note, or all of them
+    const drop = (n) => {
+        S.notes = n ? S.notes.filter((x) => x !== n) : [];
+        if (n) S.marks.delete(n.id);
+        else S.marks.clear();
+        save();
         paint();
-        if (all().length) openDrawer();
-        else closePanel();
+        openDrawer();
     };
-    const copy = async (manual, hint, md = exportMarkdown()) => {
+    const copy = async (manual, hint, text = exportText()) => {
         try {
-            await navigator.clipboard.writeText(md);
-            return toast('已复制，粘贴给 agent 就行');
+            await navigator.clipboard.writeText(text);
+            return toast('已复制，粘贴到对话里就行');
         } catch {
-            // no async clipboard (iOS frames, plain http): select the text for a manual copy
+            // no async clipboard (some app views, plain http): select the text for a manual copy
         }
-        Object.assign(manual, { hidden: false, value: md }).focus();
-        manual.setSelectionRange(0, md.length);
+        Object.assign(manual, { hidden: false, value: text }).focus();
+        manual.setSelectionRange(0, text.length);
         hint.textContent = '已全部选中，请手动复制';
     };
-    const download = () => {
-        const url = URL.createObjectURL(new Blob([exportMarkdown()], { type: 'text/markdown;charset=utf-8' }));
-        const name = `annotations-${stamp().replace(/\D/g, '')}.md`;
-        const a = Object.assign(make('<a></a>'), { href: url, download: name });
-        root.append(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
-    };
 
-    const renderPins = () => {
-        pins.textContent = '';
-        const o = root.getBoundingClientRect();
-        all().forEach((n, i) => {
-            const el = n.kind === 'local' && attempt(() => document.querySelector(n.path));
-            const r = el && el.getBoundingClientRect();
-            if (!r || !(r.width || r.height)) return;
-            const pin = button(String(i + 1), 'ann-pin', openDrawer);
-            pin.setAttribute('aria-label', `第 ${i + 1} 条批注`);
-            place(pin, r.right - 18 - o.left, r.top - 10 - o.top);
-            pins.append(pin);
-        });
-    };
-    const paint = () => {
-        if (!root) return;
-        const n = all().length;
-        Object.assign(badge, { textContent: n, hidden: !n });
-        list.hidden = !n;
-        renderPins();
-    };
-    const later = () => {
-        if (raf) return;
-        raf = requestAnimationFrame(() => {
-            raf = 0;
-            renderPins();
-            if (hovered && !ring.hidden) frame(ring, hovered);
-        });
-    };
-    const flash = (el) => {
-        if (!el || !el.isConnected) return;
-        const f = root.appendChild(make('<div class="ann-ring ann-flash"></div>'));
-        frame(f, el);
-        setTimeout(() => f.remove(), 900);
-    };
     const toast = (msg) => {
         Object.assign(toastEl, { textContent: msg, hidden: false });
         clearTimeout(toast.timer);
@@ -472,25 +509,52 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
     };
     const onDown = (e) => {
         S.pointer = e.pointerType;
-        if (!S.picking || inUI(e.target)) return;
-        e.stopPropagation();
+        S.down = [e.clientX, e.clientY];
+        if (S.picking && !inUI(e.target)) e.stopPropagation();
     };
-    const onKey = (e) => e.key === 'Escape' && (S.panel ? closePanel() : S.picking ? setPicking(false) : hideChip());
+    // outside annotate mode, a tap on marked text (not on a control) opens its note in the list
+    const onUp = (e) => {
+        const [down, x, y] = [S.down, e.clientX, e.clientY];
+        S.down = null;
+        if (S.picking) return inUI(e.target) || e.stopPropagation();
+        if (!HL || S.panel || !down || inUI(e.target) || Math.hypot(x - down[0], y - down[1]) > 8) return;
+        if (e.target.closest && e.target.closest('a,button,input,select,textarea,summary,label')) return;
+        const within = (r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+        const hit = S.notes.find((n) => {
+            const m = S.marks.get(n.id);
+            return m && m.range && [...m.range.getClientRects()].some(within);
+        });
+        if (hit) setTimeout(() => getSelection().isCollapsed && openDrawer(hit.id));
+    };
+    // Escape closes the panel, then leaves annotate mode; not while an IME candidate is open (Escape cancels it)
+    const onKey = (e) =>
+        e.key === 'Escape' &&
+        !e.isComposing &&
+        e.keyCode !== 229 &&
+        (S.panel ? closePanel() : S.picking ? setPicking(false) : hideChip());
 
     const start = () => {
-        S.key = `annotate:${location.pathname}|${squash(document.title)}`;
-        S.local = load('localStorage', S.key);
-        S.sent = load('sessionStorage', S.key + ':sent');
+        S.key = `annotate:${cfg.source || location.pathname}|${squash(document.title)}`;
+        S.notes = load();
+        const probe = S.key + ':probe';
+        S.volatile = !attempt(() => (localStorage.setItem(probe, 1), localStorage.removeItem(probe), 1));
         root = make(ROOT);
-        const parts = '.ann-pins .ann-ring .ann-chip .ann-banner .ann-list .ann-pill .ann-badge .ann-toast .ann-scrim';
-        [pins, ring, chip, banner, list, pill, badge, toastEl, scrim] = $(root, ...parts.split(' '));
-        pill.firstChild.textContent = cfg.label;
+        const parts =
+            '.ann-pins .ann-ring .ann-chip .ann-banner .ann-free .ann-list .ann-badge .ann-pill .ann-toast .ann-scrim';
+        let free;
+        [pins, ring, chip, banner, free, list, badge, pill, toastEl, scrim] = $(root, parts);
+        pill.textContent = cfg.label;
         banner.textContent = `点一下要批注的内容 · 再点「${cfg.label}」退出`;
         pill.onclick = () => closePanel() || setPicking(!S.picking);
+        free.onclick = () => openComposer({ kind: 'n' });
         list.onclick = () => (S.panel && S.panel.matches('.ann-drawer') ? closePanel() : openDrawer());
-        scrim.onclick = () => typed() || closePanel();
+        // the tap that opened a sheet must not close it again through the scrim
+        scrim.onclick = () => Date.now() - S.shown > 400 && !typed() && closePanel();
         chip.onmousedown = (e) => e.preventDefault(); // keep the selection on desktop
         chip.onclick = () => S.sel && openComposer(fromSelection(S.sel), below(S.sel.range.getBoundingClientRect()));
+        // keys pressed inside the layer stay there: the page's own shortcuts never see them
+        for (const type of ['keydown', 'keypress', 'keyup'])
+            root.addEventListener(type, (e) => (e.stopPropagation(), type === 'keydown' && onKey(e)));
         document.body.append(root);
 
         const passive = { capture: true, passive: true };
@@ -499,11 +563,12 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
             S.picking && !S.panel && e.pointerType === 'mouse' && hover(inUI(e.target) ? null : blockOf(e.target));
         addEventListener('click', onClick, true);
         addEventListener('pointerdown', onDown, true);
-        for (const type of ['pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend'])
-            addEventListener(type, swallow, passive);
+        addEventListener('pointerup', onUp, true);
+        for (const type of ['mousedown', 'mouseup', 'touchstart', 'touchend']) addEventListener(type, swallow, passive);
         addEventListener('pointermove', onMove, passive);
         addEventListener('keydown', onKey);
         addEventListener('resize', () => (hideChip(), fit(), later()));
+        addEventListener('load', paint); // late images and fonts move things: marks and pins again
         // inner scrollers and late layout move the pins
         addEventListener('scroll', (e) => e.target !== document && later(), passive);
         document.addEventListener('selectionchange', () => {
@@ -518,7 +583,6 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
             for (const type of ['resize', 'scroll']) visualViewport.addEventListener(type, () => fit());
         if (window.ResizeObserver) new ResizeObserver(later).observe(document.body);
         paint();
-        detect();
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
     else start();
