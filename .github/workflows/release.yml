@@ -31,6 +31,11 @@ jobs:
       # 信任发布需要较新的 npm（OIDC 支持）
       - run: npm install -g npm@latest
 
+      # 测试不过不发版（Linux 上跑的是 POSIX 相对软链分支，Windows junction 分支在开发机上跑）
+      - name: test
+        working-directory: packages/shelf
+        run: npm test
+
       - name: detect new version
         id: v
         run: |
