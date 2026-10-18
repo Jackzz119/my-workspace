@@ -93,22 +93,22 @@ git push              # 5. 推送（用户要求时）
 ```bash
 git commit -m "$(cat <<'EOF'
 type: 描述
-
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 EOF
 )"
 ```
+
+署名行（如 `Co-Authored-By`）按当前 agent 自己的提交指引追加，这里不写死模型名。
 
 ---
 
 ## 分支规范
 
 - `main` / `master`：线上稳定版本，不直接推送
-- `dev` / `develop`：日常开发集成分支
+- `dev` / `develop`：日常开发集成分支（有的项目只用 `main` 集成，以项目协议为准）
 - `feat/<功能名>`：独立功能开发
 - `fix/<问题描述>`：问题修复
 
-PR/MR 方向：功能分支 → 开发分支 → 主分支
+PR/MR 方向：功能分支 → 集成分支（项目协议写明是哪条）
 
 ---
 
@@ -132,36 +132,11 @@ PR/MR 方向：功能分支 → 开发分支 → 主分支
 
 ## 常用操作参考
 
-### 查看状态
-
-```bash
-git status
-git log --oneline -10
-git diff
-git diff --staged
-```
-
-### 撤销操作
-
-```bash
-git restore <file>              # 丢弃工作区改动
-git restore --staged <file>     # 取消暂存
-git revert HEAD                 # 安全撤销最近一次 commit（保留历史）
-```
-
-### 同步远程
-
-```bash
-git fetch                       # 拉取远程信息（不合并）
-git rebase origin/<branch>      # 变基同步（保持线性历史）
-git pull                        # fetch + merge
-```
-
 ### Rebase vs Merge
 
 - 优先使用 `rebase`，保持线性提交历史，便于 review 和 bisect
 - 不要 rebase 已推送到共享分支的 commit
-- 合并多人协作分支时使用 `merge`，保留分支结构
+- PR 合并：单分支的 PR 用 rebase（`gh pr merge --rebase`）；只有环境分支之间同步（如 dev → staging → main）才用 merge commit（`--merge`）保留两条线；任何时候都不 squash（压扁后 `blame` 只剩一句概述）
 
 ### 提交粒度原则
 
