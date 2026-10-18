@@ -404,7 +404,7 @@ async function handleRun(argv) {
   }
 
   if (!parsed.brief) {
-    console.error("Usage: /codex-visual:studio [--mode auto|audit|design|compare] [--model <slug>] [--out <dir>] [--target <image> ...] [--candidate <image> ...] [--ref <image> ...] <brief>");
+    console.error("Usage: node scripts/codex-visual.mjs run [--mode auto|audit|design|compare] [--model <slug>] [--out <dir>] [--target <image> ...] [--candidate <image> ...] [--ref <image> ...] <brief>");
     process.exitCode = 1;
     return;
   }

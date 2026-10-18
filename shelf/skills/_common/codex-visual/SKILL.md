@@ -1,6 +1,6 @@
 ---
 name: codex-visual
-description: 把视觉检测、UI/平面设计评审、层级与可读性检查、设计稿生成、改版探索、A/B 设计比稿、视觉对标、参考板制作委派给 Codex CLI；随后独立复核 Codex 返回的报告与图片并给用户结论。当用户要求「让 codex 看一眼」「视觉检测」「出设计稿/比稿」「找视觉问题」「第二意见」「设计调研出图」时使用。
+description: 把一个视觉任务（视觉检测、设计评审、出设计稿、改版探索、A/B 比稿、视觉对标、参考板）委派给 Codex CLI，拿回报告与图并独立复核。用户点名 Codex（「让 codex 看一眼」「用 codex 出图 / 比稿」），或 monet / ui-tailor 在设计流程中需要出图、审图、比稿、第二意见时使用；会消耗 Codex 订阅额度，用户没点名时先问。
 allowed-tools: Bash(node:*), Bash(codex:*), Read, Glob
 ---
 
@@ -46,11 +46,11 @@ node "${CLAUDE_SKILL_DIR}/scripts/codex-visual.mjs" status
 
 **委派前读项目的设计系统**：从项目共享登记（`ai/PROJECT.md`「文档索引」）定位 design-system 根与 UI/UX
 常驻规范，沿链接读相关领域 / 主题规范，把硬约束**原文摘进 brief**——否则 Codex 会用通用设计口味给出与项目纪律
-冲突的建议。项目决定、资产地址、brief 该带哪些约束，都登记在项目文档里（本项目：`ai/design_system/design-system.md`
-「委派 Codex 时 brief 必带的硬约束」）；**本技能不存项目内容**。
+冲突的建议。项目决定、资产地址、brief 该带哪些约束，都登记在项目文档里（通常是设计系统的铁律 / 冻结项一节）；
+**本技能不存项目内容**。
 
 **指定模型（可选）**：`--model <slug>` 透传成 codex 的 `-m`。不传就沿用 `~/.codex/config.toml` 里的 `model`。
-可用 slug 见 `~/.codex/models_cache.json`（例：`gpt-6-astra` 是最强档，配图默认走 imagegen 的 `gpt-image-2`）。
+可用 slug 及各档强弱以 `~/.codex/models_cache.json` 和 Codex 当前说明为准。
 **只在用户点名模型时才传** —— 强档消耗订阅额度更快。
 
 只跑一条命令：
@@ -63,7 +63,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/codex-visual.mjs" run [flags] "<brief>"
 
 ## 消费结果
 
-归档以项目设计系统为中心：调研、比稿、候选图、待确认 HTML/交互原型统一放其根目录下的 `codex-visual/`。这条规则也适用于调用者自行制作的比较页；技能本体保持在技能目录。`uiux/` 只放已定稿的 UI/UX 规范与选定展示，用户仅认可方向时不得把所有候选晋升为定稿。普通报告默认在 session 汇报；包装器必需的原始日志/报告留批次目录，长期保留与临时忽略规则由项目登记。
+归档以项目设计系统为中心：调研、比稿、候选图、待确认的交互原型统一放其根目录下的 `codex-visual/<主题>/`（同名文档 + `img/` + `lab/`）。这条规则也适用于调用者自行制作的比较素材；技能本体保持在技能目录。给用户看的比稿页不存进设计系统，交 `annotated-report` 从这些素材生成发布。设计系统的定稿文档只放已定稿的规范与选定展示，用户仅认可方向时不得把所有候选晋升为定稿，整批日志也不搬进定稿文档。复核结论写进当轮报告；包装器必需的原始日志/报告留批次目录，长期保留与临时忽略规则由项目登记。
 
 包装脚本会打印机器可读行：
 
@@ -88,4 +88,4 @@ node "${CLAUDE_SKILL_DIR}/scripts/codex-visual.mjs" run [flags] "<brief>"
 - 图片必须是本地已存在的文件；网页截图可用 headless Chrome 落盘：
   `chrome.exe --headless=new --disable-gpu --window-size=W,H --screenshot="<out.png>" "<url>"`
 - 一次委派只解决一个问题；范围过大时先拆
-- 产物默认落 `ai/design_system/codex-visual/<时间戳>/`（cwd 下有 `ai/design_system/` 时；否则 `./codex-visual/`），可用 `--out <dir>` 或 `CODEX_VISUAL_OUT` 改。有价值的比稿留在设计系统的 `codex-visual/`；定稿后仅晋升最终规范和选定展示，不搬整批日志进 `uiux/`。
+- 产物默认落 `ai/design_system/codex-visual/<时间戳>/`（cwd 下有 `ai/design_system/` 时；否则 `./codex-visual/`），可用 `--out <dir>` 或 `CODEX_VISUAL_OUT` 改；归档规则见上方「消费结果」。

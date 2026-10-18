@@ -55,6 +55,14 @@ The wrapper provides an exact output directory. Create `codex-report.md` in that
 7. Recommendation and next actions
 8. Artifact manifest
 
-Save every generated image, comparison board, or annotated visual inside the same output directory. At the end, print the chosen mode and the absolute report/artifact paths. The wrapper will normalize these into machine-readable markers for Claude.
+Save every generated image, comparison board, or annotated visual inside the same output directory. End your final message with these plain lines (no Markdown around them); the wrapper parses them into machine-readable markers for Claude:
+
+```text
+MODE: <audit|design|compare>
+REPORT: <absolute path of codex-report.md>
+ARTIFACT: <absolute path of an image you created>
+```
+
+Repeat the `ARTIFACT:` line once per image.
 
 Proposals, research, comparison boards and unapproved interactive prototypes belong under the project's design-system `codex-visual/` directory, including work produced without delegation. Never place candidates in `uiux/`: that area contains finalized UI/UX specifications and selected presentation assets only. The caller promotes approved results and records implementation status; approval of a direction is not blanket approval of its details. Keep skill code in the skill directory and routine reports in session context or the wrapper's raw batch, not in the finalized design catalog.
