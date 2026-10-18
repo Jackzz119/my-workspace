@@ -32,13 +32,13 @@ allowed-tools: Read, Grep
 
 ## 环境分级
 
-使用封装类 `Logman` 替代裸 log 调用，详见 `reference.md`。
+使用封装类 `Logman` 替代裸 log 调用，详见 `reference.md`。方法名跟随项目语言与现有封装（如 C# 的 `Logman.Log`、TypeScript 的 `Logman.log`），动手前先看项目里的实现。
 
-| 方法 | 开发/测试 | Pro |
+| 级别 | 开发/测试 | Pro |
 |------|-----------|-----|
-| `Logman.Log` | ✅ 打印 | ❌ 屏蔽 |
-| `Logman.Warn` | ✅ 打印 | ✅ 打印 |
-| `Logman.Error` | ✅ 打印 | ✅ 打印 |
+| 普通（Log） | ✅ 打印 | ❌ 屏蔽 |
+| 警告（Warn） | ✅ 打印 | ✅ 打印 |
+| 错误（Error） | ✅ 打印 | ✅ 打印 |
 
 ---
 
