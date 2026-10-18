@@ -13,15 +13,15 @@ allowed-tools: Read, Glob, Bash
 登记分两处：**通用技能**（不含项目特定内容、换个项目照样用）登记在本机 `CLAUDE.md` / `AGENTS.md`
 的「Skill 系统」节；**本项目专属技能**登记在 `ai/JASKILL.md`。
 
-🔴 **创建规范的唯一出处是这个 skill**（2026-09-10 收口）：目录结构、frontmatter 字段、动态特性、
+**创建规范的唯一出处是这个 skill**：目录结构、frontmatter 字段、动态特性、
 最佳实践、落地三步，全在本文件与 `${CLAUDE_SKILL_DIR}/reference.md`。协议文档只登记「有哪些技能、
-什么场景触发」，不再抄一份创建规范——两份规范并存时，改了一份忘另一份是迟早的事。
+什么场景触发」，不抄创建规范——两份规范并存时，改了一份忘另一份是迟早的事。
 
 ---
 
 ## 当前可用 Skills
 
-!for f in ai/jaSkills/*/SKILL.md; do name=$(basename $(dirname $f)); desc=$(grep "^description:" "$f" | head -1 | sed 's/^description: //'); echo "• [$name] $desc"; done
+名称与 description 都在 agent 启动时注入的技能清单里，以它为准；要核对真源目录就 `ls ai/jaSkills/`。
 
 ---
 
@@ -74,18 +74,18 @@ ai/jaSkills/<skill-name>/
 
 reference.md / examples.md 什么时候该建，见 `${CLAUDE_SKILL_DIR}/reference.md`「文件结构决策」。
 frontmatter 字段与 `allowed-tools` 的授权原则见同文件「Frontmatter 字段说明」，
-`!命令` / `$ARGUMENTS` / `${CLAUDE_SKILL_DIR}` 三个动态特性的写法见「动态特性用法」。
+注入命令、调用参数、技能目录三个动态特性的写法见「动态特性用法」——本文件不直接写出它们的占位符，一写就会在调用时被替换掉。
 
 **② 确认链接在**——`.claude/skills` 与 `.agents/skills` 各是一条指向 `ai/jaSkills/` 的整目录 symlink，
 新技能放进真源即自动可见，不用逐个建链接。链接不在（新检出、新 worktree）就跑本技能自带的保底脚本：
-`bash ai/jaSkills/custom-skill/scripts/sync-worktree.sh`（同时补根目录协议文档；用法与三种行为见脚本头部注释）。
+`bash ai/jaSkills/custom-skill/scripts/sync-worktree.sh`（它还会补协议文档等其他 gitignored 文件；做什么、怎么用以脚本头部注释为准）。
 
 **③ 登记**——落点看它是哪一类：
 
 | 类型 | 登记到 | 判据 |
 |---|---|---|
-| 通用技能 | `CLAUDE.md` 与 `AGENTS.md` 的「通用技能」「Skill 触发规范」两张表（**两份都要**，等义改写） | 把它原样搬到另一个项目，还成不成立 |
-| 项目专属技能 | `ai/JASKILL.md` §一 / §二 | 写死了本项目的路径、字段值、基础设施 |
+| 通用技能 | `CLAUDE.md` 与 `AGENTS.md` 的「通用技能与触发」表（**两份都要**，等义改写；改协议前先按其「修改授权」问用户） | 把它原样搬到另一个项目，还成不成立 |
+| 项目专属技能 | `ai/JASKILL.md` 的技能登记表 | 写死了本项目的路径、字段值、基础设施 |
 
 写完对着 `${CLAUDE_SKILL_DIR}/reference.md`「质量检查清单」逐条自检再交付。
 
@@ -97,12 +97,9 @@ frontmatter 字段与 `allowed-tools` 的授权原则见同文件「Frontmatter 
 - 有规则遗漏或边界情况未覆盖
 - 用户在使用中给出了新的约束或纠正
 
-### 4. 未来：云端 Skill 同步（计划中）
+### 4. 云端同步
 
-> 此功能尚未实现，记录在此供后续迭代：
-> - 从 GitHub 拉取用户维护的 skill 库
-> - 通过 CLI 安装/更新 skill
-> - 本地 skill 与云端 skill 版本对比
+技能与货架之间的拉取、推送、对账归 `shelf-ops`，按它的守则走；本技能不重复那套命令。
 
 ---
 
@@ -115,8 +112,8 @@ frontmatter 字段与 `allowed-tools` 的授权原则见同文件「Frontmatter 
 | 通用性 | 不绑定特定项目，可跨项目复用 |
 | 单一职责 | 每个 skill 解决一类问题 |
 | 精简入口 | SKILL.md 只写核心指令，细节放 reference.md |
-| 动态注入 | 用 `!命令` 注入运行时信息（当前状态、文件列表等） |
-| 参数支持 | 用 `$ARGUMENTS` 接收调用参数 |
+| 动态注入 | 用注入命令把运行时信息（当前状态、文件列表等）放进上下文，写法见 reference.md「动态特性用法」 |
+| 参数支持 | 用参数占位符接收调用参数（写法见 reference.md「动态特性用法」） |
 | 按需加载 | reference.md 只在需要时读取，不增加默认上下文 |
 
 ---
