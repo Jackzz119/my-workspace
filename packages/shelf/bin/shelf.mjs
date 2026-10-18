@@ -1,90 +1,98 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import {
   cmdShelfBrowse,
+  cmdShelfLs,
   cmdShelfPull,
   cmdShelfPush,
   cmdShelfCreate,
   cmdShelfSync,
+  cmdShelfDiff,
+  cmdShelfMerge,
+  cmdShelfForget,
+  cmdShelfMirror,
   cmdShelfInit,
   cmdShelfAgents,
   cmdShelfAdopt,
   cmdShelfHome,
 } from "../lib/commands/shelf.mjs";
+import { run, enableJson, fail, finish, setExit, ShelfExit } from "../lib/output.mjs";
+import { COMMANDS, ORDER, EXIT_CODES, parseArgs, usageText, commandHelp } from "../lib/spec.mjs";
 
-function usage() {
-  console.log(`shelf — 个人内容货架 CLI（别名 atk）
+const VERSION = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
-Usage:
-  shelf                  交互浏览货架（数字进目录，p 1,3-5 拉取，a 全部）
-  shelf pull <路径...>    按路径拉取，如 shelf pull skills/common/intj
-                         [--dest <目录>]
-  shelf create <本地路径> 上架新货：全架查重名，交互选位（m <名> 建目录，
-                         d 放下）[--to <货架目录>] [--yes]
-  shelf push <本地路径>   更新已有货：按记账/名字自动定位
-                         [--yes] [--force] [--force-secret]
-  shelf sync [--dry-run] 按账本对账：库上新版自动更新本地；本地有改动
-                         则显示 diff 由你决定推上库还是覆盖本地
-  shelf init             项目接入（幂等）：交互多选 agent 目标，或
-                         --agents claude,codex,kimi / all
-  shelf agents [add <名>] 查看 / 追加 agent 目标（claude / codex / kimi）
-  shelf adopt            收编外来技能：实体目录迁入正本重链 + 未记账技能
-                         登记进账本 local 段（不上货架）
-  shelf home [--update]  查看货架在哪、什么模式；--update 拉取最新
-
-货架定位：SHELF_HOME 环境变量 > 本 clone > ~/.shelfrc > 托管档口 ~/.shelf/home
-免 clone 直跑：npx -y -p github:Jackzz119/my-workspace shelf <命令>`);
+function cmdVersion(argv) {
+  parseArgs("version", argv);
+  console.log(VERSION);
+  run.data = { version: VERSION };
 }
 
-const argv = process.argv.slice(2);
-const sub = argv[0];
-const rest = argv.slice(1);
+function cmdHelp(argv) {
+  const name = argv.find((a) => !a.startsWith("-"));
+  if (name && !COMMANDS[name]) fail(1, `✗ 没有 '${name}' 这个命令（shelf help 看全部）`);
+  if (run.json) {
+    run.data = {
+      version: VERSION,
+      commands: (name ? [name] : ORDER).map((n) => ({ name: n, ...COMMANDS[n], flags: Object.keys(COMMANDS[n].flags) })),
+      globalFlags: ["--json", "--help"],
+      exitCodes: EXIT_CODES,
+    };
+    return;
+  }
+  console.log(name ? commandHelp(name) : usageText());
+}
+
+const HANDLERS = {
+  browse: cmdShelfBrowse,
+  ls: cmdShelfLs,
+  status: (a) => cmdShelfSync(a, { status: true }),
+  sync: cmdShelfSync,
+  diff: cmdShelfDiff,
+  merge: cmdShelfMerge,
+  pull: cmdShelfPull,
+  push: cmdShelfPush,
+  create: cmdShelfCreate,
+  forget: cmdShelfForget,
+  mirror: cmdShelfMirror,
+  init: cmdShelfInit,
+  agents: cmdShelfAgents,
+  adopt: cmdShelfAdopt,
+  home: cmdShelfHome,
+  version: cmdVersion,
+  help: cmdHelp,
+};
+const ALIASES = { "--version": "version", "-v": "version", "--help": "help", "-h": "help" };
+
+const raw = process.argv.slice(2);
+const argv = raw.filter((a) => a !== "--json");
+if (argv.length !== raw.length) enableJson();
+
+let sub = argv.length === 0 ? "browse" : (ALIASES[argv[0]] ?? argv[0]);
+let rest = argv.slice(1);
+// shelf <命令> --help / -h → 该命令的用法
+if (HANDLERS[sub] && sub !== "help" && (rest.includes("--help") || rest.includes("-h"))) {
+  rest = [sub];
+  sub = "help";
+}
+run.command = sub;
 
 try {
-  switch (sub) {
-    case undefined:
-    case "browse":
-      await cmdShelfBrowse();
-      break;
-    case "pull":
-      await cmdShelfPull(rest);
-      break;
-    case "create":
-      await cmdShelfCreate(rest);
-      break;
-    case "push":
-      await cmdShelfPush(rest);
-      break;
-    case "sync":
-      await cmdShelfSync(rest);
-      break;
-    case "init":
-      await cmdShelfInit(rest);
-      break;
-    case "agents":
-      await cmdShelfAgents(rest);
-      break;
-    case "adopt":
-      await cmdShelfAdopt(rest);
-      break;
-    case "home":
-      await cmdShelfHome(rest);
-      break;
-    case "-h":
-    case "--help":
-    case "help":
-      usage();
-      break;
-    case "skills":
-    case "list":
-      console.error(`'shelf ${sub}' 已随老版技能命令清退：浏览用 shelf，按路径拉取用 shelf pull <路径> --dest .claude/skills，保持最新用 shelf sync`);
-      process.exit(1);
-      break;
-    default:
-      console.error(`Unknown command: ${sub}\n`);
-      usage();
-      process.exit(1);
+  if (sub === "skills" || sub === "list") {
+    fail(1, `'shelf ${sub}' 已随老版技能命令清退：列货架用 shelf ls，按路径拉取用 shelf pull <路径>，保持最新用 shelf sync`);
   }
+  const handler = HANDLERS[sub];
+  if (!handler) {
+    if (!run.json) console.log(usageText() + "\n");
+    fail(1, `Unknown command: ${sub}（shelf help 看全部命令）`);
+  }
+  await handler(rest);
 } catch (err) {
-  console.error(err.message || err);
-  process.exit(1);
+  if (err instanceof ShelfExit) {
+    run.error = { message: err.message, ...err.extra };
+    setExit(err.code);
+  } else {
+    run.error = { message: err?.message ?? String(err) };
+    setExit(1);
+  }
 }
+finish(VERSION);

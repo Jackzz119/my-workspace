@@ -53,6 +53,15 @@ export function setShelfEntry(manifest, shelfPath, entry) {
   manifest.shelf[shelfPath] = entry;
 }
 
+// 改写一条账：只覆盖给出的字段，保留 mirror / planted 这类条目级设置；
+// 顺手丢掉 #22 复制镜像时代遗留的 mirrors 字段
+export function updateShelfEntry(manifest, shelfPath, fields) {
+  manifest.shelf ??= {};
+  const next = { ...(manifest.shelf[shelfPath] ?? {}), ...fields };
+  delete next.mirrors;
+  manifest.shelf[shelfPath] = next;
+}
+
 export function findShelfEntryByLocalPath(manifest, localPath) {
   const normalized = localPath.replaceAll("\\", "/");
   for (const [shelfPath, entry] of Object.entries(manifest.shelf ?? {})) {
