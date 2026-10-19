@@ -7,6 +7,7 @@
 - [ ] **ST-E**：macOS 侧冒烟（Windows 已过全套测试与验收流程；Linux 由 release.yml 的测试闸门覆盖）
 - [ ] 货架 `shelf-ops` 手册跟上 1.3.0：diff / merge / forget / mirror / ls / status、`--json` 与退出码表、Codex 改用 `.agents/skills`（由在用它的项目改完 push 上来，本仓库不直接改 `shelf/`）
 - [ ] 协议与技能里写死的 `ai/` 路径照顾 .NET 项目的 `AI/`：custom-skill 的 `sync-worktree.sh` 按账本 `aiDir` 找技能正本（大小写敏感的文件系统上 `ai/jaSkills` 找不到 `AI/jaSkills`）
+- [ ] release.yml 的 npm publish 撞上 sigstore 透明日志 409（npm/cli#10078：首个请求已写入、客户端超时重试被判冲突，包不会上传）时自动重试几次，每次先 `npm view` 确认没发出去；1.3.0 是重跑到第 3 次才发布成功
 
 ## Milestone 2 — Shelf Server 社区平台（规划中）
 
