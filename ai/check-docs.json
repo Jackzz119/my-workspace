@@ -4,15 +4,16 @@
         "^CLAUDE\\.md$",
         "^AGENTS\\.md$",
         "^ai/jaSkills(/|$)",
+        "^ai/jaAgents(/|$)",
+        "^ai/scripts(/|$)",
         "^\\.claude/skills",
         "^\\.agents/",
         "^ai/sessions(/|$)",
         "^node_modules(/|$)"
     ],
     "accepted": [
-        "ai/features/SHELF.md:ai/jaAgents/CLAUDE.md",
-        "ai/features/SHELF.md:ai/jaAgents/",
-        "packages/shelf/README.md:ai/jaAgents/CLAUDE.md"
+        "packages/shelf/README.md:ai/design_system/concept/",
+        "packages/shelf/README.md:ai/project-audit/runs/"
     ],
     "budgets": {
         "ai/PROJECT.md": 9000,
