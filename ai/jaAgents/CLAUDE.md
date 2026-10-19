@@ -9,7 +9,7 @@
 - 改完必须在报告里贴出改动原文（增 / 删 / 改哪一节），与代码改动同等待遇。
 - **`AGENTS.md` 与本文件是一对**：一份改了什么，另一份要等义跟改，只在「两个 agent 的机制不同」处分方言。
 
-> 为什么：这份文件是每次对话的开场规则，改错一句会静默影响之后所有会话；它 gitignored，改动不进 git 历史（入库副本在 `ai/jaAgents/`）。
+> 为什么：这份文件是每次对话的开场规则，改错一句会静默影响之后所有会话。正本在 `ai/jaAgents/`，随仓库入库；根目录这份是给 agent 读的副本（gitignored）。两份改哪份都行，`shelf sync` / `push` 会把改动同步给另一份。
 
 ## 上下文准备
 
@@ -25,11 +25,12 @@
 
 ### 真源与落点
 
-技能本体只有一份，在 **`ai/jaSkills/`**，随仓库入库；`.claude/skills`、`.agents/skills` 各是指向它的整目录链接（Claude Code / Codex 分别从这里发现技能）。链接与根协议都 gitignored，新检出、新 worktree 里默认没有——**worktree 开工第一步先跑保底脚本**（归 `custom-skill` 管，重复执行安全）：
+技能本体只有一份，在 **`ai/jaSkills/`**，随仓库入库；`.claude/skills`、`.agents/skills` 各是指向它的整目录链接（Claude Code / Codex 分别从这里发现技能）。链接与根目录协议副本都 gitignored，新检出、新 worktree 里默认没有——**开工第一步先补齐**（重复执行安全）：装了 shelf 就跑 `shelf init`，按账本还原链接、根目录协议副本和缺的货；没装 shelf 或没网，跑 AI 工作流模板带的保底脚本（.NET 项目是 `AI/scripts/`）：
 
 ```bash
-bash ai/jaSkills/custom-skill/scripts/sync-worktree.sh            # 补技能链接 + 协议文档，两个 agent 都补
-bash ai/jaSkills/custom-skill/scripts/sync-worktree.sh --dry-run  # 只报告不动手
+shelf init                                   # 装了 shelf：按账本还原
+bash ai/scripts/sync-worktree.sh             # 没装 shelf：补技能链接 + 协议副本，两个 agent 都补
+bash ai/scripts/sync-worktree.sh --dry-run   # 只报告不动手
 ```
 
 旧版脚本或手动 `ln -s` 在 Windows 的 Git Bash 里会把链接建成目录副本（PA-060，脚本已修）：PowerShell `(Get-Item .claude\skills).LinkType` 为空就是副本——先 `diff -r .claude/skills ai/jaSkills` 确认副本没有独有改动，删掉再跑保底脚本。`Junction`、`SymbolicLink` 都是有效链接；删链接只用 `cmd /c rmdir <链接路径>`（不带 `/s`），递归删除会删到正本。
@@ -55,7 +56,8 @@ bash ai/jaSkills/custom-skill/scripts/sync-worktree.sh --dry-run  # 只报告不
 | `ui-tailor` | 任何 UI / UX 工作：界面视觉、概念模型、用户流程、信息架构、术语命名、导航交互、可用性、动效，包括纯 UX 讨论（「这个流程顺不顺」「命名统一吗」） | 自动 |
 | `codex-visual` | **工具，不是设计师**：把出图 / 审图 / 比稿 / 第二意见委派给 Codex CLI；通常由 `monet` / `ui-tailor` 在设计流程中委派，用户点名（「让 codex 看一眼」）时也用；消耗外部额度 | 询问后 |
 | `annotated-report` | 可批注的网页报告：每轮改了文件的详细报告（见「报告规范」）、设计报告、提案；处理贴回的「批注｜」清单 | 自动 |
-| `shelf-ops` | 从货架拉取 / 推送 / 上架技能与模板（「货架」「shelf」「拉技能」「推上去」） | 点名时 |
+| `shelf-ops` | 初始化与同步 AI 工作流（「初始化 / 还原 ai 工作流」「同步 / 更新 ai 工作流」、换设备、新 worktree），从货架拉取 / 推送 / 上架技能与模板（「货架」「shelf」「拉技能」「推上去」） | 自动 |
+| `project-audit` | 全项目自审：文档、文件与工程结构、代码解耦、协议、性能与 AI 上下文成本，逐步调研、协商并执行精简；处理审核报告的批注（「项目体检」「全仓审核」「清理冗余」「性能复查」） | 点名时 |
 
 **重要**：读写技能文件（`ai/jaSkills/` 下的一切）前，都要先触发 `custom-skill`，不得直接用 Read / Edit 工具操作。创建规范（目录结构、frontmatter 与 `allowed-tools`、动态特性、最佳实践与反模式、质量检查清单、落地三步）只在 `custom-skill` 里，不凭记忆另写一套。
 
