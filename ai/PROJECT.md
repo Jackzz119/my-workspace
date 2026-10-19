@@ -11,7 +11,7 @@
 - **本仓库就是货架 home**：`shelf/` 是所有项目共用的内容真源。**本仓库里不直接改 `shelf/`**——货架内容由用到它的项目经 `shelf push` / `shelf create` 推上来，在这里直接改会和别的项目的推送撞车；确需在这里改，先得到用户明确授意。
 - **本仓库自己的 AI 协议与技能是 gitignored 拷贝**：根 `CLAUDE.md` / `AGENTS.md` ← `shelf/agents/`；`ai/jaSkills/` ← `shelf/skills/` 的启用清单；`.claude/skills`、`.agents/skills` 是指向 `ai/jaSkills` 的链接。新 clone / 新 worktree 先跑 `node scripts/setup-links.mjs`；货架更新后要跟进时加 `--refresh`。
 - **货架 ≠ 启用**：只认 `ai/jaSkills/` 里的技能；`shelf/skills/` 是库存，不读不用。启用清单在 `scripts/setup-links.mjs` 顶部的 `ACTIVE`，项目口径见 [`ai/JASKILL.md`](JASKILL.md)。
-- **测 shelf CLI 一律用临时货架**：在本仓库里直跑 CLI 时它会把本仓库当成货架，写操作（push / create / sync / merge）会直接提交并推到真货架。测试与冒烟只对临时 bare 仓库跑，做法见 `packages/shelf/test/helpers.mjs`。
+- **测 shelf CLI 一律用临时货架**：CLI 的写操作（push / create / `sync --push`）会提交并推到真货架（托管档口就是 GitHub 上的本仓库）；2.0 起在本仓库里直跑也不再把本仓库当货架，同样推真货架。测试与冒烟只对临时 bare 仓库跑（`SHELF_HOME` 指向它的 clone），做法见 `packages/shelf/test/helpers.mjs`。
 - **发版**：`packages/shelf` 有代码变更就按下方「Shelf 发版规则」升版本号，合进 `main` 后由 `release.yml` 自动发布到 npm。
 
 ## 项目结构
@@ -19,8 +19,9 @@
 - `packages/shelf/` — `shelf` CLI（别名 `atk`）实现（`bin/shelf.mjs` + `lib/`），可独立发布为 npm 包（含自身 README/LICENSE），详见 [`ai/features/SKILL-SYNC-CLI.md`](features/SKILL-SYNC-CLI.md) 与 [`ai/features/SHELF.md`](features/SHELF.md)
 - `shelf/` — 内容货架（唯一真源），任何条目均可被 `shelf` 拉到目标项目 / 推回
   - `shelf/skills/` — 技能，按**包**组织：`_common/`（通用包，`shelf init` 整包装进项目）、`<pack>/`（领域包，如 `blender/`）、顶层单件（如 `project-audit/`）
-  - `shelf/agents/` — AI 平台工作协议模板：`claude/CLAUDE.md`、`codex/AGENTS.md`
+  - `shelf/agents/` — AI 平台工作协议：`claude/CLAUDE.md`、`codex/AGENTS.md`、`multica/MULTICA.md`
   - `shelf/docs/` — 植入用模板（`JASKILL.md`：项目专属技能登记表）
+  - `shelf/templates/` — 项目模板（配方）：`shelf/templates/ai/template.json` 列出 `shelf init` / `sync` 要装的货与落点，模板自带的文件（`ai/scripts/` 下两个 AI 工作流脚本、`PROJECT.md` / `TODO.md` 骨架、`.worktreeinclude`、`.claude/settings.json` 等）放在 `shelf/templates/ai/files/`
 - `apps/` — 应用（预留，当前为空；可视化工作流引擎将落在这里）
 - `ai/` — 工作区级 PROJECT.md / TODO.md / JASKILL.md / features/ 文档；`ai/jaSkills/` 是本仓库启用技能的拷贝（gitignored）
 - `scripts/setup-links.mjs` — 本仓库自己的 AI 工作区：从 `shelf/` 拷协议与启用技能、建 agent 技能目录链接（幂等，见「开工红线」）
@@ -43,7 +44,7 @@
 
 | 文档 | 状态 | 说明 |
 |---|---|---|
-| [`ai/features/SHELF.md`](features/SHELF.md) | 1.3.0 已实现（余 macOS 冒烟） | Shelf — 通用内容货架 CLI：init 接入与 ai 区脚手架、sync / status 对账、diff / merge 三方处理双改、`--json` 给 agent 用 |
+| [`ai/features/SHELF.md`](features/SHELF.md) | 2.0.0（余 macOS 冒烟） | Shelf — 通用内容货架 CLI：按 `ai` 模板 init 接入 / 按账本还原、sync 跟模板并 `--merge --push`、技能声明的 ai 区固定目录、diff / merge 三方处理双改、非终端默认 JSON 给 agent 用 |
 | [`ai/features/SKILL-SYNC-CLI.md`](features/SKILL-SYNC-CLI.md) | 50% (3/6 ST) | Milestone 1 — Skill 双向同步 CLI（本地 git-based） |
 | [`ai/features/SHELF-SERVER.md`](features/SHELF-SERVER.md) | 需求对齐中 | Milestone 2 — Shelf Server 社区平台（账户 / Web / REST API） |
 | [`ai/features/NPM-PUBLISH.md`](features/NPM-PUBLISH.md) | 策略已定，待执行 | npm 发布策略与流程（等 M2 品牌敲定后启动） |
