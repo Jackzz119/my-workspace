@@ -1,103 +1,74 @@
 ---
 name: shelf-ops
-description: 货架（shelf）操作手册——用户要求从货架拉取/推送/上架技能、模板、文档等任何内容，或提到"货架 / shelf / 拉技能 / 推上去 / 上架 / 同步到云端"时使用。封装 shelf 命令的全部用法、落点约定、退出码语义和冲突处理守则。
-allowed-tools: Bash, Read
+description: 货架（shelf）与 AI 工作流的操作手册——用户要「初始化 / 还原 ai 工作流」「同步 / 更新 ai 工作流」「拉技能 / 推上去 / 上架」，或提到货架、shelf、模板、换设备、新 worktree 时使用。封装 shelf CLI 的用法、JSON 输出与退出码、双改合并与冲突守则。
+allowed-tools: Read, Glob, Bash(shelf status *), Bash(shelf diff *), Bash(shelf ls *), Bash(shelf template *), Bash(shelf home *)
 ---
 
 # Shelf 操作手册
 
-shelf 是 my-workspace monorepo 里的内容货架（`shelf/` 目录，git 管理，**唯一真源**）。CLI 命令是 `shelf`（别名 `atk`，两者等价）。
-`shelf` 是哑传输工具：浏览 / pull / push / create 只搬文件；**放哪、什么时候推、冲突怎么办**由你按本手册判断。
-核心设计：**没有人（包括你）需要记忆或翻查货架的目录结构**——更新自动定位，上架实时选位。
+shelf 是个人内容货架：一个 git 仓库（货架）放技能、协议和模板，`shelf` CLI（别名 `atk`）负责把它们装进项目、保持同步、把项目里的改动推回去。项目里的账本是根目录 `.shelf.json`（进项目 git，不要手改）。
 
-## 命令总览
+## 先知道这几件事
 
-```bash
-shelf                                  # 交互浏览货架（给人用；你在 Bash 里跑会因等待键盘输入而中止）
-shelf pull <shelf路径> [...]            # 按路径拉取到当前目录，可多个
-shelf pull <shelf路径> --dest <目录>    # 拉到指定目录
-shelf create <本地路径> --to <货架目录>  # 上架新货；--to 目录不存在会自动新建
-shelf push <本地路径> [--yes]           # 更新已有货：自动定位，不填地址
-shelf push <本地路径> --force           # 覆盖"异机已修改"的冲突（仅限用户明确指示）
-shelf init [--agents claude,codex,kimi]  # 项目接入（幂等）；非交互必须带 --agents（或 all）
-shelf agents [add <名>]                  # 查看 / 追加 agent 目标（后补目录+文档+镜像+gitignore）
-shelf adopt                             # 收编外来技能：实体目录迁入正本重链 + 未记账技能登记 local 段
-shelf sync [--dry-run]                  # 按账本对账：库新→自动更新本地；本地改→待人决定方向
-shelf home [--update]                   # 货架在哪、什么模式；--update 立即拉最新
-```
+- **输出是 JSON**：你在 Bash 里跑时（输出不是终端）默认拿到一份 JSON：`{ ok, exitCode, data, next, warnings?, error? }`。按 `exitCode` 判断结果，按 `next` 走下一步（多条是并列选项，方向由用户定），不去解析给人看的文字；要文字时加 `--text`。
+- **退出码**：0 成功或一致 · 1 参数或输入错误（看 `error.message`）· 2 需要处理（待决、变更清单待确认、diff 有差异）· 3 冲突 · 4 提交失败（货架已回滚）。
+- **从不等键盘**：要确认的操作退出 2，`next` 里给出带 `--yes` 的原命令。
+- **模板**：货架上的 `templates/ai` 是 AI 工作流模板（协议、通用技能与 project-audit、技能登记表、worktree 与 Multica 开工脚本、文档骨架）。`shelf template show ai` 列出它会装哪些货、落在哪、会建哪些固定目录。
+- **项目布局**（ai 区的目录名记在账本 `aiDir`：.NET / C# 项目是 `AI`，其余是 `ai`）：
+  - `ai/jaAgents/CLAUDE.md`、`AGENTS.md` 是协议正本（入库）；根目录 `CLAUDE.md` / `AGENTS.md` 是给 agent 读的副本（gitignore）。改哪份都行：只改了一份，shelf 会同步给另一份；两份各改各的才停下（`mirror-mismatch`）
+  - `ai/jaSkills/<名>/` 是技能唯一正本，`.claude/skills`、`.agents/skills` 是指向它的链接
+  - `ai/features/`、`ai/sessions/`、`ai/design_system/` 下的 `concept/ img/ uiux/ codex-visual/`、`ai/project-audit/` 下的 `runs/ scripts/` 是固定目录：各技能在 frontmatter 里声明，init / sync 缺了就建
+  - `ai/JASKILL.md`、`ai/PROJECT.md`、`ai/TODO.md`、`ai/check-docs.json`、`.claude/settings.json`、`.worktreeinclude` 是植入物：装一次，之后归项目，shelf 不对账、不推
 
-列清单用浏览器或 `ls`，装技能用 `shelf pull <路径> --dest ai/jaSkills`，保持最新用 `shelf sync`。
+## 用户这样说 → 你这样做
 
-- 路径里 `_` 前缀可省略：`skills/common/intj` 和 `skills/_common/intj` 等价，落盘用真实名。
-- 你（AI）在非交互环境运行：create **必须带 `--to`**；push/create 的最终确认**必须带 `--yes`**（先跑一遍不带 `--yes` 拿到变更清单转述给用户，用户同意后再加 `--yes` 重跑）；**首次 init 必须带 `--agents`**（先问用户要接入哪几个：claude / codex / kimi）。已 init 过的项目重跑会沿用记录的目标。
-- 版本追踪在当前目录 `.shelf.json`（`shelf` 段，按 shelf 相对路径为键），不要手改；见到旧名 `.agent-toolkit.json` / `.atk.json` 属正常，任一次 pull/push 会自动迁移。
-- **每次操作前自动拉最新**（写操作强制拉，push 撞上别的设备刚推过会自动变基重推），所以正常情况下你永远在用最新货架；离线时用本地副本并警告。`shelf home` 一眼看清当前模式，`shelf home --update` 手动强刷。货架位置的解析顺序、临时机器、免 clone 设备、安装与给用户介绍浏览器的按键见 `${CLAUDE_SKILL_DIR}/reference.md`。
+### 「帮我初始化 ai 工作流」（新项目 / 换设备 / 新 worktree）
 
-## create 还是 push？
+跑 `shelf init`：
 
-| 情况 | 用哪个 | 定位逻辑 |
+- 没有账本 → 按模板新接入（默认接 claude + codex；用户点名别的组合时加 `--agents`）
+- 有账本 → 按账本还原：建技能链接、按 `ai/jaAgents` 补根目录协议副本、补拉缺的货、货架有新版且本地没动的直接更新、把 `ai/jaSkills` 里没记账的技能登记进账本
+- 退出 0 → 完成，转述装了什么；退出 2 → 有待决，按下面「同步」一节的表处理
+- `data.jaskill.unregistered` 里有名字 → 那些是项目自己的技能，按 custom-skill 的规范补进 JASKILL.md；`data.jaskill.stale` 是登记表里有、正本里没有的，问用户是装回来还是删掉那一行
+
+### 「同步 / 更新 ai 工作流」
+
+跑 `shelf sync --merge --push`：它会装上模板新增的货，把货架新版且本地没动的更新到本地，把双方都改过的做三方合并，再把本地领先的和合并干净的推上货架。
+
+- 退出 0 → 全部一致，转述更新了哪些、推了哪些
+- 退出 3 → 有合并冲突。冲突文件里是标准冲突标记（`<<<<<<< 本地` … `=======` … `>>>>>>> 货架 <sha>`）。先用 `shelf diff <路径>` 看清两边各改了什么讲给用户，按用户的决定改好、把标记删干净，再 `shelf push <路径> --yes`（传冲突文件本身的路径也行，按它所属的整件推）
+- 退出 2 → 剩下要人定的（`data.items` 里 `pending` 为真的），按 `state` 处理：
+
+| state | 含义 | 怎么办 |
 |---|---|---|
-| 这个东西货架上还没有 | `shelf create <路径> --to <目录>` | 先全架查重名：**重名直接被拒**（名字即 ID）。被拒时把已有位置转述给用户——大概率该用 push |
-| 更新从货架拉过的东西 | `shelf push <路径>` | 按 `.shelf.json` 记账推回原位；**原位被移走会自动按名字找回**、推新位置并更新记账 |
-| 更新货架已有、但本工作区没拉过的东西 | `shelf push <路径>` | 按文件名全架匹配；唯一命中即视为更新它 |
+| `removed` / `ambiguous` | 货架上下架了 / 找到多个同名 | 问用户；不要了就 `shelf forget <路径>` |
+| `local-missing` | 账本里有、本地没了 | 问用户：拿回来 `shelf pull <路径> --force`，不要了 `shelf forget <路径>` |
+| `mirror-mismatch` | 正本和根目录副本各改各的 | 用 `next` 里的 `git diff` 给用户看，用户定以哪份为准、改成一致后再 sync |
+| `untracked-differs` | 模板要装的货本地已有同名、内容不同、没记过账 | 先看差异：`git diff --no-index <localPath> <shelf home 给的 data.shelfDir>/<key>`，讲给用户；用货架版跑 `next` 第一条（`pull … --force`，按模板落点装），用本地版跑第二条（`push … --yes`——它会成为模板内容，所有项目跟着变，推前讲清楚） |
 
-push 不接受 `--to`；create 的 `--to` 是**货架目录**（不是完整条目路径），条目名 = 本地文件/文件夹名。
+只想看不想动：`shelf status`（只读，同样的状态和下一步）。
 
-## 外来/三方技能（adopt）
+### 「我改了某个技能 / 协议，推上去」
 
-- agent 技能目录是链接，所以**从网上装的技能会透明落进正本 `ai/jaSkills/`**，不需要任何处理；只是它没进账本。
-- 用户装完新技能、或某个安装器把 skills 目录换成了实体目录时 → 跑 `shelf adopt`：实体内容迁入正本并恢复链接，正本里未被货架追踪的技能登记进账本 `local` 段——**不上货架但有账**。
-- local 段由 init / sync / adopt 自动增量维护：登记过的技能**缺失时会告警但保留记录**（带上次指纹）；转述给用户，用户用惯用安装器重装后跑 `shelf sync` 即恢复入账（无需 adopt）。
-- local 段技能不参与 sync 对账（没有远端）；用户想跨项目复用某个本地技能时 → `shelf create ai/jaSkills/<名> --to skills/<包>` 升格上架，下次 adopt 自动把它移出 local 段。
+`shelf push <路径> --yes`（`ai/jaSkills/<名>`、`ai/jaAgents/CLAUDE.md`、根目录 `CLAUDE.md` 都认；技能里面的文件如 `ai/jaSkills/<名>/SKILL.md` 按整个技能推）：
 
-## sync 的行为（你替用户跑时）
+- 退出 3「货架在你上次拉取后被改过」→ `shelf merge <路径>`：退出 0 再 push；退出 3 按上面的冲突处理
+- 退出 1「植入物不推」→ 植入物归项目自己；要改货架上的模板，告诉用户到货架 clone 里改
 
-`shelf sync` 逐条核对账本里的每件物品（三哈希对比：记账 R / 库上 S / 本地 L）：
+### 其他
 
-- 库上有新版、本地没动过 → **自动覆盖本地**（安全，零损失），你只需转述更新清单；
-- 本地有改动（领先或双改）、库上搬家找不回、本地文件丢失 → 全部进"待决"清单并 exit 2——把每条待决和 diff 摘要转述给用户，**由用户决定方向**；用户拍板后用 `shelf push <路径>`（推上库）或 `shelf pull <路径> --dest <原位置>`（库覆盖本地）逐条执行；
-- `--dry-run` 只报告不动手，适合先给用户看全局。
-- 交互模式下（用户自己跑）sync 会当场显示逐行 diff 并提供 [p]推上库/[o]覆盖本地/[s]跳过 菜单——不需要你介入。
+- 装货架上的某个技能：`shelf pull skills/<包>/<名>`（技能自动进技能正本）
+- 新东西上架：`shelf create <本地路径> --to <货架目录> --yes`；被拒说明重名，问用户是更新它（push）还是改名再上架
+- 看货架上有什么：`shelf ls [路径]`；看模板内容：`shelf template show ai`
+- 从账本里清掉一件（本地文件不动）：`shelf forget <路径>`
+- 外部安装器装了技能，或把技能目录弄成了实体目录：`shelf adopt`
 
-## 退出码（你判断下一步的依据）
+## 守则
 
-| 退出码 | 含义 | 你该做什么 |
-|---|---|---|
-| 0 | 成功 / 无需变更 | 转述结果（提交号或"已一致"） |
-| 1 | 参数错误 / 重名被拒 / 无匹配 / 凭据拦截 | 按错误信息转述并和用户对齐（改名？用 push？去掉敏感文件？） |
-| 2 | 需要确认 | 变更清单已打印——转述给用户，同意后加 `--yes` 重跑 |
-| 3 | 异机冲突 / 多重同名无法自动选择 | 差异/候选已打印——转述给用户，**未经明示不得 `--force`** |
-| 4 | 提交失败（如 git 环境异常） | 货架已自动回滚到改动前，无残留；把错误原文转述给用户 |
+1. 只有冲突（退出 3）和 `next` 给了多个选项时才需要问用户；能安全自动做的，命令已经做掉了。
+2. **`--force` 从不自己加**（它会整体覆盖货架上别人的改动）；`--force-secret` 永远不主动用，被拦下的凭据文件如实告诉用户。
+3. 改技能、改协议只改项目里的正本（或根目录副本），不去改货架 clone；推上去用 push。
+4. 账本 `.shelf.json` 不手改；登记的增删用 pull / forget。
+5. Windows 上技能链接是 junction；删链接只用 `cmd /c rmdir <链接路径>`（不带 `/s`），递归删除会删到正本。
 
-## 落点约定（pull 之后放哪）
-
-CLI 一律拉到当前目录，分类落点由你执行：
-
-| 拉的是什么 | 放到哪 |
-|---|---|
-| `shelf/skills/**` 下的技能 | **一律拉进正本 `ai/jaSkills/`**（`--dest ai/jaSkills`）；agent 的 skills 目录是指向正本的链接，agent 自动读到，从哪个目录改都等价（`shelf init` 按接入目标建 `.claude/skills`、`.codex/skills`、`.kimi/skills`，断了或变成实体目录时 `init` / `sync` / `adopt` 会修复；Codex 从 `.agents/skills` 发现项目技能，这条链接 shelf 不建） |
-| `shelf/agents/claude/CLAUDE.md` | 项目根 `CLAUDE.md`（已有则对比合并，别盲目覆盖） |
-| `shelf/agents/codex/AGENTS.md` | 项目根 `AGENTS.md` |
-| 其他文档/模板/文件 | 用户指定处，默认当前目录 |
-
-技能落点可以一步到位：`shelf pull skills/common/intj --dest ai/jaSkills`。
-
-## Push / Create 守则
-
-1. push/create 前先跑一遍不带 `--yes` 的命令，把变更清单（新增/删除/修改）或"将新建目录"提示转述给用户。
-2. 遇到「货架已被其他设备修改」（exit 3）：把打印的差异转述给用户；**没有用户明确指示不得加 `--force`**。
-3. 遇到「已被移动到 X」的搬家提示：这是正常的自动找回，转述新位置即可；记账会自动更新。
-4. `--force-secret` 永远不主动使用；工具拦下疑似凭据文件（.env / *.key / *.pem / auth.json / credentials*）时，如实告知用户被拦的文件名。
-5. create 被重名拒绝时，把已有条目位置告诉用户，问清是"更新它"（改用 push）还是"改名再上架"。
-6. push/create 成功后提交信息是自动的（`shelf: update/add <路径> (from <主机名>)`），并会自动 git push 到远程；你不需要另外 commit。
-7. **双改（sync 报「双方都改过」）不能整件覆盖**：先看货架在上次拉取之后改了什么（有 `shelf diff` 用它；没有就在货架 clone 里 `git diff <账本 sourceCommit> HEAD -- shelf/<路径>`），把要保留的并进本地、在项目里提交，再 push；冲突处列给用户定。
-8. **植入后归项目的文件不推**：`shelf init` 植入的 `docs/JASKILL.md` 这类模板，之后装的是本项目的口径（项目专属技能、第三方包），推上去会把模板变成本项目的内容。要改模板只改所有项目都用得上的通用部分，别把项目内容带上去。
-9. **Windows**：shelf 建技能链接用 junction（不要管理员）；看到 agent 的技能目录变成实体目录（被安装器或 Git Bash 的 `ln -s` 复制出来的）时跑 `shelf adopt` 迁回正本并恢复链接。
-
-## 典型对话 → 命令
-
-- "看看货架上有什么" → 用 `ls <货架clone>/shelf` 逐层看，把目录结构转述给用户（交互浏览器留给用户手动用）
-- "我改了这个技能，同步上去" → `shelf push ai/jaSkills/<名字>`（自动定位；先不带 --yes 看清单）
-- "把这个项目的货架物品都对一遍/同步一下" → `shelf sync`（非交互会自动应用"库上新版"，其余待决转述给用户）
-- "把这份部署清单存到货架" → `shelf create deploy-checklist.md --to docs`（新东西用 create；被拒说明已有同名，改用 push 或改名）
-- "这个项目还没接货架" → 问清要接哪些 agent，然后 `shelf init --agents claude,codex`：按目标植入协议文档（CLAUDE.md / AGENTS.md，后者 codex+kimi 共用）、`multica/`（货架上有才装）、`ai/JASKILL.md`、技能正本目录 + 镜像目录、gitignore 对应行，并全部入账。幂等：重跑=补缺失+体检，已有文件绝不盲覆盖；**账上有而本地缺的货架物品（含标准清单之外的）也会一并补拉**——换设备后一条 init 全就位；后补目标用 `shelf agents add kimi`
+细节（JSON 里的物品状态全表、账本字段、货架从哪来、没装 shelf 的机器与 worktree、模板写法）见 ${CLAUDE_SKILL_DIR}/reference.md。

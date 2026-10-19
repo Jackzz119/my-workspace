@@ -2,6 +2,8 @@
 name: feature
 description: 功能驱动开发流程——读取/创建功能文档、需求对齐、拆分 Subtask、逐步执行并记录进度
 allowed-tools: Read, Glob, Bash
+metadata:
+  shelf-scaffold: "features"
 ---
 
 # /feature — 功能驱动开发流程
@@ -11,6 +13,8 @@ allowed-tools: Read, Glob, Bash
 用法：`/feature <功能名>`
 
 功能名对应 `ai/features/<功能名>.md`。如果文档不存在，流程会先帮你创建它。
+
+`ai/features/` 是每个项目都有的固定目录：本技能在 frontmatter 的 `metadata.shelf-scaffold` 里声明了它，`shelf init` / `shelf sync` 会在项目里建出来（空目录放 `.gitkeep`），不等第一份功能文档才建。
 
 ## 🔴 菜单功能走 menu 目录（2026-08-12 立）
 

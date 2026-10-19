@@ -2,6 +2,8 @@
 name: intj
 description: 任务主管——管理 Epic/Milestone/Task/Bug 层级，主动记录任务，判断优先级，负责项目文档更新，并管理 ai/sessions/ 下的会话存档（把当前会话压缩成一份存档，供换会话时读回续接；仅在用户开口时执行，绝不自动存也绝不自动读。触发词：存档、记一下进度、交接、有哪些档、读 xx 档、删档、/savepoint）；多人协作时维护 ai/SYNC.md 的 commit 指针，开工检查合作者有没有新 commit，有就读改动、总结给用户、再把 ai/ 文档对齐（触发词：合作者、别人改了什么、同步指针、/intj collab）
 allowed-tools: Read, Write, Edit, Glob, Bash
+metadata:
+  shelf-scaffold: "sessions, features"
 ---
 
 # INTJ — 任务主管
@@ -31,6 +33,8 @@ allowed-tools: Read, Write, Edit, Glob, Bash
 | `ai/SYNC.md` | 协作同步指针：我方身份、跟踪的分支、「ai/ 文档已对齐到哪个 commit」、同步记录 | 只在有合作者时存在，读写（见合作者同步章节） |
 
 > 不建 PROGRESS.md / KNOWLEDGE.md：长期为真的东西归 `ai/PROJECT.md`（协议文件只在用户授意时改），待办归 `ai/TODO.md`。
+
+**固定目录**：`ai/sessions/` 与 `ai/features/` 每个项目都有。本技能在 frontmatter 的 `metadata.shelf-scaffold` 里声明了它们，`shelf init` / `shelf sync` 会在项目里建出来（空目录放 `.gitkeep`），不等第一份文档才建；改目录名要同时改这张表和声明。
 
 ---
 

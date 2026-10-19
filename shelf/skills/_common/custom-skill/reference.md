@@ -11,8 +11,17 @@
 name: skill-name                  # 必需，kebab-case
 description: 一句话描述触发场景    # 必需，用于判断何时触发
 allowed-tools: Read, Edit, Bash   # 可选，预批准工具列表
+metadata:                         # 可选，自定义键值（开放标准字段，各 agent 不解读）
+  shelf-scaffold: "features, design_system/uiux"   # 可选，本技能在项目 ai 区要的固定目录
 ---
 ```
+
+**`metadata.shelf-scaffold`：技能的固定目录**（用户 2026-10-19 定）。技能要在项目的 ai 区用固定的文件夹（如 `features/`、`design_system/uiux/`、`project-audit/runs/`）时，两处一起写：
+
+- frontmatter 声明：逗号分隔、相对 ai 区（.NET 项目是 `AI/`），只写目录；绝对路径和带 `..` 的会被丢掉。装了这个技能的项目，`shelf init` / `shelf sync` 会把缺的目录建出来，空目录放 `.gitkeep`（只放在最深一层）。
+- SKILL.md 正文写一节「固定目录」：每个目录放什么、入口文档叫什么、第一次什么时候写。只写跨项目都成立的目录；项目特有的目录登记在项目文档里。目录只建空架子，不预建空文档。
+
+两处说法要一致；改目录名时同时改声明、正文和所有引用它的地方。
 
 **allowed-tools 原则：只列读取类工具，不预授权写操作。**
 
@@ -97,6 +106,7 @@ allowed-tools: Read, Edit, Bash   # 可选，预批准工具列表
 - [ ] SKILL.md 正文没有会被替换的占位符字面量：讲到调用参数、技能目录时换了说法，`${CLAUDE_SKILL_DIR}` 只作路径用，注入命令里没有 `$0`、`$1` 一类写法（awk 字段也算）
 - [ ] 参数用法有说明（如果接收 `$ARGUMENTS`）
 - [ ] 涉及文件修改的 skill：改动按宿主协议的报告规范交代（逐文件给出改了什么）；不可逆或越出授权的动作前有确认节点
+- [ ] 用到项目 ai 区固定目录的 skill：frontmatter 的 `metadata.shelf-scaffold` 与正文「固定目录」一节写的是同一组目录
 
 ---
 

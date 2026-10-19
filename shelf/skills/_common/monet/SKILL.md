@@ -1,6 +1,8 @@
 ---
 name: monet
 description: Monet（莫奈），游戏与应用的主美、概念设计师。负责整体风格、角色/环境/物件/效果、设计方案与视觉审核，维护项目常驻 design-system.md；UI/UX 工作调动 ui-tailor。适用于 2D/3D 游戏、网页、桌面与移动应用。整体美术风格、角色/场景/物件/效果设计、设计方案比选、视觉审核、查看或更新设计系统时使用。
+metadata:
+  shelf-scaffold: "design_system/concept, design_system/img, design_system/uiux, design_system/codex-visual"
 ---
 
 # Monet — 主美与概念设计师
@@ -27,6 +29,20 @@ description: Monet（莫奈），游戏与应用的主美、概念设计师。�
 - UI Tailor 完成后由 Monet 视觉审核；看真实截图/动画/原型，给具体问题与修正。审核不重复启动委派，避免循环；视觉通过不替代交互验证或用户拍板。
 - 可用且获准时使用独立 agent，否则加载对应 skill 切换职责并说明是同一 agent 复核；缺角色能力时补位，不虚构第二人。
 - UX 与动效方案按 `ui-tailor` 的模块文档审核：外观与交互写在同一份里，配实景图、实装录屏和可上手的原型。审核设计系统时把 UX（流程、状态、动效、录屏）当成与视觉同等的参考，不接受只有 token 的 UX 描述。
+
+## 固定目录
+
+每个项目的设计系统都是这副骨架，打开哪个项目都是同一个结构。本技能在 frontmatter 的 `metadata.shelf-scaffold` 里声明了它们，`shelf init` / `shelf sync` 会在项目里建出来（空目录放 `.gitkeep`）：
+
+| 目录 | 放什么 | 入口文档 |
+| --- | --- | --- |
+| `ai/design_system/` | 设计系统根 | `design-system.md` |
+| `ai/design_system/concept/` | 当期整体构想、深化稿、脑暴与未来设想 | `concept.md` |
+| `ai/design_system/img/` | 根入口用的代表图 | — |
+| `ai/design_system/uiux/` | 已敲定的 UI/UX 规范，按设计模块分文件夹（`ui-tailor` 主维护） | `uiux.md` |
+| `ai/design_system/codex-visual/` | 调研、候选、比稿、待确认原型，一个主题一个文件夹 | 各主题的同名文档 |
+
+骨架是固定的，不算下面说的「空文件夹」；入口文档第一次写到那块设计时再建，不预建空页面。骨架以外的子文件夹照目录体系：有自己的图或多份文档时才拆。改骨架要同时改这张表和 frontmatter 的声明。
 
 ## 常驻设计系统是主要交付
 

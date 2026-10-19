@@ -1,6 +1,8 @@
 ---
 name: project-audit
 description: 跨软件与游戏引擎的全项目自审：逐步真实调研，审核文档、文件与工程结构、代码解耦、协议、性能及 AI 上下文成本，协商并执行精简优化；每轮的步骤与日志单独存进运行目录，总报告做成可批注页面，批注作为本轮验收期逐条处理。用于项目体检、全仓审核、清理冗余、性能复查、扩展专项审核及处理审核报告的批注。
+metadata:
+  shelf-scaffold: "project-audit/runs, project-audit/scripts"
 ---
 
 # PROJECT-AUDIT — 项目自审
@@ -29,6 +31,8 @@ description: 跨软件与游戏引擎的全项目自审：逐步真实调研，�
 审核发现的待办写进项目已有的任务唯一来源（如 `TODO.md`），`FINDINGS.md` 只引用其 ID；项目没有任务来源时才记在 `FINDINGS.md`。
 **每一轮单独一个运行目录** `runs/<日期-序号>/`：这一轮的步骤细节、日志和报告都在里面，下次审核回看借鉴；
 跨轮沉淀的做法写回根目录的蓝图。下面的文件名按项目现有命名风格调整一次，随后保持稳定。
+`runs/` 与 `scripts/` 是每个项目都有的固定目录：本技能在 frontmatter 的 `metadata.shelf-scaffold` 里声明了它们，
+`shelf init` / `shelf sync` 会在项目里建出来（空目录放 `.gitkeep`）；`INDEX.md`、`STEPS.md` 等文件第一次审核时才写。
 
 | 文件 | 内容与加载时机 |
 | --- | --- |

@@ -2,6 +2,8 @@
 name: codex-visual
 description: 把一个视觉任务（视觉检测、设计评审、出设计稿、改版探索、A/B 比稿、视觉对标、参考板）委派给 Codex CLI，拿回报告与图并独立复核。用户点名 Codex（「让 codex 看一眼」「用 codex 出图 / 比稿」），或 monet / ui-tailor 在设计流程中需要出图、审图、比稿、第二意见时使用；会消耗 Codex 订阅额度，用户没点名时先问。
 allowed-tools: Bash(node:*), Bash(codex:*), Read, Glob
+metadata:
+  shelf-scaffold: "design_system/codex-visual"
 ---
 
 # Codex Visual Studio（项目内置版）
@@ -89,3 +91,4 @@ node "${CLAUDE_SKILL_DIR}/scripts/codex-visual.mjs" run [flags] "<brief>"
   `chrome.exe --headless=new --disable-gpu --window-size=W,H --screenshot="<out.png>" "<url>"`
 - 一次委派只解决一个问题；范围过大时先拆
 - 产物默认落 `ai/design_system/codex-visual/<时间戳>/`（cwd 下有 `ai/design_system/` 时；否则 `./codex-visual/`），可用 `--out <dir>` 或 `CODEX_VISUAL_OUT` 改；归档规则见上方「消费结果」。
+- `ai/design_system/codex-visual/` 是固定目录：本技能在 frontmatter 的 `metadata.shelf-scaffold` 里声明了它，`shelf init` / `shelf sync` 会在项目里建出来，所以装了本技能的项目里默认输出位置总在。原始批次要不要入库由项目的忽略规则决定
