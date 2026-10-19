@@ -4,16 +4,16 @@
   "skills": {},
   "shelf": {
     "agents/claude/CLAUDE.md": {
-      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
-      "contentHash": "sha256:55e8dd9c45360cc5023257482bf858aec530a2e9a0fc8cc2e3fb657fbb7080c5",
+      "sourceCommit": "760cef658044982044b0229bc09fe84a48525f6f",
+      "contentHash": "sha256:1f97261d9936bea54999f01c0dd92f81c35998432c8d065755a8d8407ccb5ebd",
       "pulledAt": "2026-10-19",
       "localPath": "ai/jaAgents/CLAUDE.md",
       "mirror": "CLAUDE.md",
       "fromTemplate": true
     },
     "agents/codex/AGENTS.md": {
-      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
-      "contentHash": "sha256:98eb19da38365aa211929782d52ba040f47346685eaf083f6dc4addf5fb6d913",
+      "sourceCommit": "0d5cb6e08cbe5dbe74371986a64100bb850f0805",
+      "contentHash": "sha256:121eb732b9e20ddb743db67e072d79f5a9bb61445a4b48fc28d6415bb924c2db",
       "pulledAt": "2026-10-19",
       "localPath": "ai/jaAgents/AGENTS.md",
       "mirror": "AGENTS.md",
@@ -138,8 +138,8 @@
       "fromTemplate": true
     },
     "skills/_common/custom-skill": {
-      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
-      "contentHash": "sha256:467886d59231d868a6b981c0bddd1e5279c5e7e96b3e1e7f46b7acf75b455cff",
+      "sourceCommit": "ef6b722c5e189f7d88825f9c3b3238e4eee58646",
+      "contentHash": "sha256:c821d7b3202c2223670c464bcde4fb055c852a0d26f82d34996db6a61b6a8d95",
       "pulledAt": "2026-10-19",
       "localPath": "ai/jaSkills/custom-skill",
       "fromTemplate": true

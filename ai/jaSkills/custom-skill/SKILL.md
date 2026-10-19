@@ -78,8 +78,8 @@ frontmatter 字段与 `allowed-tools` 的授权原则见同文件「Frontmatter 
 注入命令、调用参数、技能目录三个动态特性的写法见「动态特性用法」——本文件不直接写出它们的占位符，一写就会在调用时被替换掉。
 
 **② 确认链接在**——`.claude/skills` 与 `.agents/skills` 各是一条指向 `ai/jaSkills/` 的整目录 symlink，
-新技能放进真源即自动可见，不用逐个建链接。链接不在（新检出、新 worktree）就跑本技能自带的保底脚本：
-`bash ai/jaSkills/custom-skill/scripts/sync-worktree.sh`（它还会补协议文档等其他 gitignored 文件；做什么、怎么用以脚本头部注释为准）。
+新技能放进真源即自动可见，不用逐个建链接。链接不在（新检出、新 worktree）就补齐：装了 shelf 跑 `shelf init`（按账本还原）；
+没装 shelf 跑 AI 工作流模板带的保底脚本 `bash ai/scripts/sync-worktree.sh`（.NET 项目是 `AI/scripts/`；它还会补根目录协议副本等其他 gitignored 文件，用法以脚本头部注释为准）。
 
 **③ 登记**——落点看它是哪一类：
 
