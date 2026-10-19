@@ -4,8 +4,8 @@
 
 > 设计文档：[`ai/features/SHELF.md`](features/SHELF.md)（2.0.0）
 
-- [ ] 本仓库改用 shelf CLI 管自己的 AI 工作流（2.0 发布后）：删 `scripts/setup-links.mjs`，`ai/jaSkills`、`ai/jaAgents`、`ai/scripts` 入库，跑 `shelf init`，根目录协议改由账本副本维护
-- [ ] 协议里的 worktree 保底脚本改指 `ai/scripts/sync-worktree.sh`（读账本 `aiDir`，照顾 .NET 的 `AI/`），删掉 custom-skill 里那份；改协议要用户授意
+- [ ] 发 2.0.1：带上「模板技能待决期间不登记成项目自己的技能」的修复（本仓库试用时发现，代码已在 `main`）
+- [ ] 协议跟上 2.0（改协议要用户授意）：worktree 保底脚本改指 `ai/scripts/sync-worktree.sh` 并删掉 custom-skill 里那份；「入库副本」说法改成正本在 `ai/jaAgents`；shelf-ops 一行改成初始化 / 同步 AI 工作流、自动触发；通用技能名册加 `project-audit`
 - [ ] 在用的项目升到 2.0：各项目的 agent 跑一次 `shelf sync --merge --push`（协议正本迁到 `ai/jaAgents`、补装模板新货与固定目录）；lovelei 由那边的 agent 按用户转交的提示自己升级，Multica 配置改用 `ai/scripts/bootstrap.sh`
 - [ ] **ST-E**：macOS 侧冒烟（Windows 已过全套测试与验收流程；Linux 由 release.yml 的测试闸门覆盖）
 - [ ] release.yml 的 npm publish 撞上 sigstore 透明日志 409（npm/cli#10078：首个请求已写入、客户端超时重试被判冲突，包不会上传）时自动重试几次，每次先 `npm view` 确认没发出去；1.3.0 是重跑到第 3 次才发布成功

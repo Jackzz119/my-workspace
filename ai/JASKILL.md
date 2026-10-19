@@ -4,7 +4,7 @@
 
 ## 读法
 
-技能正本在 `ai/jaSkills/<name>/`——本仓库里是从 `shelf/skills/` 拷来的 gitignored 副本，由 `node scripts/setup-links.mjs` 生成；`.claude/skills`、`.agents/skills` 是指向它的整目录链接。先读对应 `SKILL.md`，再按需读 `reference.md` / `references/`，不整包加载。
+技能正本在 `ai/jaSkills/<name>/`（入库，由 `shelf init` / `sync` 从货架装、按账本 `.shelf.json` 对账）；`.claude/skills`、`.agents/skills` 是指向它的整目录链接。先读对应 `SKILL.md`，再按需读 `reference.md` / `references/`，不整包加载。
 
 ## 技能与触发场景
 
@@ -14,5 +14,6 @@
 
 ## 本仓库口径
 
-- 根协议名册里的 `monet` / `ui-tailor` / `codex-visual` 在本仓库**没有启用**（这里是 CLI 与内容货架，没有界面与美术工作）；要用时把它加进 `scripts/setup-links.mjs` 顶部的 `ACTIVE`，再跑一次脚本。
-- `shelf/skills/` 里的技能是库存，不读、不用；只认 `ai/jaSkills/` 里的。
+- 和其他项目一样，`ai` 模板装的技能全都在：根协议名册里的 `monet` / `ui-tailor` / `codex-visual` 也装上了，但本仓库是 CLI 与内容货架，没有界面与美术工作，一般用不到。
+- `project-audit` 随模板装上（项目自审），还没进根协议的通用技能名册，触发靠它自己的 description。
+- `shelf/skills/` 里的技能是货架库存，不读、不用；只认 `ai/jaSkills/` 里的。

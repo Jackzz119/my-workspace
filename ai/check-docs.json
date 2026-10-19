@@ -1,5 +1,5 @@
 {
-    "skipped": ["^shelf/", "^ai/sessions/", "^node_modules/"],
+    "skipped": ["^shelf/", "^ai/jaSkills/", "^ai/jaAgents/", "^ai/sessions/", "^node_modules/"],
     "ignoredTargets": [
         "^CLAUDE\\.md$",
         "^AGENTS\\.md$",

@@ -2,11 +2,10 @@
 .idea/
 node_modules/
 .claude/settings.local.json
-# 本仓库自己用的 AI 协议与技能是从 shelf/ 拷来的副本（node scripts/setup-links.mjs 生成），不入库；真源在 shelf/agents/ 与 shelf/skills/。
-# 根协议写成 /CLAUDE.md：只忽略根目录那份，不误伤货架里的 shelf/agents/claude/CLAUDE.md。
+# shelf: agent 读的根目录协议副本与技能链接不入项目库（正本在 ai/jaAgents、ai/jaSkills，由 shelf init / sync 维护）。
+# 根协议写成 /CLAUDE.md：只忽略根目录那份，不误伤 ai/jaAgents/CLAUDE.md 与货架里的 shelf/agents/claude/CLAUDE.md。
 /CLAUDE.md
 /AGENTS.md
-/ai/jaSkills/
 # agent 技能目录是指向 ai/jaSkills 的链接；链接在 git 眼里不是目录，所以不带结尾的 /
 /.claude/skills
 /.agents/skills

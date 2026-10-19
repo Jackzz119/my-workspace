@@ -1,6 +1,6 @@
 # My Workspace
 
-> 最后更新：2026-10-18
+> 最后更新：2026-10-19
 
 管理所有个人工作流的 monorepo：`shelf` CLI（别名 `atk`） + `shelf/` 内容货架（skill 库、AI 工作协议模板、跨项目取用的任意文件），未来承载可视化工作流引擎等 app。前身是独立仓库 agent-toolkit，2026-08-16 按 GitHub HEAD 并入（原仓库 `Jackzz119/agent-toolkit` 保留为历史）。
 
@@ -8,9 +8,9 @@
 
 每会话必读的强制前置动作，细则在链接处：
 
-- **本仓库就是货架 home**：`shelf/` 是所有项目共用的内容真源。**本仓库里不直接改 `shelf/`**——货架内容由用到它的项目经 `shelf push` / `shelf create` 推上来，在这里直接改会和别的项目的推送撞车；确需在这里改，先得到用户明确授意。
-- **本仓库自己的 AI 协议与技能是 gitignored 拷贝**：根 `CLAUDE.md` / `AGENTS.md` ← `shelf/agents/`；`ai/jaSkills/` ← `shelf/skills/` 的启用清单；`.claude/skills`、`.agents/skills` 是指向 `ai/jaSkills` 的链接。新 clone / 新 worktree 先跑 `node scripts/setup-links.mjs`；货架更新后要跟进时加 `--refresh`。
-- **货架 ≠ 启用**：只认 `ai/jaSkills/` 里的技能；`shelf/skills/` 是库存，不读不用。启用清单在 `scripts/setup-links.mjs` 顶部的 `ACTIVE`，项目口径见 [`ai/JASKILL.md`](JASKILL.md)。
+- **本仓库就是货架**：`shelf/` 是所有项目共用的内容真源（托管档口 clone 的就是 GitHub 上的本仓库）。**本仓库里不直接改 `shelf/`**——货架内容由用到它的项目经 `shelf push` / `shelf create` 推上来，在这里直接改会和别的项目的推送撞车；确需在这里改，先得到用户明确授意。
+- **本仓库的 AI 工作流和其他项目一样由 shelf CLI 管**（2026-10-19 起）：协议正本 `ai/jaAgents/`、技能正本 `ai/jaSkills/`、脚本 `ai/scripts/` 入库；根目录 `CLAUDE.md` / `AGENTS.md` 是副本，`.claude/skills`、`.agents/skills` 是链接（都 gitignore）。新 clone / 新 worktree 跑 `shelf init` 按账本还原，更新跑 `shelf sync --merge --push`（用法见 `shelf-ops`）；改技能改 `ai/jaSkills/` 再 `shelf push`。
+- **货架 ≠ 启用**：只认 `ai/jaSkills/` 里的技能；同仓库的 `shelf/skills/` 是货架库存，和本仓库自己的技能互不相干，不读不用。项目口径见 [`ai/JASKILL.md`](JASKILL.md)。
 - **测 shelf CLI 一律用临时货架**：CLI 的写操作（push / create / `sync --push`）会提交并推到真货架（托管档口就是 GitHub 上的本仓库）；2.0 起在本仓库里直跑也不再把本仓库当货架，同样推真货架。测试与冒烟只对临时 bare 仓库跑（`SHELF_HOME` 指向它的 clone），做法见 `packages/shelf/test/helpers.mjs`。
 - **发版**：`packages/shelf` 有代码变更就按下方「Shelf 发版规则」升版本号，合进 `main` 后由 `release.yml` 自动发布到 npm。
 
@@ -23,12 +23,11 @@
   - `shelf/docs/` — 植入用模板（`JASKILL.md`：项目专属技能登记表）
   - `shelf/templates/` — 项目模板（配方）：`shelf/templates/ai/template.json` 列出 `shelf init` / `sync` 要装的货与落点，模板自带的文件（`ai/scripts/` 下两个 AI 工作流脚本、`PROJECT.md` / `TODO.md` 骨架、`.worktreeinclude`、`.claude/settings.json` 等）放在 `shelf/templates/ai/files/`
 - `apps/` — 应用（预留，当前为空；可视化工作流引擎将落在这里）
-- `ai/` — 工作区级 PROJECT.md / TODO.md / JASKILL.md / features/ 文档；`ai/jaSkills/` 是本仓库启用技能的拷贝（gitignored）
-- `scripts/setup-links.mjs` — 本仓库自己的 AI 工作区：从 `shelf/` 拷协议与启用技能、建 agent 技能目录链接（幂等，见「开工红线」）
+- `ai/` — 工作区级 PROJECT.md / TODO.md / JASKILL.md / features/ 文档；`ai/jaAgents/`（协议正本）、`ai/jaSkills/`（技能正本）、`ai/scripts/`（AI 工作流脚本）由 `shelf init` 装、入库；`ai/sessions/`、`ai/design_system/`、`ai/project-audit/` 是技能声明的固定目录；账本是根目录 `.shelf.json`
 
 ## AI 协作配置
 
-本仓库与其他项目用同一套工作协议：根 `CLAUDE.md` / `AGENTS.md` 是货架 `shelf/agents/` 的拷贝（规则以它们为准，PROJECT.md 不复述），启用的通用技能是 `intj` / `feature` / `vc` / `logman` / `custom-skill` / `shelf-ops` / `annotated-report`。与普通项目的区别只有一处：这里的协议与技能不入库（真源就在同仓库的 `shelf/` 里），所以用 `scripts/setup-links.mjs` 拷贝，而不是 `shelf init`。
+本仓库与其他项目用同一套工作协议和同一条接入路径：`shelf init` 按货架的 `ai` 模板装好协议（正本 `ai/jaAgents/`，根目录是给 agent 读的副本）、通用技能与 `project-audit`、AI 工作流脚本与配置（`.worktreeinclude`、`.claude/settings.json`）；规则以协议为准，PROJECT.md 不复述。本仓库和同仓库的 `shelf/` 互不相干：shelf CLI 经托管档口拿货（SHELF 决策 #40），在这里直接改 `shelf/` 不会改到本仓库自己的技能，反之亦然。
 
 ## Shelf 发版规则（2026-08-30 用户定规）
 
