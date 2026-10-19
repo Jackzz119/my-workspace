@@ -43,7 +43,7 @@
 
 | 文档 | 状态 | 说明 |
 |---|---|---|
-| [`ai/features/SHELF.md`](features/SHELF.md) | 2.0.0（余 macOS 冒烟） | Shelf — 通用内容货架 CLI：按 `ai` 模板 init 接入 / 按账本还原、sync 跟模板并 `--merge --push`、技能声明的 ai 区固定目录、diff / merge 三方处理双改、非终端默认 JSON 给 agent 用 |
+| [`ai/features/SHELF.md`](features/SHELF.md) | 2.0.1（余 macOS 冒烟） | Shelf — 通用内容货架 CLI：按 `ai` 模板 init 接入 / 按账本还原、sync 跟模板并 `--merge --push`、技能声明的 ai 区固定目录、diff / merge 三方处理双改、非终端默认 JSON 给 agent 用 |
 | [`ai/features/SKILL-SYNC-CLI.md`](features/SKILL-SYNC-CLI.md) | 50% (3/6 ST) | Milestone 1 — Skill 双向同步 CLI（本地 git-based） |
 | [`ai/features/SHELF-SERVER.md`](features/SHELF-SERVER.md) | 需求对齐中 | Milestone 2 — Shelf Server 社区平台（账户 / Web / REST API） |
 | [`ai/features/NPM-PUBLISH.md`](features/NPM-PUBLISH.md) | 策略已定，待执行 | npm 发布策略与流程（等 M2 品牌敲定后启动） |
