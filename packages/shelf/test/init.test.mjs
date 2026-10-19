@@ -101,6 +101,23 @@ test("init：.NET 项目的 ai 资料区叫 AI，协议正本、技能、链接�
   assert.equal(ledger(p).shelf["skills/_common/intj"].localPath, "AI/jaSkills/intj");
 });
 
+test("init：项目里已有模板技能的旧拷贝（没记过账、内容不同）→ 待决，不当成项目自己的技能登记", (t) => {
+  const root = tmpRoot(t, "stale");
+  const m = machine(root, "a", makeRemote(root));
+  const p = project(root, "p", {
+    "package.json": '{"name":"p"}',
+    "ai/jaSkills/intj/SKILL.md": SKILL_MD("intj", "旧拷贝"),
+    "ai/JASKILL.md": "# 本项目技能\n",
+  });
+  const r = m.json(p, "init", "--agents", "claude");
+  assert.equal(r.code, 2, r.out);
+  assert.equal(r.json.data.items.find((i) => i.key === "skills/_common/intj").state, "untracked-differs");
+  assert.deepEqual(Object.keys(ledger(p).local ?? {}), [], "模板里的货不进 local 段");
+  assert.deepEqual(r.json.data.jaskill.unregistered, [], "也就不会被当成没登记的项目技能");
+  assert.equal(m.json(p, "pull", "skills/common/intj", "--force").code, 0);
+  assert.equal(m.json(p, "sync").code, 0);
+});
+
 test("init：非交互首次不带 --agents 按模板默认接 claude + codex；参数不合法退出 1", (t) => {
   const root = tmpRoot(t, "noagents");
   const m = machine(root, "a", makeRemote(root));

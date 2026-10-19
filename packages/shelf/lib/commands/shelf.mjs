@@ -1893,12 +1893,14 @@ async function promptPending(ctx, manifest, item) {
 
 // local 段维护：在场→刷指纹；升格→移除；缺失→告警但保留记录（仅 adopt 交互提供清账）；
 // 新出现的未追踪目录→登记。init / sync / adopt 共用。
-async function reconcileLocalSkills(manifest, { allowPrune = false } = {}) {
+async function reconcileLocalSkills(manifest, { allowPrune = false, plan = null } = {}) {
   const home = skillsHomeOf(manifest);
   const canonical = path.join(process.cwd(), ...home.split("/"));
-  const tracked = new Set(
-    Object.values(manifest.shelf ?? {}).map((e) => normRel(e.localPath ?? "")),
-  );
+  const tracked = new Set([
+    ...Object.values(manifest.shelf ?? {}).map((e) => normRel(e.localPath ?? "")),
+    // 模板里的货（含还没记账、等人定的）不是项目自己的技能，不登记进 local 段
+    ...(plan?.items ?? []).map((i) => normRel(i.dest)),
+  ]);
   const isTracked = (name) => [...tracked].some((t) => samePath(t, home + "/" + name));
   const prev = manifest.local ?? {};
   const next = {};
@@ -1995,7 +1997,7 @@ async function applyTemplate(ctx, manifest, tpl, targets) {
     planScaffold(plan.scaffold, { aiDir: aiDirOf(manifest), skillsHomeAbs: path.resolve(cwd, skillsHomeOf(manifest)) }),
     { date: todayISO(), name: projectName(cwd) },
   );
-  const local = await reconcileLocalSkills(manifest);
+  const local = await reconcileLocalSkills(manifest, { plan });
   const jaskill = jaskillCheck(manifest);
   return { plan, health, items, links, gitignoreAdded, scaffold, local, jaskill };
 }
@@ -2375,7 +2377,7 @@ export async function cmdShelfSync(argv, { status = false } = {}) {
       : { created: [], existed: [] };
 
     let local = null;
-    if (!dryRun) local = await reconcileLocalSkills(manifest);
+    if (!dryRun) local = await reconcileLocalSkills(manifest, { plan });
     const jaskill = jaskillCheck(manifest);
     // 模板里已经没有、当初由模板装进来的货：本地保留，提示一句
     const dropped = plan
