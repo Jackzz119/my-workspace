@@ -46,6 +46,7 @@ allowed-tools: Read, Glob, Bash
 - 单一职责：一个 skill 只做一件事
 - 入口精简：SKILL.md ≤ 500 行，细节放 reference.md
 - 通用优先：不写项目特定内容，保持跨项目复用（除非功能本身是项目特定的）
+- 固定目录：要在项目 ai 区用固定文件夹的，frontmatter 的 `metadata.shelf-scaffold` 声明 + 正文写「固定目录」一节，`shelf init` / `sync` 就会在每个项目建出来（写法见 reference.md「Frontmatter 字段说明」）
 
 **Step 3 — 通用性检查（起草前必做）**
 

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "ai",
+  "description": "AI 工作流：协议（正本在 ai/jaAgents，根目录是给 agent 读的副本）、通用技能与项目自审技能、技能登记表、worktree 与 Multica 开工脚本、项目文档骨架、Claude Code 项目设置；ai 区的固定目录由各技能自己声明",
+  "defaultAgents": ["claude", "codex"],
+  "items": [
+    { "from": "agents/claude/CLAUDE.md", "to": "{ai}/jaAgents/CLAUDE.md", "copy": "CLAUDE.md", "agents": ["claude"] },
+    { "from": "agents/codex/AGENTS.md", "to": "{ai}/jaAgents/AGENTS.md", "copy": "AGENTS.md", "agents": ["codex", "kimi"] },
+    { "from": "agents/multica/MULTICA.md", "to": "{ai}/jaAgents/MULTICA.md" },
+    { "from": "skills/common/*", "to": "{ai}/jaSkills/" },
+    { "from": "skills/project-audit", "to": "{ai}/jaSkills/project-audit" },
+    { "from": "docs/JASKILL.md", "to": "{ai}/JASKILL.md", "planted": true },
+    { "from": "files/ai/scripts/sync-worktree.sh", "to": "{ai}/scripts/sync-worktree.sh" },
+    { "from": "files/ai/scripts/bootstrap.sh", "to": "{ai}/scripts/bootstrap.sh" },
+    { "from": "files/ai/PROJECT.md", "to": "{ai}/PROJECT.md", "planted": true, "render": true },
+    { "from": "files/ai/TODO.md", "to": "{ai}/TODO.md", "planted": true },
+    { "from": "files/ai/check-docs.json", "to": "{ai}/check-docs.json", "planted": true, "render": true },
+    { "from": "files/.worktreeinclude", "to": ".worktreeinclude", "planted": true },
+    { "from": "files/.claude/settings.json", "to": ".claude/settings.json", "planted": true, "agents": ["claude"] }
+  ]
+}

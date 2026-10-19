@@ -1,6 +1,8 @@
 ---
 name: ui-tailor
 description: UI Tailor（UI 裁缝），统一负责游戏与应用的 UI 和 UX。界面视觉、概念模型、用户流程、信息架构、术语命名、导航交互、可用性或动效工作均使用，包括纯 UX 讨论；依据当前设计系统设计，维护 uiux 常驻文档，视觉完成件交 Monet 审核。
+metadata:
+  shelf-scaffold: "design_system/uiux, design_system/codex-visual"
 ---
 
 # UI Tailor — UI 裁缝
@@ -38,6 +40,7 @@ UI 和 UX 本来就要一起看，文档里不分两套：
 
 ## `uiux` 是项目资料，不是技能附件
 
+- **固定目录**：`ai/design_system/uiux/`（定稿区，入口 `uiux.md`）与 `ai/design_system/codex-visual/`（比稿与候选区）每个项目都有。本技能在 frontmatter 的 `metadata.shelf-scaffold` 里声明了它们，`shelf init` / `shelf sync` 会建出来（空目录放 `.gitkeep`）；整副设计系统骨架见 Monet 的「固定目录」。
 - 在项目设计系统中维护 **`uiux` 常驻 Markdown**，入口是 `uiux` 同名文档，只登记已敲定的主题/组件/交互规范及其展示，并由全局 `design-system.md` 链入；已批准但未实现须明确标注实现状态。目录体系（文件夹 + 同名文档 + 图片素材，不另设 README）照 Monet 的 [maintenance](../monet/references/maintenance.md)。
 - 每个已采用 UI 都要能从 `uiux` 入口找到所属模块文档：实际截图/动图或原型、风格与布局、控件状态、使用流程、响应式/动效、实现与素材来源。
 - **UX 是设计系统参考的重要一环，不能只用 token 表达**：每个已采用的交互都写清流程（入口→操作→结果→退出/出错）、各状态、动效参数（起止、时长/曲线、打断/反向、低动效降级），并配实装录屏或可运行示例；token 只是参数表，代替不了这些。

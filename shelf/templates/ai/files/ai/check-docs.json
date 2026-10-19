@@ -1,0 +1,20 @@
+{
+    "skipped": ["^{{ai}}/sessions/", "^node_modules/"],
+    "frozen": [],
+    "ignoredTargets": [
+        "^CLAUDE\\.md$",
+        "^AGENTS\\.md$",
+        "^\\.claude/skills",
+        "^\\.agents/",
+        "^\\.codex/",
+        "^\\.mcp\\.json$",
+        "^{{ai}}/sessions(/|$)",
+        "^node_modules(/|$)"
+    ],
+    "accepted": [],
+    "budgets": {
+        "{{ai}}/PROJECT.md": 21000,
+        "{{ai}}/TODO.md": 24000,
+        "{{ai}}/JASKILL.md": 12000
+    }
+}
