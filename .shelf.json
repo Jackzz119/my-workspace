@@ -1,6 +1,179 @@
 {
-  "source": "github:unknown/agent-toolkit",
+  "source": "https://github.com/Jackzz119/my-workspace.git",
   "skillsDir": ".claude/skills",
   "skills": {},
-  "shelf": {}
+  "shelf": {
+    "agents/claude/CLAUDE.md": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:55e8dd9c45360cc5023257482bf858aec530a2e9a0fc8cc2e3fb657fbb7080c5",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaAgents/CLAUDE.md",
+      "mirror": "CLAUDE.md",
+      "fromTemplate": true
+    },
+    "agents/codex/AGENTS.md": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:98eb19da38365aa211929782d52ba040f47346685eaf083f6dc4addf5fb6d913",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaAgents/AGENTS.md",
+      "mirror": "AGENTS.md",
+      "fromTemplate": true
+    },
+    "agents/multica/MULTICA.md": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:969caf9a20f6a26312adb830586a86854666ea223a756d2fee8e56102e6c9300",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaAgents/MULTICA.md",
+      "fromTemplate": true
+    },
+    "skills/_common/annotated-report": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:d658792e80994b53be6227f111843e4c5994089c4aa422571eb6dd8c5766f1a2",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaSkills/annotated-report",
+      "fromTemplate": true
+    },
+    "skills/_common/codex-visual": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:acee80d827e1ed79c25310974190b76d08a2ecba0ebb72911ba0865d9a551c1e",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaSkills/codex-visual",
+      "fromTemplate": true
+    },
+    "skills/_common/logman": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:e195d8a205ea6850b517bebf19a35652f737716c305fb05594199c5228ee4738",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaSkills/logman",
+      "fromTemplate": true
+    },
+    "skills/_common/monet": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:23f21ba5ac74cb182da0bff583ba449115850b4ec2dfae480acb872e63318931",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaSkills/monet",
+      "fromTemplate": true
+    },
+    "skills/_common/ui-tailor": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:b75f23e78fc82bef2e1fa057e4a8025df3474922c73b600f9d4707eea49a91c7",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaSkills/ui-tailor",
+      "fromTemplate": true
+    },
+    "skills/_common/vc": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:e3cb54d4ebcdf2687cbdd06e4f846ac6309ab0e21ce1849f4b57b4273f14da01",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaSkills/vc",
+      "fromTemplate": true
+    },
+    "skills/project-audit": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:8afc5937e2988a03e547b955945c45ca3e4f773073680023f5e548288bc65683",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaSkills/project-audit",
+      "fromTemplate": true
+    },
+    "docs/JASKILL.md": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:119458683fa4b82d415440496d625a70ca15be5712a4136047888d3eba5cf58a",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/JASKILL.md",
+      "planted": true,
+      "fromTemplate": true
+    },
+    "templates/ai/files/ai/scripts/sync-worktree.sh": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:478077aa915ce93551b430d6af58defb95ee5328e062c495549700feadd6cf65",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/scripts/sync-worktree.sh",
+      "fromTemplate": true
+    },
+    "templates/ai/files/ai/scripts/bootstrap.sh": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:7699d218e54d4b2b15bbe6427685a07791e404916ca7b7698ef88891a2a58950",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/scripts/bootstrap.sh",
+      "fromTemplate": true
+    },
+    "templates/ai/files/ai/PROJECT.md": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:3377f3c29d583fa44082cf23e0ccb679c69a4fe381525d6d0d9095793490ea53",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/PROJECT.md",
+      "planted": true,
+      "fromTemplate": true
+    },
+    "templates/ai/files/ai/TODO.md": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:01c891dfdee6f51de95902d41da5c4803e0f1a61da9f25ec0cb0438b989dc2ff",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/TODO.md",
+      "planted": true,
+      "fromTemplate": true
+    },
+    "templates/ai/files/ai/check-docs.json": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:f800c82cc7da05a2c63fa093e18e9a946b29a51df1aba44ae6ca239d02999eb1",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/check-docs.json",
+      "planted": true,
+      "fromTemplate": true
+    },
+    "templates/ai/files/.worktreeinclude": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:ef5075ae3eacfad0181e86606d062b1a9c3d519744a90cf11dc10aa05c0f25bc",
+      "pulledAt": "2026-10-19",
+      "localPath": ".worktreeinclude",
+      "planted": true,
+      "fromTemplate": true
+    },
+    "templates/ai/files/.claude/settings.json": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:0a20ab1e8d677f15138238f9fd73eea5dd5af038b60a6e116023dc689330e651",
+      "pulledAt": "2026-10-19",
+      "localPath": ".claude/settings.json",
+      "planted": true,
+      "fromTemplate": true
+    },
+    "skills/_common/custom-skill": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:467886d59231d868a6b981c0bddd1e5279c5e7e96b3e1e7f46b7acf75b455cff",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaSkills/custom-skill",
+      "fromTemplate": true
+    },
+    "skills/_common/feature": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:86e4a82beb09759e633260b7e7bec90c80b79d8e3fd9db2d930398bbc07ceaa2",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaSkills/feature",
+      "fromTemplate": true
+    },
+    "skills/_common/intj": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:22f4b5c1cdb175b4d17ae3845906450c2688d0d35d734bdc89d8c441811868e8",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaSkills/intj",
+      "fromTemplate": true
+    },
+    "skills/_common/shelf-ops": {
+      "sourceCommit": "80fc91c60558666e248b06ed628157e143cc7154",
+      "contentHash": "sha256:5c8135a400d67206fdfd6e9f155d0c4ac2ed24c2209960dc23cf7e4c2787565d",
+      "pulledAt": "2026-10-19",
+      "localPath": "ai/jaSkills/shelf-ops",
+      "fromTemplate": true
+    }
+  },
+  "local": {},
+  "aiDir": "ai",
+  "agents": [
+    "claude",
+    "codex"
+  ],
+  "template": {
+    "name": "ai",
+    "commit": "80fc91c60558666e248b06ed628157e143cc7154"
+  }
 }
