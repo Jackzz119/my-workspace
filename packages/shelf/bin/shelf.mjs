@@ -10,11 +10,11 @@ import {
   cmdShelfDiff,
   cmdShelfMerge,
   cmdShelfForget,
-  cmdShelfMirror,
   cmdShelfInit,
   cmdShelfAgents,
   cmdShelfAdopt,
   cmdShelfHome,
+  cmdShelfTemplate,
 } from "../lib/commands/shelf.mjs";
 import { run, enableJson, fail, finish, setExit, ShelfExit } from "../lib/output.mjs";
 import { COMMANDS, ORDER, EXIT_CODES, parseArgs, usageText, commandHelp } from "../lib/spec.mjs";
@@ -34,7 +34,8 @@ function cmdHelp(argv) {
     run.data = {
       version: VERSION,
       commands: (name ? [name] : ORDER).map((n) => ({ name: n, ...COMMANDS[n], flags: Object.keys(COMMANDS[n].flags) })),
-      globalFlags: ["--json", "--help"],
+      globalFlags: ["--json", "--text", "--help"],
+      output: "终端里是文字；输出不是终端时默认 JSON（--json / --text / SHELF_OUTPUT=json|text 强制）",
       exitCodes: EXIT_CODES,
     };
     return;
@@ -53,7 +54,7 @@ const HANDLERS = {
   push: cmdShelfPush,
   create: cmdShelfCreate,
   forget: cmdShelfForget,
-  mirror: cmdShelfMirror,
+  template: cmdShelfTemplate,
   init: cmdShelfInit,
   agents: cmdShelfAgents,
   adopt: cmdShelfAdopt,
@@ -64,8 +65,7 @@ const HANDLERS = {
 const ALIASES = { "--version": "version", "-v": "version", "--help": "help", "-h": "help" };
 
 const raw = process.argv.slice(2);
-const argv = raw.filter((a) => a !== "--json");
-if (argv.length !== raw.length) enableJson();
+const argv = raw.filter((a) => a !== "--json" && a !== "--text");
 
 let sub = argv.length === 0 ? "browse" : (ALIASES[argv[0]] ?? argv[0]);
 let rest = argv.slice(1);
@@ -75,6 +75,14 @@ if (HANDLERS[sub] && sub !== "help" && (rest.includes("--help") || rest.includes
   sub = "help";
 }
 run.command = sub;
+
+// 输出：给人（终端）是文字，给 agent / 脚本（输出不是终端）默认 JSON；--json / --text / SHELF_OUTPUT 强制。
+// version 与 help 天生是给人读的文字，除非显式 --json
+const mode = process.env.SHELF_OUTPUT;
+const json = raw.includes("--json")
+  || (!raw.includes("--text") && sub !== "version" && sub !== "help"
+    && (mode === "json" || (mode !== "text" && !process.stdout.isTTY)));
+if (json) enableJson();
 
 try {
   if (sub === "skills" || sub === "list") {

@@ -8,11 +8,37 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// 本仓库货架里真实的 ai 模板：测试用它，测的就是要发布的配方
+const REAL_TEMPLATE = path.resolve(PKG, "..", "..", "shelf", "templates", "ai");
+
+function readTree(dir, prefix) {
+  const out = {};
+  const walk = (d, rel) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(path.join(d, e.name), r);
+      else out[`${prefix}/${r}`] = fs.readFileSync(path.join(d, e.name), "utf8");
+    }
+  };
+  walk(dir, "");
+  return out;
+}
+
+export const TEMPLATE_FILES = readTree(REAL_TEMPLATE, "templates/ai");
+
+// 测试技能的固定目录声明，和货架上同名真技能的 metadata.shelf-scaffold 一致（unit 测试核对真技能）
+export const TEST_SCAFFOLD = {
+  intj: "sessions, features",
+  feature: "features",
+  monet: "design_system/concept, design_system/img, design_system/uiux, design_system/codex-visual",
+  "project-audit": "project-audit/runs, project-audit/scripts",
+};
 
 export const SKILL_MD = (name, body = "") => [
   "---",
   `name: ${name}`,
   `description: test skill ${name}`,
+  ...(TEST_SCAFFOLD[name] ? ["metadata:", `  shelf-scaffold: "${TEST_SCAFFOLD[name]}"`] : []),
   "---",
   "",
   `# ${name}`,
@@ -21,17 +47,21 @@ export const SKILL_MD = (name, body = "") => [
   body,
 ].join("\n") + "\n";
 
-export const DEFAULT_SHELF = {
+// 没有模板的货架（老货架 / 自建货架）：init 走内置配方
+export const BARE_SHELF = {
   "agents/claude/CLAUDE.md": "# Claude 协议\n\n规则一\n规则二\n规则三\n",
   "agents/codex/AGENTS.md": "# Codex 协议\n\n规则一\n规则二\n规则三\n",
+  "agents/multica/MULTICA.md": "# Multica 开工协议\n\n先跑 bash ai/scripts/bootstrap.sh\n",
   "docs/JASKILL.md": "# JASKILL 模板\n\n| 技能 | 何时读 | 上游 |\n| --- | --- | --- |\n",
   "skills/_common/intj/SKILL.md": SKILL_MD("intj"),
   "skills/_common/intj/reference.md": "intj reference\nsecond line\n",
   "skills/_common/feature/SKILL.md": SKILL_MD("feature"),
   "skills/_common/monet/SKILL.md": SKILL_MD("monet"),
   "skills/project-audit/SKILL.md": SKILL_MD("project-audit"),
-  "templates/note.md": "a note\n",
+  "docs/note.md": "a note\n",
 };
+
+export const DEFAULT_SHELF = { ...BARE_SHELF, ...TEMPLATE_FILES };
 
 const STRIP_ENV = ["SHELF_HOME", "ATK_HOME", "SHELF_REMOTE", "ATK_REMOTE", "SHELF_EPHEMERAL", "SHELF_NONINTERACTIVE", "GIT_DIR", "GIT_WORK_TREE"];
 
@@ -133,8 +163,10 @@ export function machine(root, name, remote) {
     name,
     home,
     env,
+    cli,
     shelfHome: path.join(home, ".shelf", "home"),
-    run: (cwd, ...args) => exec(cwd, args),
+    run: (cwd, ...args) => exec(cwd, [...args, "--text"]),
+    raw: (cwd, ...args) => exec(cwd, args),
     json(cwd, ...args) {
       const r = exec(cwd, [...args, "--json"]);
       try {
@@ -152,6 +184,16 @@ export function project(root, name, files = {}) {
   fs.mkdirSync(dir, { recursive: true });
   writeFiles(dir, files);
   return dir;
+}
+
+// 「换设备」：把项目提交进 git，再 clone 一份——新 clone 里只有入库的文件（链接、根目录协议副本都没有）
+export function cloneProject(root, dir, name) {
+  if (!fs.existsSync(path.join(dir, ".git"))) git(root, dir, ["init", "-q"]);
+  git(root, dir, ["add", "-A"]);
+  git(root, dir, ["commit", "-qm", "project"]);
+  const dest = path.join(root, name);
+  git(root, root, ["clone", "-q", dir, dest]);
+  return dest;
 }
 
 export function ledger(dir) {

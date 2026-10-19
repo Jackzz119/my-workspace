@@ -15,7 +15,7 @@ import {
 } from "../transport.mjs";
 import { displayName, displayPath, resolveShelfPath, findByBasename } from "../shelfnames.mjs";
 import { contentHash } from "../version.mjs";
-import { loadManifest, saveManifest, updateShelfEntry } from "../manifest.mjs";
+import { loadManifest, saveManifest, updateShelfEntry, manifestPath } from "../manifest.mjs";
 import { choose } from "../prompt.mjs";
 import { run, fail, setExit, suggest, q, useColor, ShelfExit } from "../output.mjs";
 import { COMMANDS, parseArgs } from "../spec.mjs";
@@ -34,11 +34,12 @@ import {
   clearMergeState,
 } from "../threeway.mjs";
 import { detectAiDir, planScaffold, applyScaffold, projectName } from "../scaffold.mjs";
+import { DEFAULT_TEMPLATE, listTemplates, loadTemplate, expandTemplate, renderText } from "../template.mjs";
 
 const IGNORE_NAMES = new Set(["node_modules", ".git", ".DS_Store"]);
 const SECRET_PATTERNS = [/^\.env(\..+)?$/i, /\.key$/i, /\.pem$/i, /^auth\.json$/i, /^credentials/i];
 const BIG_FILE_BYTES = 50 * 1024 * 1024;
-// init 植入一次、之后归项目自己维护的物品：账本标 planted，sync / push 不对账（SHELF 决策 #30）
+// 1.x 账本里没带 planted 标记的植入物（SHELF 决策 #30）；2.0 起植入与否由模板条目决定并记进账本
 const PLANTED_KEYS = new Set(["docs/JASKILL.md"]);
 
 // 非 TTY（agent/脚本驱动）时不能挂在交互提问上：自动选安全项
@@ -175,8 +176,9 @@ function shelfAbs(ctx, key) {
   return path.join(ctx.shelfDir, ...key.split("/"));
 }
 
-// 输入可以是本地路径（含入库副本、Windows 反斜杠）或货架路径（_ 前缀可省）→ 账本条目
-function resolveEntry(manifest, input) {
+// 输入可以是本地路径（含根目录副本、Windows 反斜杠）或货架路径（_ 前缀可省）→ 账本条目。
+// within：路径落在某件已记账的目录里面（agent 常传它刚改的那个文件）时归到那一件，最深的优先
+function resolveEntry(manifest, input, { within = false } = {}) {
   const cwd = process.cwd();
   const rel = normRel(path.relative(cwd, path.resolve(cwd, input)));
   for (const [key, entry] of Object.entries(manifest.shelf ?? {})) {
@@ -188,12 +190,26 @@ function resolveEntry(manifest, input) {
   for (const [key, entry] of Object.entries(manifest.shelf ?? {})) {
     if (key === raw || displayPath(key) === shown) return { key, entry, via: "key" };
   }
-  return null;
+  if (!within) return null;
+  const inside = (p, dir) => p.length > dir.length && samePath(p.slice(0, dir.length + 1), dir + "/");
+  let best = null;
+  for (const [key, entry] of Object.entries(manifest.shelf ?? {})) {
+    const lp = entry.localPath ? normRel(entry.localPath) : null;
+    const base = lp && inside(rel, lp) ? lp : inside(shown, displayPath(key)) ? displayPath(key) : null;
+    if (base && (!best || base.length > best.depth)) best = { key, entry, via: "within", depth: base.length };
+  }
+  return best;
+}
+
+// push / diff / merge 收到物品里面的路径：说一声按整件处理
+function noteWithin(found, input) {
+  if (found?.via !== "within") return;
+  console.log(`↪ ${input} 在已记账的 ${found.entry.localPath ?? displayPath(found.key)} 里面，按整件处理（货架 ${displayPath(found.key)}）`);
 }
 
 // 非交互要确认时给出的「原样重跑 + 某个开关」
 function rerun(flag) {
-  const args = process.argv.slice(2).filter((a) => a !== "--json" && a !== flag);
+  const args = process.argv.slice(2).filter((a) => a !== "--json" && a !== "--text" && a !== flag);
   return ["shelf", ...args.map(q), flag].join(" ");
 }
 
@@ -203,7 +219,7 @@ function writeLocal(src, destAbs) {
   copyFiltered(src, destAbs);
 }
 
-// 账本条目带入库副本（mirror）时两处一起写（SHELF 决策 #31）
+// 账本条目带根目录副本（mirror）时两处一起写（SHELF 决策 #31 / #38）
 function writeWithMirror(src, destAbs, mirrorRel) {
   writeLocal(src, destAbs);
   if (mirrorRel) writeLocal(src, path.resolve(process.cwd(), mirrorRel));
@@ -216,6 +232,54 @@ function entryFields(ctx, srcAbs, destAbs) {
     pulledAt: todayISO(),
     localPath: toPosix(path.relative(process.cwd(), destAbs)),
   };
+}
+
+// ---- 正本与根目录副本（SHELF 决策 #38）----
+
+// 正本（localPath，进项目 git）与副本（mirror，比如给 agent 读的根目录 CLAUDE.md，gitignore）：
+// 缺哪份补哪份；只有一份相对账本记的内容改过，就把它同步给另一份；两份各改各的才算不一致，交给人定。
+// dryRun 只判断不动手；返回 { state: none | ok | synced | mismatch | both-missing, note?, hash? }
+function reconcileMirror(entry, { dryRun = false } = {}) {
+  if (!entry.mirror || !entry.localPath) return { state: "none" };
+  const cwd = process.cwd();
+  const p = path.resolve(cwd, entry.localPath);
+  const m = path.resolve(cwd, entry.mirror);
+  const pe = fs.existsSync(p);
+  const me = fs.existsSync(m);
+  if (!pe && !me) return { state: "both-missing" };
+  const sync = (from, to, note) => {
+    const hash = contentHash(from);
+    if (!dryRun) writeLocal(from, to);
+    return { state: "synced", note, hash };
+  };
+  if (!me) return sync(p, m, `按正本补上副本 ${entry.mirror}`);
+  if (!pe) return sync(m, p, `按副本补回正本 ${entry.localPath}`);
+  const hp = contentHash(p);
+  const hm = contentHash(m);
+  if (hp === hm) return { state: "ok", hash: hp };
+  if (hp === entry.contentHash) return sync(m, p, `${entry.mirror} 改过，同步回正本 ${entry.localPath}`);
+  if (hm === entry.contentHash) return sync(p, m, `${entry.localPath} 改过，同步到副本 ${entry.mirror}`);
+  return { state: "mismatch" };
+}
+
+// push / merge 之前：副本先对齐；两份各改各的就列出差异停下，不替人选
+function requireMirrorInSync(entry) {
+  const r = reconcileMirror(entry);
+  if (r.state === "synced") console.log(`↪ ${r.note}`);
+  if (r.state === "both-missing") fail(1, `✗ 本地没有 ${entry.localPath}，也没有副本 ${entry.mirror}`);
+  if (r.state !== "mismatch") return;
+  const cwd = process.cwd();
+  const fk = path.basename(entry.localPath);
+  const d = diffTrees(
+    readTreeFs(path.resolve(cwd, entry.mirror), fk),
+    readTreeFs(path.resolve(cwd, entry.localPath), fk),
+    { labelA: entry.mirror, labelB: entry.localPath },
+  );
+  console.error(`✗ ${entry.localPath} 和副本 ${entry.mirror} 都改过、改得不一样（副本 → 正本）：`);
+  console.error(statText(d));
+  run.data.mirror = { path: entry.mirror, files: d.files };
+  suggest(`git diff --no-index ${q(entry.mirror)} ${q(entry.localPath)}`);
+  fail(1, `✗ 已停下，不替你选哪份为准——把两份改成同一内容后再来`);
 }
 
 // ---- pull ----
@@ -237,24 +301,54 @@ function countsOf(c) {
   return { pulled: c.pulled, updated: c.updated, skipped: c.skipped, upToDate: c.upToDate, keptLocal: c.blocked };
 }
 
+// 植入物渲染用的变量
+function renderVars(manifest) {
+  return { project: projectName(process.cwd()), date: todayISO(), ai: aiDirOf(manifest) };
+}
+
+// opts：force 覆盖本地改动 · planted 植入物 · mirror 根目录副本 · render 植入时代入占位符 · fromTemplate 来自模板
 async function pullEntry(ctx, realRel, manifest, counters, ask, destAbs, opts = {}) {
   const cwd = process.cwd();
   const src = shelfAbs(ctx, realRel);
   const shown = displayPath(realRel);
   const recorded = manifest.shelf?.[realRel];
   const planted = !!(opts.planted || recorded?.planted || PLANTED_KEYS.has(realRel));
+  const mirror = recorded?.mirror ?? opts.mirror ?? null;
   const localPath = toPosix(path.relative(cwd, destAbs));
   const item = { key: realRel, shown, localPath };
   counters.items.push(item);
 
   const record = () => {
-    updateShelfEntry(manifest, realRel, { ...entryFields(ctx, src, destAbs), ...(planted ? { planted: true } : {}) });
+    updateShelfEntry(manifest, realRel, {
+      ...entryFields(ctx, src, destAbs),
+      ...(planted ? { planted: true } : {}),
+      ...(mirror ? { mirror } : {}),
+      ...(opts.fromTemplate ? { fromTemplate: true } : {}),
+    });
     clearMergeState(cwd, realRel);
   };
   const install = () => {
-    writeWithMirror(src, destAbs, recorded?.mirror);
+    writeWithMirror(src, destAbs, mirror);
+    if (planted && opts.render && fs.statSync(destAbs).isFile()) {
+      fs.writeFileSync(destAbs, renderText(fs.readFileSync(destAbs, "utf8"), opts.render));
+    }
     record();
   };
+
+  // 正本不在、根目录副本在（项目原来只有根目录那份）：先拿副本当本地内容，绝不拿货架版本覆盖它
+  const mirrorAbs = mirror ? path.resolve(cwd, mirror) : null;
+  if (!fs.existsSync(destAbs) && mirrorAbs && fs.existsSync(mirrorAbs) && !opts.force) writeLocal(mirrorAbs, destAbs);
+  // 记过账的：副本被单边改过就先同步进正本，再按正本判断；两份各改各的不碰
+  if (recorded?.mirror && !opts.force && fs.existsSync(destAbs)) {
+    const r = reconcileMirror(recorded);
+    if (r.state === "synced") console.log(`↪ ${r.note}`);
+    if (r.state === "mismatch") {
+      console.log(`! ${shown}：正本和副本 ${recorded.mirror} 各改各的——没动，先对齐两份`);
+      Object.assign(item, { state: "mirror-mismatch", action: "kept-local" });
+      counters.blocked++;
+      return;
+    }
+  }
 
   if (!fs.existsSync(destAbs)) {
     install();
@@ -281,7 +375,8 @@ async function pullEntry(ctx, realRel, manifest, counters, ask, destAbs, opts = 
   const upstreamHash = contentHash(src);
   const localHash = contentHash(destAbs);
   if (upstreamHash === localHash) {
-    if (!recorded || recorded.contentHash !== upstreamHash || recorded.localPath !== localPath) record();
+    if (!recorded || recorded.contentHash !== upstreamHash || recorded.localPath !== localPath || (mirror && !recorded.mirror)) record();
+    if (mirror && !fs.existsSync(mirrorAbs)) writeLocal(destAbs, mirrorAbs);
     console.log(`= up to date ${shown}`);
     counters.upToDate++;
     item.action = "up-to-date";
@@ -363,6 +458,10 @@ export async function cmdShelfPull(argv) {
   try {
     const manifest = loadManifest();
     manifest.source ??= remoteUrl(ctx.root) || toPosix(ctx.root);
+    // 项目接了模板时，模板里的货没记过账也按模板的落点与属性装（sync 对「本地已有同名、内容不同」给的就是这条命令）
+    const tplName = manifest.template?.name ?? (manifest.agents?.length ? DEFAULT_TEMPLATE : null);
+    const tpl = tplName ? loadTemplate(ctx.shelfDir, tplName) : null;
+    const plan = tpl ? planOf(ctx, manifest, tpl) : null;
     const counters = newCounters();
     const missing = [];
     for (const input of positionals) {
@@ -370,6 +469,7 @@ export async function cmdShelfPull(argv) {
       const found = resolveEntry(manifest, input);
       let key;
       let destAbs;
+      let opts = { force: !!flags["--force"], render: renderVars(manifest) };
       if (found) {
         key = found.key;
         if (!fs.existsSync(shelfAbs(ctx, key))) {
@@ -390,9 +490,15 @@ export async function cmdShelfPull(argv) {
           continue;
         }
         key = hit.realRel;
-        destAbs = destRoot ? path.join(destRoot, path.basename(key)) : defaultDest(manifest, hit);
+        const it = destRoot ? null : plan?.items.find((i) => i.key === key);
+        if (it) {
+          destAbs = path.resolve(process.cwd(), it.dest);
+          opts = { ...opts, planted: it.planted, mirror: it.copy, render: it.render ? opts.render : null, fromTemplate: true };
+        } else {
+          destAbs = destRoot ? path.join(destRoot, path.basename(key)) : defaultDest(manifest, hit);
+        }
       }
-      await pullEntry(ctx, key, manifest, counters, safeAsk, destAbs, { force: !!flags["--force"] });
+      await pullEntry(ctx, key, manifest, counters, safeAsk, destAbs, opts);
     }
     saveManifest(manifest);
     printSummary(counters);
@@ -443,7 +549,7 @@ function makeLineReader() {
 
 export async function cmdShelfBrowse(argv = []) {
   parseArgs("browse", argv);
-  if (run.json) fail(1, "✗ 交互浏览器不支持 --json；列货架用 shelf ls --json");
+  if (run.json) fail(1, "✗ 交互浏览器不支持 JSON 输出；列货架用 shelf ls（在终端里直接跑 shelf 才进浏览器）");
   const ctx = resolveShelfContext();
   const rl = makeLineReader();
   const askWithRl = async (question, choices) => {
@@ -555,14 +661,19 @@ export async function cmdShelfLs(argv) {
     } else {
       entries = listEntries(abs).map((e) => {
         const childRel = rel ? `${rel}/${e.name}` : e.name;
-        const type = e.isDir ? (fs.existsSync(path.join(abs, e.name, "SKILL.md")) ? "skill" : "dir") : "file";
+        const childAbs = path.join(abs, e.name);
+        const type = !e.isDir ? "file"
+          : fs.existsSync(path.join(childAbs, "SKILL.md")) ? "skill"
+          : fs.existsSync(path.join(childAbs, "template.json")) ? "template"
+          : "dir";
         return { name: e.display, path: displayPath(childRel), type, info: e.info, installed: manifest.shelf?.[childRel]?.localPath ?? null };
       });
     }
+    const label = { skill: " · 技能", template: " · 模板" };
     console.log(`shelf:/${displayPath(rel)}`);
     if (entries.length === 0) console.log("  (空)");
     for (const e of entries) {
-      console.log(`  ${e.type === "file" ? e.name : e.name + "/"}  (${e.info}${e.type === "skill" ? " · 技能" : ""})`
+      console.log(`  ${e.type === "file" ? e.name : e.name + "/"}  (${e.info}${label[e.type] ?? ""})`
         + (e.installed ? `  ✓ 已装 → ${e.installed}` : ""));
     }
     run.data = { path: displayPath(rel), entries };
@@ -680,25 +791,6 @@ async function pickAmong(hits, promptLabel) {
   return hits[Number(act) - 1];
 }
 
-// 正本与入库副本必须一致才往下走；不一致就列出差异停下，不替人选哪份（SHELF 决策 #31）
-function assertMirrorInSync(entry) {
-  const cwd = process.cwd();
-  const localAbs = path.resolve(cwd, entry.localPath);
-  const mirrorAbs = path.resolve(cwd, entry.mirror);
-  if (!fs.existsSync(mirrorAbs)) {
-    suggest(`shelf mirror ${q(entry.localPath)} ${q(entry.mirror)}`);
-    fail(1, `✗ 入库副本 ${entry.mirror} 不存在，已停下（重新登记会按正本建出副本）`);
-  }
-  if (contentHash(mirrorAbs) === contentHash(localAbs)) return;
-  const fk = path.basename(entry.localPath);
-  const d = diffTrees(readTreeFs(mirrorAbs, fk), readTreeFs(localAbs, fk), { labelA: entry.mirror, labelB: entry.localPath });
-  console.error(`✗ ${entry.localPath} 和入库副本 ${entry.mirror} 内容不一致（副本 → 正本）：`);
-  console.error(statText(d));
-  run.data.mirror = { path: entry.mirror, files: d.files };
-  suggest(`git diff --no-index ${q(entry.mirror)} ${q(entry.localPath)}`);
-  fail(1, `✗ 已停下，不替你选哪份为准——把两份改成同一内容后再来`);
-}
-
 // ---- 子命令：push（更新已有货，SHELF 决策 #15）----
 
 export async function cmdShelfPush(argv) {
@@ -712,16 +804,17 @@ export async function cmdShelfPush(argv) {
   if (positionals.length !== 1) fail(1, "用法: " + COMMANDS.push.usage);
 
   const manifest = loadManifest();
-  const found = resolveEntry(manifest, positionals[0]);
+  const found = resolveEntry(manifest, positionals[0], { within: true });
+  noteWithin(found, positionals[0]);
+  if (found?.entry.planted) {
+    fail(1, `✗ ${found.entry.localPath ?? positionals[0]} 是模板植入、之后归项目维护的文件（货架 ${displayPath(found.key)}），不推回货架——推上去会把模板变成本项目的内容。`
+      + `要改货架上的模板，到货架 clone 里改（shelf home 看位置）`);
+  }
+  if (found?.entry.mirror) requireMirrorInSync(found.entry);
   const localAbs = path.resolve(process.cwd(), found?.entry.localPath ?? positionals[0]);
   if (!fs.existsSync(localAbs)) fail(1, `✗ 本地路径不存在: ${found?.entry.localPath ?? positionals[0]}`);
   const localPosix = toPosix(path.relative(process.cwd(), localAbs));
   run.data = { localPath: localPosix };
-  if (found?.entry.planted) {
-    fail(1, `✗ ${localPosix} 是 init 植入、之后归项目维护的文件（货架 ${displayPath(found.key)}），不推回货架——推上去会把模板变成本项目的内容。`
-      + `要改货架上的模板，到货架 clone 里改（shelf home 看位置）`);
-  }
-  if (found?.entry.mirror) assertMirrorInSync(found.entry);
 
   const ctx = resolveShelfContext({ forWrite: true });
   let keepEphemeral = false;
@@ -760,20 +853,32 @@ export async function cmdShelfPush(argv) {
         key = target;
       }
     } else {
-      const name = path.basename(localAbs);
-      const hits = findByBasename(ctx.shelfDir, name);
-      if (hits.length === 0) {
-        suggest(`shelf create ${q(localPosix)} --to <货架目录>`);
-        fail(1, `✗ 货架上没有名为 '${name}' 的条目；新内容上架用 shelf create`);
+      // 没记过账：先看是不是模板里某件货的落点（模板自带的文件不参与按名字匹配），再按名字找
+      const tplName = manifest.template?.name ?? (manifest.agents?.length ? DEFAULT_TEMPLATE : null);
+      const tpl = tplName ? loadTemplate(ctx.shelfDir, tplName) : null;
+      const tplItem = tpl ? planOf(ctx, manifest, tpl).items.find((i) => samePath(normRel(i.dest), localPosix)) : null;
+      if (tplItem?.planted) {
+        fail(1, `✗ ${localPosix} 是模板植入、之后归项目维护的文件（货架 ${displayPath(tplItem.key)}），不推回货架`);
       }
-      key = hits.length === 1
-        ? hits[0]
-        : await pickAmong(hits, `货架上有多个同名 '${name}'：`);
-      if (!key) {
-        console.log("已中止。");
-        return;
+      if (tplItem) {
+        key = tplItem.key;
+        console.log(`≈ ${localPosix} 是模板 ${tpl.name} 里的货：货架 ${displayPath(key)}（本工作区无 pull 记录）`);
+      } else {
+        const name = path.basename(localAbs);
+        const hits = findByBasename(ctx.shelfDir, name);
+        if (hits.length === 0) {
+          suggest(`shelf create ${q(localPosix)} --to <货架目录>`);
+          fail(1, `✗ 货架上没有名为 '${name}' 的条目；新内容上架用 shelf create`);
+        }
+        key = hits.length === 1
+          ? hits[0]
+          : await pickAmong(hits, `货架上有多个同名 '${name}'：`);
+        if (!key) {
+          console.log("已中止。");
+          return;
+        }
+        console.log(`≈ 按名字匹配到货架条目 ${displayPath(key)}（本工作区无 pull 记录）`);
       }
-      console.log(`≈ 按名字匹配到货架条目 ${displayPath(key)}（本工作区无 pull 记录）`);
     }
 
     const targetAbs = shelfAbs(ctx, key);
@@ -1017,7 +1122,8 @@ export async function cmdShelfDiff(argv) {
   if (positionals.length !== 1) fail(1, "用法: " + COMMANDS.diff.usage);
   const stat = !!flags["--stat"];
   const manifest = loadManifest();
-  const found = resolveEntry(manifest, positionals[0]);
+  const found = resolveEntry(manifest, positionals[0], { within: true });
+  noteWithin(found, positionals[0]);
   if (!found) {
     fail(1, `✗ 本工作区账本里没有 '${positionals[0]}'——diff 对比的是「上次拉取的版本」，只对拉取过的物品有效`);
   }
@@ -1026,6 +1132,11 @@ export async function cmdShelfDiff(argv) {
   const ctx = resolveShelfContext({ forWrite: true });
   try {
     const it = itemContext(ctx, key, entry);
+    if (entry.mirror) {
+      const r = reconcileMirror(entry, { dryRun: true });
+      if (r.state === "synced") console.warn(`! ${r.note.replace("同步", "要同步")}（diff 只读，没动；sync / push 时会做）`);
+      if (r.state === "mismatch") console.warn(`! ${entry.localPath} 和副本 ${entry.mirror} 各改各的——下面比的是正本`);
+    }
     const headSha = headCommit(ctx.root);
     const base = readTreeAtCommit(ctx.root, entry.sourceCommit, key, it.fileKey);
     const head = readTreeFs(it.headAbs, it.fileKey);
@@ -1098,45 +1209,26 @@ const MERGE_REASON = {
   "ours-deleted": "本地删了它、货架改过：已放回货架版本，确实不要就再删",
 };
 
-async function mergeCore(ctx, key, entry) {
+// 三方合并的核心：写回本地（带副本时两处一起写）、记合并标记，返回结果；出错抛 ShelfExit，由调用方报告
+function mergeItem(ctx, key, entry) {
   const it = itemContext(ctx, key, entry);
-  const lp = q(it.localPath);
-  run.data = { key, shown: displayPath(key), localPath: it.localPath };
   const local = readTreeFs(it.localAbs, it.fileKey);
   const left = conflictMarkerFiles(local);
   if (left.length) {
-    run.data.conflicts = left.map((p) => ({ path: p, how: "conflict", reason: "unresolved" }));
-    suggest(`shelf push ${lp}`);
-    fail(3, `✗ 本地还有上次合并留下的冲突标记没解决：${left.join(", ")}——改好后直接 shelf push ${it.localPath}`);
+    throw new ShelfExit(3, `✗ 本地还有上次合并留下的冲突标记没解决：${left.join(", ")}——改好后直接 shelf push ${it.localPath}`, { conflicts: left });
   }
   const S = contentHash(it.headAbs);
   const L = contentHash(it.localAbs);
   const ms = getMergeState(it.cwd, key);
-  if (ms && ms.headHash === S) {
-    console.log(`= 已经合并过货架 ${sha7(ms.headCommit)} 的改动，货架之后没再变——直接 push`);
-    run.data.state = "already-merged";
-    suggest(`shelf push ${lp}`);
-    return { conflicts: [] };
-  }
-  if (L === S) {
-    console.log(`= ${it.localPath} 与货架一致，不需要合并（shelf sync 会刷新账本）`);
-    run.data.state = "same-as-shelf";
-    suggest("shelf sync");
-    return { conflicts: [] };
-  }
+  if (ms && ms.headHash === S) return { state: "already-merged", it, headSha: ms.headCommit };
+  if (L === S) return { state: "same-as-shelf", it };
   // 再次合并时以上次合进来的那一版为基准（和 git 的 merge base 前移一样）
   const baseCommit = ms?.headCommit ?? entry.sourceCommit;
   const baseHash = ms?.headHash ?? entry.contentHash;
-  if (S === baseHash) {
-    console.log(`= 货架在${ms ? "上次合并" : "上次拉取"}之后没变，不需要合并——本地改动直接 push`);
-    run.data.state = "shelf-unchanged";
-    suggest(`shelf push ${lp}`);
-    return { conflicts: [] };
-  }
+  if (S === baseHash) return { state: "shelf-unchanged", it, again: !!ms };
   const base = readTreeAtCommit(ctx.root, baseCommit, key, it.fileKey);
   if (!base) {
-    suggest(`shelf diff ${lp}`);
-    fail(1, `✗ 取不到合并基准（${ms ? "上次合并" : "上次拉取"}的版本 ${sha7(baseCommit)} 不在货架历史里，或账本没记 sourceCommit）——`
+    throw new ShelfExit(1, `✗ 取不到合并基准（${ms ? "上次合并" : "上次拉取"}的版本 ${sha7(baseCommit)} 不在货架历史里，或账本没记 sourceCommit）——`
       + `用 shelf diff 看差异、手动合并后 shelf push --force`);
   }
   const headSha = headCommit(ctx.root);
@@ -1148,47 +1240,71 @@ async function mergeCore(ctx, key, entry) {
   writeTree(it.localAbs, res.result, { isFile: it.isFile, fileKey: it.fileKey, previous: local });
   if (entry.mirror) writeLocal(it.localAbs, path.resolve(it.cwd, entry.mirror));
   setMergeState(it.cwd, key, { headCommit: headSha, headHash: S, at: todayISO(), conflicts: res.conflicts.map((f) => f.path) });
+  return {
+    state: res.conflicts.length ? "conflict" : "merged",
+    it,
+    again: !!ms,
+    baseCommit,
+    headSha,
+    files: res.files.filter((f) => !["same", "both-same", "both-deleted"].includes(f.how)),
+    conflicts: res.conflicts,
+  };
+}
 
-  console.log(`三方合并 ${displayPath(key)}：基准 ${sha7(baseCommit)}（${ms ? "上次合并" : "上次拉取"}）· 货架 ${sha7(headSha)} · 本地`);
-  for (const f of res.files) {
+function printMergeResult(key, entry, r) {
+  if (r.state === "already-merged") return console.log(`= 已经合并过货架 ${sha7(r.headSha)} 的改动，货架之后没再变——直接 push`);
+  if (r.state === "same-as-shelf") return console.log(`= ${r.it.localPath} 与货架一致，不需要合并（shelf sync 会刷新账本）`);
+  if (r.state === "shelf-unchanged") return console.log(`= 货架在${r.again ? "上次合并" : "上次拉取"}之后没变，不需要合并——本地改动直接 push`);
+  console.log(`三方合并 ${displayPath(key)}：基准 ${sha7(r.baseCommit)}（${r.again ? "上次合并" : "上次拉取"}）· 货架 ${sha7(r.headSha)} · 本地`);
+  for (const f of r.files) {
     if (f.how === "conflict") console.log(`  ⚠ 冲突       ${f.path}（${MERGE_REASON[f.reason]}）`);
     else if (MERGE_HOW[f.how]) console.log(`  ${MERGE_HOW[f.how]}  ${f.path}`);
   }
-  console.log(`结果已写回 ${it.localPath}${entry.mirror ? ` 与入库副本 ${entry.mirror}` : ""}；账本没动，push 成功后才更新。`);
-  const shownFiles = res.files.filter((f) => !["same", "both-same", "both-deleted"].includes(f.how));
-  Object.assign(run.data, {
-    state: res.conflicts.length ? "conflict" : "merged",
-    base: baseCommit,
-    head: headSha,
-    files: shownFiles,
-    conflicts: res.conflicts,
-  });
-  if (res.conflicts.length) {
-    console.log(`✗ ${res.conflicts.length} 个文件要人处理：${res.conflicts.map((f) => f.path).join(", ")}——处理完（冲突标记删干净）再 push`);
-    setExit(3);
-  } else {
-    console.log("✓ 合并干净，可以 push 了");
-  }
-  suggest(`shelf push ${lp}`);
-  return { conflicts: res.conflicts };
+  console.log(`结果已写回 ${r.it.localPath}${entry.mirror ? ` 与副本 ${entry.mirror}` : ""}；账本没动，push 成功后才更新。`);
+  if (r.conflicts.length) console.log(`✗ ${r.conflicts.length} 个文件要人处理：${r.conflicts.map((f) => f.path).join(", ")}——处理完（冲突标记删干净）再 push`);
+  else console.log("✓ 合并干净，可以 push 了");
 }
 
 export async function cmdShelfMerge(argv) {
   const { positionals } = parseArgs("merge", argv);
   if (positionals.length !== 1) fail(1, "用法: " + COMMANDS.merge.usage);
   const manifest = loadManifest();
-  const found = resolveEntry(manifest, positionals[0]);
+  const found = resolveEntry(manifest, positionals[0], { within: true });
+  noteWithin(found, positionals[0]);
   if (!found) {
     fail(1, `✗ 本工作区账本里没有 '${positionals[0]}'——merge 以「上次拉取的版本」为基准，只对拉取过的物品有效`);
   }
   const { key, entry } = found;
   if (entry.planted || PLANTED_KEYS.has(key)) {
-    fail(1, `✗ ${entry.localPath ?? key} 是 init 植入、之后归项目维护的文件，不和货架对账，也不合并（要重新植入: shelf pull ${key} --force）`);
+    fail(1, `✗ ${entry.localPath ?? key} 是模板植入、之后归项目维护的文件，不和货架对账，也不合并（要重新植入: shelf pull ${key} --force）`);
   }
-  if (entry.mirror) assertMirrorInSync(entry);
+  if (entry.mirror) requireMirrorInSync(entry);
   const ctx = resolveShelfContext({ forWrite: true });
   try {
-    await mergeCore(ctx, key, entry);
+    run.data = { key, shown: displayPath(key), localPath: entry.localPath ?? null };
+    let r;
+    try {
+      r = mergeItem(ctx, key, entry);
+    } catch (err) {
+      if (err instanceof ShelfExit && err.extra?.conflicts) {
+        run.data.conflicts = err.extra.conflicts.map((p) => ({ path: p, how: "conflict", reason: "unresolved" }));
+        suggest(`shelf push ${q(entry.localPath)}`);
+      }
+      if (err instanceof ShelfExit && err.code === 1) suggest(`shelf diff ${q(entry.localPath)}`);
+      throw err;
+    }
+    printMergeResult(key, entry, r);
+    const lp = q(r.it.localPath);
+    Object.assign(run.data, {
+      state: r.state === "conflict" ? "conflict" : r.state,
+      base: r.baseCommit ?? null,
+      head: r.headSha ?? null,
+      files: r.files ?? [],
+      conflicts: r.conflicts ?? [],
+    });
+    if (r.state === "same-as-shelf") suggest("shelf sync");
+    else suggest(`shelf push ${lp}`);
+    if (r.state === "conflict") setExit(3);
   } finally {
     ctx.cleanup();
   }
@@ -1217,67 +1333,11 @@ export async function cmdShelfForget(argv) {
   run.data = { removed };
 }
 
-// ---- 子命令：mirror（入库副本登记，SHELF 决策 #31）----
+// ---- gitignore ----
 
 function gitIgnores(cwd, rel) {
   return spawnSync("git", ["check-ignore", "-q", "--no-index", rel], { cwd, stdio: "ignore" }).status === 0;
 }
-
-export async function cmdShelfMirror(argv) {
-  const { flags, positionals } = parseArgs("mirror", argv);
-  if (positionals.length === 0 || positionals.length > 2 || (flags["--off"] && positionals.length !== 1)) {
-    fail(1, "用法: " + COMMANDS.mirror.usage);
-  }
-  const cwd = process.cwd();
-  const manifest = loadManifest();
-  const found = resolveEntry(manifest, positionals[0]);
-  if (!found) fail(1, `✗ 账本里没有 '${positionals[0]}'——先 shelf pull 它`);
-  const { key, entry } = found;
-  run.data = { key, shown: displayPath(key), localPath: entry.localPath ?? null };
-
-  if (flags["--off"]) {
-    const was = entry.mirror ?? null;
-    delete entry.mirror;
-    saveManifest(manifest);
-    console.log(was ? `✓ 已取消入库副本登记（${was} 文件本身原样保留）` : "= 本来就没有登记入库副本");
-    run.data.mirror = null;
-    return;
-  }
-  if (positionals.length === 1) {
-    console.log(entry.mirror ? `${entry.localPath} ↔ 入库副本 ${entry.mirror}` : `${entry.localPath} 没有登记入库副本`);
-    run.data.mirror = entry.mirror ?? null;
-    return;
-  }
-
-  const mirrorRel = normRel(path.relative(cwd, path.resolve(cwd, positionals[1])));
-  if (!entry.localPath) fail(1, `✗ 账本里 ${displayPath(key)} 没有 localPath`);
-  if (samePath(mirrorRel, normRel(entry.localPath))) fail(1, "✗ 副本不能和正本是同一个路径");
-  const localAbs = path.resolve(cwd, entry.localPath);
-  const mirrorAbs = path.resolve(cwd, mirrorRel);
-  if (!fs.existsSync(localAbs)) fail(1, `✗ 本地没有 ${entry.localPath}`);
-  if (fs.existsSync(mirrorAbs)) {
-    if (contentHash(mirrorAbs) !== contentHash(localAbs)) {
-      const fk = path.basename(entry.localPath);
-      const d = diffTrees(readTreeFs(mirrorAbs, fk), readTreeFs(localAbs, fk));
-      console.error(statText(d));
-      run.data.files = d.files;
-      suggest(`git diff --no-index ${q(mirrorRel)} ${q(entry.localPath)}`);
-      fail(1, `✗ ${mirrorRel} 和 ${entry.localPath} 内容不同（见上）——先对齐（以哪份为准你定），再登记`);
-    }
-  } else {
-    writeLocal(localAbs, mirrorAbs);
-    console.log(`✓ 已按 ${entry.localPath} 建出副本 ${mirrorRel}`);
-  }
-  entry.mirror = mirrorRel;
-  saveManifest(manifest);
-  console.log(`✓ 已登记：${entry.localPath} ↔ 入库副本 ${mirrorRel}（pull 两处一起写，push 前核对两处一致）`);
-  if (gitIgnores(cwd, mirrorRel)) {
-    console.warn(`! ${mirrorRel} 被 .gitignore 忽略了，入库副本进不了 git——多半是写了裸的 ${path.basename(mirrorRel)}，改成 /${path.basename(mirrorRel)} 只忽略根目录那份`);
-  }
-  run.data.mirror = mirrorRel;
-}
-
-// ---- init：gitignore ----
 
 // 规则已在（各种等价写法），或已被更宽的规则盖住（.claude/、.claude/* …）就不补。
 // 项目是 git 仓库时直接问 git（check-ignore --no-index），否则按常见父目录写法判断
@@ -1293,7 +1353,7 @@ function ignoreCovered(cwd, line, have) {
   return false;
 }
 
-// 只忽略 shelf 自己放进来的东西：根协议（写成 /CLAUDE.md，不误伤 ai/jaAgents/CLAUDE.md 这类入库副本）
+// 只忽略 shelf 自己生成的东西：根目录副本（写成 /CLAUDE.md，不误伤 ai/jaAgents/CLAUDE.md 这类正本）
 // 和 agent 技能目录链接（不带结尾 /：链接在 git 眼里不是目录）
 function ensureGitignore(cwd, lines) {
   const p = path.join(cwd, ".gitignore");
@@ -1303,17 +1363,17 @@ function ensureGitignore(cwd, lines) {
   if (missing.length === 0) return [];
   const eol = content.includes("\r\n") ? "\r\n" : "\n";
   const sep = content === "" || content.endsWith("\n") ? "" : eol;
-  fs.writeFileSync(p, content + sep + "# shelf: agent 协议与技能链接不入项目库（真源在货架）" + eol + missing.join(eol) + eol, "utf8");
+  fs.writeFileSync(p, content + sep + "# shelf: agent 读的根目录协议副本与技能链接不入项目库（正本在 ai/ 里）" + eol + missing.join(eol) + eol, "utf8");
   return missing;
 }
 
-// ---- agent 目标与技能正本（SHELF 决策 #24/#26/#32）----
+// ---- agent 目标与技能链接（SHELF 决策 #24 / #26 / #32）----
 
 const AGENT_TARGETS = {
-  claude: { skillsDir: ".claude/skills", doc: { input: "agents/claude/CLAUDE.md", dest: "CLAUDE.md" }, ignore: ["/CLAUDE.md", "/.claude/skills"] },
+  claude: { skillsDir: ".claude/skills" },
   // Codex 只从 .agents/skills 发现项目技能（cwd 到仓库根逐级扫描，支持链接）
-  codex: { skillsDir: ".agents/skills", doc: { input: "agents/codex/AGENTS.md", dest: "AGENTS.md" }, ignore: ["/AGENTS.md", "/.agents/skills"] },
-  kimi: { skillsDir: ".kimi/skills", doc: { input: "agents/codex/AGENTS.md", dest: "AGENTS.md" }, ignore: ["/AGENTS.md", "/.kimi/skills"] },
+  codex: { skillsDir: ".agents/skills" },
+  kimi: { skillsDir: ".kimi/skills" },
 };
 const TARGET_PRIORITY = ["claude", "codex", "kimi"];
 const LEGACY_CODEX_DIR = ".codex/skills";
@@ -1330,18 +1390,16 @@ function parseTargetNames(spec) {
   return TARGET_PRIORITY.filter((n) => names.includes(n));
 }
 
-async function askTargets(manifest) {
+async function askTargets(manifest, defaults) {
   const rl = makeLineReader();
   try {
     console.log("要接入哪些 agent？（各自的技能目录会链接到正本 " + skillsHomeOf(manifest) + "/）");
-    TARGET_PRIORITY.forEach((n, i) => {
-      const t = AGENT_TARGETS[n];
-      console.log("  " + (i + 1) + ". " + n + "  （" + t.skillsDir + "/ · " + t.doc.dest + "）");
-    });
+    TARGET_PRIORITY.forEach((n, i) => console.log("  " + (i + 1) + ". " + n + "  （" + AGENT_TARGETS[n].skillsDir + "/）"));
     while (true) {
-      const raw = await rl.question("选择编号，逗号分隔（如 1,2）；a=全部 > ");
+      const raw = await rl.question(`选择编号，逗号分隔（如 1,2）；a=全部；直接回车=${defaults.join(" + ")} > `);
       if (raw === null) return null;
       const ans = raw.trim().toLowerCase();
+      if (ans === "") return [...defaults];
       if (ans === "a") return [...TARGET_PRIORITY];
       const idx = parseIndices(ans, TARGET_PRIORITY.length);
       if (idx && idx.length) return idx.map((i) => TARGET_PRIORITY[i]);
@@ -1420,6 +1478,16 @@ function ensureSkillsLink(cwd, targetName, manifest) {
   return st ? "fixed" : "created";
 }
 
+function ensureLinks(cwd, manifest, targets) {
+  const out = { made: 0, blocked: [] };
+  for (const n of targets) {
+    const r = ensureSkillsLink(cwd, n, manifest);
+    if (r === "created" || r === "fixed") out.made++;
+    if (r === "blocked") out.blocked.push(AGENT_TARGETS[n].skillsDir);
+  }
+  return out;
+}
+
 // 老版 init 给 Codex 建的 .codex/skills（Codex 实际不从这里发现技能）：在不在、是不是我们的
 function legacyCodexDir(cwd, manifest) {
   const p = path.join(cwd, ...LEGACY_CODEX_DIR.split("/"));
@@ -1449,15 +1517,87 @@ function migrateLegacyCodexDir(cwd, manifest) {
   return true;
 }
 
-// init / sync / adopt 的体检：植入物补标记、Codex 目录迁移、技能目录链接与 gitignore
-function healthChecks(manifest, { fix = true, links = true } = {}) {
+// ---- 模板（SHELF 决策 #37）----
+
+// 项目用的模板：账本记了就用记的；1.x 接入过的项目（有 agents、没记模板）按默认模板走；都没有返回 null
+function templateOf(ctx, manifest, override) {
+  const name = override ?? manifest.template?.name ?? (manifest.agents?.length ? DEFAULT_TEMPLATE : null);
+  if (!name) return null;
+  const tpl = loadTemplate(ctx.shelfDir, name);
+  if (!tpl) fail(1, `✗ 货架上没有模板 '${name}'（shelf template 看有哪些）`);
+  return tpl;
+}
+
+function planOf(ctx, manifest, tpl, agents = manifest.agents ?? []) {
+  return expandTemplate(tpl, { shelfDir: ctx.shelfDir, agents, aiDir: aiDirOf(manifest) });
+}
+
+// 1.x 的协议正本在根目录（CLAUDE.md 进账本、gitignore）；2.0 起正本在 ai/jaAgents（入库），根目录那份是副本。
+// 两份都在且不同时按账本基准判断谁改过；都改过就不迁，报出来让人定
+function migrateProtocolLayout(manifest, plan, { fix }) {
   const cwd = process.cwd();
-  const report = { plantedMarked: [], codexMigrated: false, linksFixed: 0, linksBlocked: [], gitignoreAdded: [] };
+  const out = [];
+  for (const it of plan.items.filter((i) => i.copy)) {
+    const rec = manifest.shelf?.[it.key];
+    if (!rec?.localPath) continue;
+    if (!samePath(normRel(rec.localPath), normRel(it.copy))) {
+      if (samePath(normRel(rec.localPath), normRel(it.dest)) && rec.mirror !== it.copy && !rec.mirror) {
+        if (fix) rec.mirror = it.copy;
+        out.push({ key: it.key, mirror: it.copy });
+      }
+      continue;
+    }
+    const oldAbs = path.resolve(cwd, rec.localPath);
+    const newAbs = path.resolve(cwd, it.dest);
+    if (fs.existsSync(oldAbs) && fs.existsSync(newAbs)) {
+      const hOld = contentHash(oldAbs);
+      const hNew = contentHash(newAbs);
+      if (hOld !== hNew) {
+        if (hNew === rec.contentHash) {
+          if (fix) writeLocal(oldAbs, newAbs);
+        } else if (hOld === rec.contentHash) {
+          if (fix) writeLocal(newAbs, oldAbs);
+        } else {
+          console.warn(`! ${rec.localPath} 和 ${it.dest} 都改过、改得不一样，协议正本没迁——两份改成同一内容后再跑一次`);
+          out.push({ key: it.key, blocked: true });
+          continue;
+        }
+      }
+    } else if (fs.existsSync(oldAbs) && fix) {
+      writeLocal(oldAbs, newAbs);
+    }
+    if (fix) {
+      rec.localPath = it.dest;
+      rec.mirror = it.copy;
+    }
+    out.push({ key: it.key, from: it.copy, to: it.dest });
+    console.log(`${fix ? "↪" : "·"} 协议正本${fix ? "改到" : "将改到"} ${it.dest}（入库）；根目录 ${it.copy} 是给 agent 读的副本（gitignore）`);
+  }
+  return out;
+}
+
+// 要忽略的行：已接入 agent 的技能目录链接 + 模板里根目录副本
+function gitignoreLinesFor(targets, plan) {
+  return [
+    ...(plan ? plan.items.filter((i) => i.copy).map((i) => "/" + i.copy) : []),
+    ...targets.filter((n) => AGENT_TARGETS[n]).map((n) => "/" + AGENT_TARGETS[n].skillsDir),
+  ];
+}
+
+// init / sync / adopt 的体检：植入物补标记、Codex 目录迁移、协议正本迁移、技能链接与 gitignore、账本没被忽略
+function healthChecks(manifest, plan, { fix = true, links = true } = {}) {
+  const cwd = process.cwd();
+  const report = { plantedMarked: [], codexMigrated: false, protocolMoved: [], linksFixed: 0, linksBlocked: [], gitignoreAdded: [], ledgerIgnored: false };
   for (const [key, rec] of Object.entries(manifest.shelf ?? {})) {
     if (!PLANTED_KEYS.has(key) || rec.planted) continue;
     report.plantedMarked.push(key);
     if (fix) rec.planted = true;
     console.log(`${fix ? "✓" : "·"} ${rec.localPath ?? key} ${fix ? "已标记" : "将标记"}为植入物：之后归项目维护，sync / push 不再对账`);
+  }
+  if (plan) report.protocolMoved = migrateProtocolLayout(manifest, plan, { fix });
+  if (fs.existsSync(manifestPath(cwd)) && gitIgnores(cwd, ".shelf.json")) {
+    report.ledgerIgnored = true;
+    console.warn("! 账本 .shelf.json 被 .gitignore 忽略了——换设备时 init 没法按账本还原，删掉那条忽略规则");
   }
   if (!fix) {
     if (legacyCodexDir(cwd, manifest)) {
@@ -1469,226 +1609,287 @@ function healthChecks(manifest, { fix = true, links = true } = {}) {
   report.codexMigrated = migrateLegacyCodexDir(cwd, manifest);
   if (links) {
     const targets = (manifest.agents ?? []).filter((n) => AGENT_TARGETS[n]);
-    for (const n of targets) {
-      const r = ensureSkillsLink(cwd, n, manifest);
-      if (r === "created" || r === "fixed") report.linksFixed++;
-      if (r === "blocked") report.linksBlocked.push(AGENT_TARGETS[n].skillsDir);
-    }
-    report.gitignoreAdded = ensureGitignore(cwd, targets.map((n) => "/" + AGENT_TARGETS[n].skillsDir));
+    const l = ensureLinks(cwd, manifest, targets);
+    report.linksFixed = l.made;
+    report.linksBlocked = l.blocked;
+    report.gitignoreAdded = ensureGitignore(cwd, gitignoreLinesFor(targets, plan));
   }
   return report;
 }
 
-// 植入引擎（init 与 agents add 共用）：协议文档去重植入 + multica / JASKILL +
-// common 技能拉进正本 + 各目标技能目录链接化 + gitignore
-async function plantForTargets(ctx, manifest, targets) {
+// ---- 对账（init / sync 共用，SHELF 决策 #19 / #39）----
+
+const SYNC_TAG = {
+  "local-ahead": "本地领先",
+  "both-changed": "双方都改过",
+  merged: "已合并，待推送",
+  "merge-conflict": "合并后还有冲突",
+  removed: "已从货架移除",
+  ambiguous: "同名多义",
+  "local-missing": "本地文件不存在",
+  "mirror-mismatch": "正本与副本各改各的",
+  "untracked-differs": "本地已有同名文件、内容和货架不同（没记过账）",
+};
+
+// 模板里有、账本里还没有的货：装上（模板新增的、或第一次接入）
+async function installMissing(ctx, manifest, plan, { dryRun }) {
   const cwd = process.cwd();
-  const home = skillsHomeOf(manifest);
-  const plan = [];
-  const seenDoc = new Set();
-  for (const n of targets) {
-    const doc = AGENT_TARGETS[n].doc;
-    if (seenDoc.has(doc.dest)) continue; // codex/kimi 共用 AGENTS.md，只植一份
-    seenDoc.add(doc.dest);
-    plan.push({ input: doc.input, dest: doc.dest });
-  }
-  plan.push({ input: "multica", dest: "multica", optional: true });
-  plan.push({ input: "docs/JASKILL.md", dest: `${aiDirOf(manifest)}/JASKILL.md`, planted: true });
-
-  const common = resolveShelfPath(ctx.shelfDir, "skills/common");
-  if (common) {
-    for (const e of fs.readdirSync(common.abs, { withFileTypes: true })) {
-      if (!e.isDirectory() || IGNORE_NAMES.has(e.name)) continue;
-      plan.push({ input: common.realRel + "/" + e.name, dest: home + "/" + e.name });
-    }
-  }
-
+  const items = [];
   const counters = newCounters();
-  for (const item of plan) {
-    const hit = resolveShelfPath(ctx.shelfDir, item.input);
-    if (!hit) {
-      console.log(item.optional
-        ? "- 货架上暂无 " + item.input + "，跳过"
-        : "✗ 货架上找不到 " + item.input + "（检查货架是否最新）");
+  const vars = renderVars(manifest);
+  for (const it of plan.items) {
+    const rec = manifest.shelf?.[it.key];
+    if (rec) {
+      if (!dryRun && !rec.fromTemplate) rec.fromTemplate = true;
       continue;
     }
-    // 记过账的物品沿用账上的位置（老项目可能不在标准落点）
-    const recorded = manifest.shelf?.[hit.realRel]?.localPath;
-    await pullEntry(ctx, hit.realRel, manifest, counters, safeAsk, path.resolve(cwd, recorded ?? item.dest), { planted: item.planted });
-  }
-
-  let linksMade = 0;
-  const linksBlocked = [];
-  for (const n of targets) {
-    const r = ensureSkillsLink(cwd, n, manifest);
-    if (r === "created" || r === "fixed") linksMade++;
-    if (r === "blocked") linksBlocked.push(AGENT_TARGETS[n].skillsDir);
-  }
-
-  const added = ensureGitignore(cwd, targets.flatMap((n) => AGENT_TARGETS[n].ignore));
-  return { counters, linksMade, linksBlocked, added };
-}
-
-function printPlantResult(targets, r, manifest, scaffold) {
-  printSummary(r.counters);
-  if (r.linksMade) console.log("⛓ 建立/修复链接 " + r.linksMade + " 个");
-  for (const b of r.linksBlocked) console.log("⚠ " + b + " 没能换成链接（见上方提示）");
-  if (r.added.length) console.log("✓ .gitignore 补行: " + r.added.join(", "));
-  if (scaffold?.created.length) console.log("✓ ai 资料区脚手架: " + scaffold.created.join(", "));
-  if (r.counters.blocked) console.log(`! ${r.counters.blocked} 件物品本地改过、没覆盖——shelf status 看待决与下一步`);
-  console.log("");
-  console.log("工作区已接入货架（agent 目标: " + targets.join(" + ") + "）:");
-  const docs = [...new Set(targets.map((n) => AGENT_TARGETS[n].doc.dest))].join(" / ");
-  console.log("  " + docs + "  工作协议（真源在货架，shelf sync 保持最新）");
-  console.log("  " + aiDirOf(manifest) + "/JASKILL.md  项目专属技能登记（植入一次，之后归项目，不对账）");
-  console.log("  " + skillsHomeOf(manifest) + "/  技能唯一正本（改技能、拉技能都在这）");
-  console.log("  " + targets.map((n) => AGENT_TARGETS[n].skillsDir).join(" · ") + "  → 指向正本的链接");
-  console.log("  .shelf.json  记账本（进项目 git，队友 clone 后 shelf init 即还原）");
-}
-
-// ---- 子命令：init（SHELF 决策 #21/#24/#33）----
-
-export async function cmdShelfInit(argv = []) {
-  const { flags, positionals } = parseArgs("init", argv);
-  if (positionals.length) fail(1, "用法: " + COMMANDS.init.usage);
-
-  const ctx = resolveShelfContext();
-  try {
-    if (path.resolve(process.cwd()) === path.resolve(ctx.root)) {
-      fail(1, "✗ 这里就是货架 home 本体，不能对它 init（防止把忽略规则写进货架仓库）");
-    }
-    const manifest = loadManifest();
-    manifest.source ??= remoteUrl(ctx.root) || toPosix(ctx.root);
-
-    let targets;
-    if (flags["--agents"] !== undefined) {
-      targets = parseTargetNames(flags["--agents"]);
-    } else if (manifest.agents?.length) {
-      targets = TARGET_PRIORITY.filter((n) => manifest.agents.includes(n));
-      console.log("（沿用已配置的 agent 目标: " + targets.join(", ") + "；调整用 shelf agents add 或 --agents）");
-    } else if (run.interactive) {
-      targets = await askTargets(manifest);
-      if (!targets || !targets.length) {
-        console.log("已取消。");
-        return;
+    // 只读时也按真跑的结果报：本地已有同名的，植入物算保留、内容一样算一致、不一样就是待决
+    if (dryRun) {
+      const item = { key: it.key, shown: displayPath(it.key), localPath: it.dest };
+      const destAbs = path.resolve(cwd, it.dest);
+      if (!fs.existsSync(destAbs)) item.state = "would-install";
+      else if (it.planted) item.state = "planted";
+      else if (!it.render && contentHash(destAbs) === contentHash(shelfAbs(ctx, it.key))) item.state = "same";
+      else {
+        Object.assign(item, {
+          state: "untracked-differs",
+          pending: true,
+          next: [`shelf pull ${q(it.key)} --force`, `shelf push ${q(it.dest)} --yes`],
+        });
       }
+      items.push(item);
+      continue;
+    }
+    await pullEntry(ctx, it.key, manifest, counters, safeAsk, path.resolve(cwd, it.dest), {
+      planted: it.planted,
+      mirror: it.copy,
+      render: it.render ? vars : null,
+      fromTemplate: true,
+    });
+    const got = counters.items[counters.items.length - 1];
+    const item = { key: it.key, shown: got.shown, localPath: got.localPath };
+    if (got.action === "pulled") item.state = "installed";
+    else if (got.action === "planted-kept") item.state = "planted";
+    else if (got.action === "up-to-date") item.state = "same";
+    else {
+      Object.assign(item, {
+        state: "untracked-differs",
+        pending: true,
+        next: [`shelf pull ${q(it.key)} --force`, `shelf push ${q(got.localPath)} --yes`],
+      });
+    }
+    items.push(item);
+  }
+  return items;
+}
+
+// 一件已记账的货对账：能安全自动做的直接做掉（补副本、补本地缺失、货架新版且本地没动就更新、账本刷新），
+// 其余标成待决并附下一步命令。restore = 本地缺失就补拉（init 用；sync 里缺失算待决，可能是有意删的）
+async function reconcileEntry(ctx, manifest, key, { dryRun, restore, plan }) {
+  const cwd = process.cwd();
+  const rec = manifest.shelf[key];
+  const item = { key, shown: displayPath(key), localPath: rec.localPath ?? null };
+  if (rec.mirror) item.mirror = rec.mirror;
+  const lp = q(rec.localPath ?? "");
+  const pend = (state, next) => Object.assign(item, { state, next, pending: true });
+
+  // 植入物：不对账；本地没了就补植入
+  if (rec.planted || PLANTED_KEYS.has(key)) {
+    const localAbs = rec.localPath ? path.resolve(cwd, rec.localPath) : null;
+    if (restore && localAbs && !fs.existsSync(localAbs) && fs.existsSync(shelfAbs(ctx, key))) {
+      if (!dryRun) {
+        const tplItem = plan?.items.find((i) => i.key === key);
+        await pullEntry(ctx, key, manifest, newCounters(), safeAsk, localAbs, { planted: true, render: tplItem?.render ? renderVars(manifest) : null });
+      }
+      item.state = "restored";
+    } else item.state = "planted";
+    return item;
+  }
+
+  let effKey = key;
+  let target = shelfAbs(ctx, effKey);
+  // 货架上的路径没了 → 按名字找回（搬家）或报告下架
+  if (!fs.existsSync(target)) {
+    const hits = findByBasename(ctx.shelfDir, path.basename(effKey));
+    if (hits.length !== 1) {
+      if (hits.length) item.candidates = hits.map(displayPath);
+      return pend(hits.length === 0 ? "removed" : "ambiguous", [`shelf forget ${q(key)}`]);
+    }
+    item.movedTo = hits[0];
+    if (dryRun) {
+      console.log(`↪ ${item.shown} 已被移动到 ${displayPath(hits[0])}（只读，暂不改账）`);
     } else {
-      suggest("shelf init --agents claude,codex");
-      fail(2, "✗ 非交互环境首次 init 需指定 --agents claude,codex,kimi（或 all）。已中止。");
+      delete manifest.shelf[effKey];
+      manifest.shelf[hits[0]] = rec;
+      clearMergeState(cwd, effKey);
+      console.log(`↪ ${item.shown} 已被移动到 ${displayPath(hits[0])}，记账已更新`);
     }
-
-    // ai 资料区目录名：账本记了就沿用；--ai-dir 指定；否则按项目命名规范判（.NET / C# 用 AI，其余用 ai）
-    const aiFlag = flags["--ai-dir"];
-    if (aiFlag !== undefined) {
-      if (!/^[A-Za-z0-9._-]+$/.test(aiFlag)) fail(1, `✗ --ai-dir 只接受一层目录名（如 ai、AI），收到: ${aiFlag}`);
-      if (manifest.aiDir && manifest.aiDir !== aiFlag) {
-        fail(1, `✗ 账本记的 ai 资料区是 ${manifest.aiDir}/，换成 ${aiFlag}/ 需要先手动搬家（技能正本、JASKILL 与账本 localPath 一起改）`);
-      }
-      manifest.aiDir = aiFlag;
-    } else if (!manifest.aiDir) {
-      const d = detectAiDir(process.cwd());
-      manifest.aiDir = d.name;
-      console.log(`（ai 资料区: ${d.name}/ —— ${d.reason}；要换用 --ai-dir）`);
-    }
-
-    const health = healthChecks(manifest, { fix: true, links: false });
-    const result = await plantForTargets(ctx, manifest, targets);
-    manifest.agents = targets;
-
-    // 账本还原（2026-08-30 用户确认）：标准植入清单之外、账上有而本地缺失的货架物品一并补拉，
-    // 换设备后一条 init 全就位，无需再跑 sync
-    let restored = 0;
-    for (const [key, rec] of Object.entries(manifest.shelf ?? {})) {
-      if (!rec.localPath) continue;
-      const destAbs = path.resolve(process.cwd(), rec.localPath);
-      if (fs.existsSync(destAbs)) continue;
-      const hit = resolveShelfPath(ctx.shelfDir, key);
-      if (!hit) {
-        console.log("⚠ 账上物品 " + displayPath(key) + " 在货架上已不在原位——跑 shelf sync 处理搬家/下架");
-        continue;
-      }
-      await pullEntry(ctx, hit.realRel, manifest, result.counters, safeAsk, destAbs);
-      restored++;
-    }
-
-    // ai 资料区脚手架：协议要的 PROJECT / TODO 骨架 + 已装技能要用的目录
-    const scaffold = applyScaffold(
-      process.cwd(),
-      planScaffold(process.cwd(), manifest.aiDir, path.resolve(process.cwd(), skillsHomeOf(manifest))),
-      { date: todayISO(), name: projectName(process.cwd()) },
-    );
-
-    await reconcileLocalSkills(manifest);
-    saveManifest(manifest);
-    printPlantResult(targets, result, manifest, scaffold);
-    if (restored) console.log("↺ 按账本补还原 " + restored + " 项（标准清单之外）");
-    if (result.counters.blocked) suggest("shelf status");
-    run.data = {
-      aiDir: manifest.aiDir,
-      skillsHome: skillsHomeOf(manifest),
-      agents: targets,
-      items: result.counters.items,
-      counts: countsOf(result.counters),
-      links: { made: result.linksMade, blocked: result.linksBlocked },
-      gitignoreAdded: result.added,
-      scaffold,
-      restored,
-      health,
-    };
-  } finally {
-    ctx.cleanup();
+    effKey = hits[0];
+    target = shelfAbs(ctx, effKey);
+    item.key = effKey;
+    item.shown = displayPath(effKey);
   }
+  const shown = item.shown;
+
+  // 正本与副本：缺的补、单边改的同步；各改各的交给人
+  let mirrorHash = null;
+  if (rec.mirror) {
+    const r = reconcileMirror(rec, { dryRun });
+    if (r.state === "mismatch") {
+      return pend("mirror-mismatch", [`git diff --no-index ${q(rec.mirror)} ${lp}`]);
+    }
+    if (r.state === "synced") {
+      item.mirrorSynced = r.note;
+      mirrorHash = r.hash;
+      console.log(`${dryRun ? "· 将：" : "↪ "}${r.note}`);
+    }
+  }
+
+  // 本地没了：init 补拉；sync 里算待决
+  const localAbs = path.resolve(cwd, rec.localPath ?? "");
+  if (!rec.localPath || (!fs.existsSync(localAbs) && mirrorHash === null)) {
+    if (restore && rec.localPath) {
+      if (!dryRun) {
+        writeWithMirror(target, localAbs, rec.mirror);
+        manifest.shelf[effKey] = { ...rec, contentHash: contentHash(target), sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
+        clearMergeState(cwd, effKey);
+      }
+      console.log(`${dryRun ? "· 将补拉" : "↓ 已补拉"} ${shown}`);
+      item.state = "restored";
+      return item;
+    }
+    return pend("local-missing", [`shelf pull ${q(effKey)} --force`, `shelf forget ${q(effKey)}`]);
+  }
+
+  const S = contentHash(target);
+  const L = mirrorHash ?? contentHash(localAbs);
+  const R = rec.contentHash;
+  const ms = getMergeState(cwd, effKey);
+
+  if (S === R && L === R) {
+    item.state = "same";
+    return item;
+  }
+  // 内容已和货架一致，只是账本落后 → 只刷新账本
+  if (L === S) {
+    item.state = "refreshed";
+    if (!dryRun) {
+      manifest.shelf[effKey] = { ...rec, contentHash: S, sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
+      clearMergeState(cwd, effKey);
+    }
+    console.log(`= ${shown} 与货架一致，${dryRun ? "账本将刷新" : "账本已刷新"}`);
+    return item;
+  }
+  // 货架有新版、本地没动 → 自动覆盖本地（零损失，副本一起写）
+  if (S !== R && L === R) {
+    if (dryRun) {
+      item.state = "would-update";
+      console.log(`↓ 将更新本地：${shown}`);
+      return item;
+    }
+    writeWithMirror(target, localAbs, rec.mirror);
+    manifest.shelf[effKey] = { ...rec, contentHash: S, sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
+    clearMergeState(cwd, effKey);
+    item.state = "updated";
+    console.log(`↓ 已更新本地：${shown}`);
+    return item;
+  }
+  // merge 过、货架之后没再变：等 push（冲突标记没删干净的先改）
+  if (ms && ms.headHash === S) {
+    const left = conflictMarkerFiles(readTreeFs(localAbs, path.basename(effKey)));
+    if (left.length) item.conflicts = left;
+    return pend(left.length ? "merge-conflict" : "merged", [`shelf push ${lp}`]);
+  }
+  // 本地有改动：本地领先，或双方都改
+  const both = S !== R;
+  item.files = diffSummary(target, localAbs);
+  return pend(both ? "both-changed" : "local-ahead", both ? [`shelf diff ${lp}`, `shelf merge ${lp}`] : [`shelf push ${lp}`]);
 }
 
-// ---- 子命令：agents（查看/添加 agent 目标，SHELF 决策 #24）----
-
-export async function cmdShelfAgents(argv) {
-  const { positionals } = parseArgs("agents", argv);
-  const manifest = loadManifest();
-  const current = TARGET_PRIORITY.filter((n) => (manifest.agents ?? []).includes(n));
-  const sub = positionals[0];
-
-  if (sub === undefined) {
-    console.log("技能正本: " + skillsHomeOf(manifest) + "/（改技能、拉技能都在这）");
-    console.log("已配置:   " + (current.length ? current.join(", ") : "（无——先跑 shelf init）"));
-    for (const n of TARGET_PRIORITY) {
-      const t = AGENT_TARGETS[n];
-      console.log("  " + (current.includes(n) ? "●" : "○") + " " + n + "  " + t.skillsDir + "/ → 链接 · " + t.doc.dest);
-    }
-    console.log("添加: shelf agents add <名>");
-    run.data = {
-      skillsHome: skillsHomeOf(manifest),
-      configured: current,
-      targets: TARGET_PRIORITY.map((n) => ({ name: n, skillsDir: AGENT_TARGETS[n].skillsDir, doc: AGENT_TARGETS[n].doc.dest, configured: current.includes(n) })),
-    };
-    return;
-  }
-  if (sub !== "add" || positionals.length < 2) fail(1, "用法: " + COMMANDS.agents.usage);
-
-  const adding = parseTargetNames(positionals.slice(1).join(","));
-  const targets = TARGET_PRIORITY.filter((n) => current.includes(n) || adding.includes(n));
-  run.data = { before: current, after: targets };
-  if (targets.join() === current.join()) {
-    console.log("= 目标已包含，无需变更（" + current.join(", ") + "）");
-    return;
-  }
-
-  const ctx = resolveShelfContext();
-  try {
-    manifest.aiDir ??= detectAiDir(process.cwd()).name;
-    manifest.agents = targets;
-    healthChecks(manifest, { fix: true, links: false });
-    const result = await plantForTargets(ctx, manifest, targets);
-    saveManifest(manifest);
-    printPlantResult(targets, result, manifest, null);
-    console.log("✓ agent 目标: " + (current.join(", ") || "（无）") + " → " + targets.join(", "));
-    run.data.items = result.counters.items;
-  } finally {
-    ctx.cleanup();
-  }
+// 人在终端跑 sync、没带 --merge / --push 时，逐条待决当场问
+function showLineDiff(shelfAbsPath, localAbs, shown) {
+  console.log(`—— ${shown}  diff（库上 → 本地）——`);
+  spawnSync("git", ["diff", "--no-index", "--color=always", "--", shelfAbsPath, localAbs], { stdio: "inherit" });
 }
 
-// ---- 本地技能台账（SHELF 决策 #27 · 增量对账）----
+async function promptPending(ctx, manifest, item) {
+  const cwd = process.cwd();
+  const rec = manifest.shelf[item.key];
+  if (!rec) return;
+  const target = shelfAbs(ctx, item.key);
+  const localAbs = path.resolve(cwd, rec.localPath ?? "");
+  const resolved = (state) => Object.assign(item, { state, pending: false, next: undefined });
+  if (item.state === "removed" || item.state === "ambiguous") {
+    const act = await choose(`⚠ ${item.shown} ${SYNC_TAG[item.state]}。[r]清记账 / [s]跳过? `, [{ key: "r" }, { key: "s" }]);
+    if (act === "r") {
+      delete manifest.shelf[item.key];
+      clearMergeState(cwd, item.key);
+      console.log(`✓ 已清记账 ${item.shown}（本地文件未动；想重新上架用 shelf create）`);
+      resolved("cleaned");
+    }
+    return;
+  }
+  if (item.state === "local-missing") {
+    const act = await choose(`⚠ ${item.shown} 的本地文件不存在（${rec.localPath ?? "无 localPath"}）。[p]重新拉取 / [r]清记账 / [s]跳过? `,
+      [{ key: "p" }, { key: "r" }, { key: "s" }]);
+    if (act === "p") {
+      writeWithMirror(target, localAbs, rec.mirror);
+      manifest.shelf[item.key] = { ...rec, contentHash: contentHash(target), sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
+      console.log(`↓ 已重新拉取 ${item.shown}`);
+      resolved("restored");
+    } else if (act === "r") {
+      delete manifest.shelf[item.key];
+      console.log(`✓ 已清记账 ${item.shown}`);
+      resolved("cleaned");
+    }
+    return;
+  }
+  if (item.state !== "local-ahead" && item.state !== "both-changed") return;
+  const both = item.state === "both-changed";
+  showLineDiff(target, localAbs, item.shown);
+  const act = await choose(
+    `${item.shown}（${SYNC_TAG[item.state]}）。[p]本地推上库 / [o]库覆盖本地 / ${both ? "[m]三方合并 / " : ""}[s]跳过? `,
+    [{ key: "p" }, { key: "o" }, ...(both ? [{ key: "m" }] : []), { key: "s" }],
+  );
+  if (act === "s") return;
+  if (act === "o") {
+    writeWithMirror(target, localAbs, rec.mirror);
+    manifest.shelf[item.key] = { ...rec, contentHash: contentHash(target), sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
+    clearMergeState(cwd, item.key);
+    console.log(`↓ 已用库上版本覆盖本地：${item.shown}`);
+    resolved("updated");
+    return;
+  }
+  if (act === "m") {
+    let r;
+    try {
+      r = mergeItem(ctx, item.key, rec);
+    } catch (err) {
+      if (!(err instanceof ShelfExit)) throw err;
+      console.log(err.message);
+      return;
+    }
+    printMergeResult(item.key, rec, r);
+    if (r.state === "conflict") return Object.assign(item, { state: "merge-conflict", next: [`shelf push ${q(rec.localPath)}`] });
+    item.state = "merged";
+    const now = await choose(`现在推上库? [p]推 / [s]稍后? `, [{ key: "p" }, { key: "s" }]);
+    if (now === "s") return Object.assign(item, { next: [`shelf push ${q(rec.localPath)}`] });
+  } else if (both) {
+    const ok = await choose(`库上的改动将被你的本地版本覆盖，确认? [y]es / [n]o? `, [{ key: "y" }, { key: "n" }]);
+    if (ok === "n") return;
+  }
+  const { secrets } = guardScan(localAbs);
+  if (secrets.length > 0) {
+    console.log(`✗ ${item.shown} 含疑似凭据文件（${secrets.map((x) => x.rel).join(", ")}），sync 不代推，已跳过——确要推请单独 shelf push --force-secret`);
+    return;
+  }
+  const r = applyAndCommit(ctx, item.key, localAbs, manifest, "update");
+  item.commit = r.commit;
+  resolved("pushed");
+  return r.keepEphemeral;
+}
+
+// ---- 本地技能台账与 JASKILL 核对（SHELF 决策 #27）----
 
 // local 段维护：在场→刷指纹；升格→移除；缺失→告警但保留记录（仅 adopt 交互提供清账）；
 // 新出现的未追踪目录→登记。init / sync / adopt 共用。
@@ -1701,7 +1902,7 @@ async function reconcileLocalSkills(manifest, { allowPrune = false } = {}) {
   const isTracked = (name) => [...tracked].some((t) => samePath(t, home + "/" + name));
   const prev = manifest.local ?? {};
   const next = {};
-  const c = { registered: 0, refreshed: 0, missing: 0, graduated: 0 };
+  const c = { registered: 0, refreshed: 0, missing: 0, graduated: 0, registeredNames: [] };
 
   const dirs = fs.existsSync(canonical)
     ? fs.readdirSync(canonical, { withFileTypes: true })
@@ -1740,19 +1941,284 @@ async function reconcileLocalSkills(manifest, { allowPrune = false } = {}) {
     };
     console.log("✚ 登记本地技能: " + name);
     c.registered++;
+    c.registeredNames.push(name);
   }
 
   manifest.local = next;
   return c;
 }
 
-// JASKILL.md 模板承诺的核对：正本里的项目专属技能（local 段）是否都登记在 JASKILL 表里
-function unregisteredLocalSkills(manifest, localNames) {
+// JASKILL.md 登记表核对：正本里的项目专属技能（local 段）有没有登记；登记表里写的技能正本里还在不在
+function jaskillCheck(manifest) {
   const rec = manifest.shelf?.["docs/JASKILL.md"];
   const p = path.resolve(process.cwd(), rec?.localPath ?? `${aiDirOf(manifest)}/JASKILL.md`);
-  if (!fs.existsSync(p)) return [];
+  if (!fs.existsSync(p)) return { file: null, unregistered: [], stale: [] };
   const text = fs.readFileSync(p, "utf8");
-  return localNames.filter((name) => !new RegExp(`(^|[^A-Za-z0-9_-])${escapeRe(name)}([^A-Za-z0-9_-]|$)`, "m").test(text));
+  const word = (name) => new RegExp(`(^|[^A-Za-z0-9_-])${escapeRe(name)}([^A-Za-z0-9_-]|$)`, "m");
+  const unregistered = Object.keys(manifest.local ?? {}).filter((name) => !word(name).test(text));
+  const home = path.resolve(process.cwd(), skillsHomeOf(manifest));
+  const listed = new Set([
+    ...[...text.matchAll(/^\|\s*`([a-z0-9][a-z0-9._-]*)`\s*\|/gm)].map((m) => m[1]),
+    ...[...text.matchAll(/^##\s+([a-z0-9][a-z0-9._-]*)\s*$/gm)].map((m) => m[1]),
+  ]);
+  const stale = [...listed].filter((name) => !fs.existsSync(path.join(home, name)));
+  return { file: toPosix(path.relative(process.cwd(), p)), unregistered, stale };
+}
+
+function printJaskill(j) {
+  for (const name of j.unregistered) {
+    console.log(`· 本地技能 ${name} 还没登记在 ${j.file}——补一行（何时读 / 上游），agent 才知道什么场景用它`);
+  }
+  for (const name of j.stale) {
+    console.log(`· ${j.file} 登记了 ${name}，但技能正本里没有它——装回来，或删掉那一行`);
+  }
+}
+
+// ---- 子命令：init（SHELF 决策 #21 / #33 / #39）----
+
+// 按模板把项目接成「该有的样子」：装模板里的货、逐件对账（缺的补、旧的更新）、链接、gitignore、脚手架、本地技能登记
+async function applyTemplate(ctx, manifest, tpl, targets) {
+  const cwd = process.cwd();
+  const plan = planOf(ctx, manifest, tpl, targets);
+  for (const m of plan.missing) console.warn(`! 模板里的 ${m} 在货架上找不到，跳过`);
+  const health = healthChecks(manifest, plan, { fix: true, links: false });
+  const items = await installMissing(ctx, manifest, plan, { dryRun: false });
+  const done = new Set(items.map((i) => i.key));
+  for (const key of Object.keys(manifest.shelf ?? {})) {
+    if (done.has(key)) continue;
+    items.push(await reconcileEntry(ctx, manifest, key, { dryRun: false, restore: true, plan }));
+  }
+  const links = ensureLinks(cwd, manifest, targets);
+  const gitignoreAdded = ensureGitignore(cwd, gitignoreLinesFor(targets, plan));
+  const scaffold = applyScaffold(
+    cwd,
+    planScaffold(plan.scaffold, { aiDir: aiDirOf(manifest), skillsHomeAbs: path.resolve(cwd, skillsHomeOf(manifest)) }),
+    { date: todayISO(), name: projectName(cwd) },
+  );
+  const local = await reconcileLocalSkills(manifest);
+  const jaskill = jaskillCheck(manifest);
+  return { plan, health, items, links, gitignoreAdded, scaffold, local, jaskill };
+}
+
+function countStates(items) {
+  const c = {};
+  for (const i of items) c[i.state] = (c[i.state] ?? 0) + 1;
+  return c;
+}
+
+function printPending(pending) {
+  for (const x of pending) console.log(`  · ${x.shown}（${SYNC_TAG[x.state] ?? x.state}）→ ${(x.next ?? []).join("  或  ")}`);
+}
+
+function printApplied(manifest, targets, r, tpl) {
+  const c = countStates(r.items);
+  const parts = [
+    [c.installed, "装上"], [c.restored, "补拉"], [c.updated, "更新"], [c.refreshed, "账本刷新"],
+    [c.same, "一致"], [c.planted, "植入物"],
+  ].filter(([n]) => n).map(([n, l]) => `${n} ${l}`);
+  console.log("");
+  console.log(`模板 ${tpl.name}${tpl.builtin ? "（内置配方）" : ""}：${parts.join(" · ") || "无变化"}`);
+  if (r.links.made) console.log(`⛓ 建立/修复技能链接 ${r.links.made} 个`);
+  for (const b of r.links.blocked) console.log(`⚠ ${b} 没能换成链接（见上方提示）`);
+  if (r.gitignoreAdded.length) console.log(`✓ .gitignore 补行: ${r.gitignoreAdded.join(", ")}`);
+  if (r.scaffold.created.length) console.log(`✓ 补上固定目录: ${r.scaffold.created.join(" · ")}`);
+  if (r.local.registered) console.log(`✚ 登记本地技能 ${r.local.registered} 个（账本 local 段）: ${r.local.registeredNames.join(", ")}`);
+  printJaskill(r.jaskill);
+  const pending = r.items.filter((i) => i.pending);
+  if (pending.length) {
+    console.log(`待决 ${pending.length}:`);
+    printPending(pending);
+  }
+  console.log("");
+  console.log(`已接入（agent: ${targets.join(" + ")} · ai 区: ${aiDirOf(manifest)}/）:`);
+  const copies = r.plan.items.filter((i) => i.copy).map((i) => `${i.copy} ← ${i.dest}`);
+  if (copies.length) console.log(`  ${copies.join(" · ")}  协议：正本入库，根目录是给 agent 读的副本`);
+  console.log(`  ${skillsHomeOf(manifest)}/  技能唯一正本；${targets.map((n) => AGENT_TARGETS[n].skillsDir).join(" · ")} 是指向它的链接`);
+  console.log("  .shelf.json  账本（进项目 git，换设备 / 新 worktree 跑 shelf init 即按它还原）");
+}
+
+export async function cmdShelfInit(argv = []) {
+  const { flags, positionals } = parseArgs("init", argv);
+  if (positionals.length) fail(1, "用法: " + COMMANDS.init.usage);
+  const cwd = process.cwd();
+
+  const ctx = resolveShelfContext({ forWrite: true }); // 要拿最新的模板与货
+  try {
+    if (path.resolve(cwd) === path.resolve(ctx.root)) {
+      fail(1, "✗ 这里就是货架 home 本体，不能对它 init（防止把忽略规则写进货架仓库）");
+    }
+    const fresh = !fs.existsSync(manifestPath(cwd));
+    const manifest = loadManifest();
+    manifest.source ??= remoteUrl(ctx.root) || toPosix(ctx.root);
+    const tpl = templateOf(ctx, manifest, flags["--template"] ?? manifest.template?.name ?? DEFAULT_TEMPLATE);
+    const defaults = parseTargetNames((tpl.defaultAgents ?? ["claude", "codex"]).join(","));
+
+    let targets;
+    if (flags["--agents"] !== undefined) {
+      targets = parseTargetNames(flags["--agents"]);
+    } else if (manifest.agents?.length) {
+      targets = TARGET_PRIORITY.filter((n) => manifest.agents.includes(n));
+      console.log("（沿用账本里的 agent 目标: " + targets.join(", ") + "；调整用 shelf agents add 或 --agents）");
+    } else if (run.interactive) {
+      targets = await askTargets(manifest, defaults);
+      if (!targets || !targets.length) {
+        console.log("已取消。");
+        return;
+      }
+    } else {
+      targets = defaults;
+      console.log(`（没指定 --agents，按模板默认接入 ${targets.join(" + ")}；要别的组合加 --agents）`);
+    }
+
+    // ai 资料区目录名：账本记了就沿用；--ai-dir 指定；否则按项目命名规范判（.NET / C# 用 AI，其余用 ai）
+    const aiFlag = flags["--ai-dir"];
+    if (aiFlag !== undefined) {
+      if (!/^[A-Za-z0-9._-]+$/.test(aiFlag)) fail(1, `✗ --ai-dir 只接受一层目录名（如 ai、AI），收到: ${aiFlag}`);
+      if (manifest.aiDir && manifest.aiDir !== aiFlag) {
+        fail(1, `✗ 账本记的 ai 资料区是 ${manifest.aiDir}/，换成 ${aiFlag}/ 需要先手动搬家（技能正本、JASKILL 与账本 localPath 一起改）`);
+      }
+      manifest.aiDir = aiFlag;
+    } else if (!manifest.aiDir) {
+      const d = detectAiDir(cwd);
+      manifest.aiDir = d.name;
+      console.log(`（ai 资料区: ${d.name}/ —— ${d.reason}；要换用 --ai-dir）`);
+    }
+
+    manifest.agents = targets;
+    manifest.template = tpl.builtin ? { name: tpl.name, builtin: true } : { name: tpl.name, commit: headCommit(ctx.root) };
+    console.log(fresh ? `新项目接入：按模板 ${tpl.name} 初始化` : `按账本还原 / 补齐（模板 ${tpl.name}）`);
+    const r = await applyTemplate(ctx, manifest, tpl, targets);
+    saveManifest(manifest);
+    printApplied(manifest, targets, r, tpl);
+
+    const pending = r.items.filter((i) => i.pending);
+    if (run.json) for (const x of pending) suggest(...x.next);
+    if (pending.length) setExit(2);
+    run.data = {
+      mode: fresh ? "fresh" : "restore",
+      template: { name: tpl.name, builtin: !!tpl.builtin },
+      aiDir: manifest.aiDir,
+      skillsHome: skillsHomeOf(manifest),
+      agents: targets,
+      items: r.items.map(({ shown, ...rest }) => rest),
+      counts: { ...countStates(r.items), pending: pending.length },
+      links: r.links,
+      gitignoreAdded: r.gitignoreAdded,
+      scaffold: r.scaffold,
+      local: r.local,
+      jaskill: r.jaskill,
+      health: r.health,
+      missingFromShelf: r.plan.missing,
+    };
+  } finally {
+    ctx.cleanup();
+  }
+}
+
+// ---- 子命令：template（看模板里有哪些货，SHELF 决策 #37）----
+
+export async function cmdShelfTemplate(argv) {
+  const { positionals } = parseArgs("template", argv);
+  const sub = positionals[0] ?? "ls";
+  const ctx = resolveShelfContext();
+  try {
+    if (sub === "ls") {
+      const list = listTemplates(ctx.shelfDir);
+      if (!list.length) console.log(`货架上还没有模板（init 会用内置的 ${DEFAULT_TEMPLATE} 配方）`);
+      for (const t of list) console.log(`  ${t.name}  ${displayPath(t.key)}  ${t.description}`);
+      run.data = { templates: list };
+      return;
+    }
+    if (sub !== "show" || positionals.length > 2) fail(1, "用法: " + COMMANDS.template.usage);
+    const manifest = loadManifest();
+    const name = positionals[1] ?? manifest.template?.name ?? DEFAULT_TEMPLATE;
+    const tpl = loadTemplate(ctx.shelfDir, name);
+    if (!tpl) fail(1, `✗ 货架上没有模板 '${name}'（shelf template 看有哪些）`);
+    const agents = manifest.agents?.length ? manifest.agents : (tpl.defaultAgents ?? ["claude", "codex"]);
+    const aiDir = aiDirOf(manifest);
+    const plan = expandTemplate(tpl, { shelfDir: ctx.shelfDir, agents, aiDir });
+    console.log(`模板 ${tpl.name}${tpl.key ? `（货架 ${displayPath(tpl.key)}）` : "（内置配方）"} · agent: ${agents.join(" + ")} · ai 区: ${aiDir}/`);
+    if (tpl.description) console.log(`  ${tpl.description}`);
+    console.log("");
+    for (const it of plan.items) {
+      const tags = [it.planted ? "植入一次，之后归项目" : "随货架同步", ...(it.copy ? [`根目录副本 ${it.copy}`] : [])];
+      console.log(`  ${it.dest}  ← ${displayPath(it.key)}（${tags.join("；")}）`);
+    }
+    console.log("");
+    console.log(`  技能链接: ${agents.filter((n) => AGENT_TARGETS[n]).map((n) => `${AGENT_TARGETS[n].skillsDir} → ${aiDir}/jaSkills`).join(" · ")}`);
+    // 固定目录：模板会装的技能在 frontmatter 里自己声明的（读货架上的版本）+ 配方里写的（内置配方兜底用）
+    const skills = plan.items
+      .filter((it) => fs.existsSync(path.join(shelfAbs(ctx, it.key), "SKILL.md")))
+      .map((it) => ({ name: path.basename(it.dest), skillMd: path.join(shelfAbs(ctx, it.key), "SKILL.md") }));
+    const scaffold = planScaffold(plan.scaffold, { aiDir, skills });
+    if (scaffold.length) {
+      console.log("  固定目录（init / sync 建，目录里放 .gitkeep）:");
+      for (const s of scaffold) console.log(`    ${s.rel}${s.kind === "dir" ? "/" : ""}  ← ${s.by.join(" / ")}`);
+    }
+    for (const m of plan.missing) console.warn(`! ${m} 在货架上找不到`);
+    run.data = {
+      name: tpl.name,
+      key: tpl.key ?? null,
+      builtin: !!tpl.builtin,
+      description: tpl.description ?? "",
+      agents,
+      aiDir,
+      items: plan.items,
+      links: agents.filter((n) => AGENT_TARGETS[n]).map((n) => ({ path: AGENT_TARGETS[n].skillsDir, to: `${aiDir}/jaSkills` })),
+      scaffold: scaffold.map((s) => ({ path: s.rel, kind: s.kind, by: s.by })),
+      missing: plan.missing,
+    };
+  } finally {
+    ctx.cleanup();
+  }
+}
+
+// ---- 子命令：agents（查看/添加 agent 目标，SHELF 决策 #24）----
+
+export async function cmdShelfAgents(argv) {
+  const { positionals } = parseArgs("agents", argv);
+  const manifest = loadManifest();
+  const current = TARGET_PRIORITY.filter((n) => (manifest.agents ?? []).includes(n));
+  const sub = positionals[0];
+
+  if (sub === undefined) {
+    console.log("技能正本: " + skillsHomeOf(manifest) + "/（改技能、拉技能都在这）");
+    console.log("已配置:   " + (current.length ? current.join(", ") : "（无——先跑 shelf init）"));
+    for (const n of TARGET_PRIORITY) {
+      console.log("  " + (current.includes(n) ? "●" : "○") + " " + n + "  " + AGENT_TARGETS[n].skillsDir + "/ → 链接");
+    }
+    console.log("添加: shelf agents add <名>");
+    run.data = {
+      skillsHome: skillsHomeOf(manifest),
+      configured: current,
+      targets: TARGET_PRIORITY.map((n) => ({ name: n, skillsDir: AGENT_TARGETS[n].skillsDir, configured: current.includes(n) })),
+    };
+    return;
+  }
+  if (sub !== "add" || positionals.length < 2) fail(1, "用法: " + COMMANDS.agents.usage);
+
+  const adding = parseTargetNames(positionals.slice(1).join(","));
+  const targets = TARGET_PRIORITY.filter((n) => current.includes(n) || adding.includes(n));
+  run.data = { before: current, after: targets };
+  if (targets.join() === current.join()) {
+    console.log("= 目标已包含，无需变更（" + current.join(", ") + "）");
+    return;
+  }
+
+  const ctx = resolveShelfContext({ forWrite: true });
+  try {
+    manifest.aiDir ??= detectAiDir(process.cwd()).name;
+    manifest.agents = targets;
+    const tpl = templateOf(ctx, manifest, manifest.template?.name ?? DEFAULT_TEMPLATE);
+    manifest.template ??= tpl.builtin ? { name: tpl.name, builtin: true } : { name: tpl.name, commit: headCommit(ctx.root) };
+    const r = await applyTemplate(ctx, manifest, tpl, targets);
+    saveManifest(manifest);
+    printApplied(manifest, targets, r, tpl);
+    console.log("✓ agent 目标: " + (current.join(", ") || "（无）") + " → " + targets.join(", "));
+    run.data.items = r.items.map(({ shown, ...rest }) => rest);
+  } finally {
+    ctx.cleanup();
+  }
 }
 
 // ---- 子命令：adopt（收编外来技能，SHELF 决策 #27）----
@@ -1763,9 +2229,10 @@ export async function cmdShelfAdopt(argv = []) {
   manifest.aiDir ??= detectAiDir(process.cwd()).name;
 
   // agent 技能目录若被外部安装器换成了实体目录：内容迁入正本，恢复链接（含老版 .codex/skills 迁移）
-  const health = healthChecks(manifest, { fix: true, links: true });
+  const health = healthChecks(manifest, null, { fix: true, links: true });
   const c = await reconcileLocalSkills(manifest, { allowPrune: true });
   saveManifest(manifest);
+  const j = jaskillCheck(manifest);
 
   console.log("");
   console.log(
@@ -1773,10 +2240,11 @@ export async function cmdShelfAdopt(argv = []) {
     + c.graduated + " 已升格/移除, " + health.linksFixed + " 目录收编重链；"
     + "local 段共 " + Object.keys(manifest.local).length + " 个本地技能",
   );
+  printJaskill(j);
   if (Object.keys(manifest.local).length) {
     console.log("（本地技能不参与货架对账；想跨项目复用: shelf create " + skillsHomeOf(manifest) + "/<名> --to skills/<包>）");
   }
-  run.data = { ...c, linksFixed: health.linksFixed, linksBlocked: health.linksBlocked, local: Object.keys(manifest.local) };
+  run.data = { ...c, linksFixed: health.linksFixed, linksBlocked: health.linksBlocked, local: Object.keys(manifest.local), jaskill: j };
 }
 
 // ---- 子命令：home（查看/更新档口）----
@@ -1786,7 +2254,7 @@ export async function cmdShelfHome(argv) {
   if (flags["--update"]) {
     const ok = refreshManagedHome({ force: true });
     if (!ok && !fs.existsSync(managedHomeDir)) {
-      console.log("（本机没有托管档口——你用的是自己的 clone 或 npx 快照，更新请用 git pull）");
+      console.log("（本机没有托管档口——你用的是 SHELF_HOME 指定的 clone 或 npx 快照，更新请用 git pull）");
     } else if (ok) {
       console.log("✓ 托管档口已更新到最新");
     }
@@ -1794,7 +2262,7 @@ export async function cmdShelfHome(argv) {
   const ctx = resolveShelfContext();
   try {
     const modeText = {
-      home: "你自己的 clone",
+      home: "SHELF_HOME / ~/.shelfrc 指定的 clone",
       managed: "托管档口（shelf 自动维护）",
       snapshot: "npx 包内快照（只读，写操作会走临时 clone）",
       ephemeral: "一次性临时 clone",
@@ -1813,349 +2281,147 @@ export async function cmdShelfHome(argv) {
   }
 }
 
-// ---- 子命令：sync / status（按账本与货架对账，SHELF 决策 #19）----
-
-// 逐行内容 diff 直通终端（git 自带着色），方向：库上 → 本地
-function showLineDiff(shelfAbsPath, localAbs, shown) {
-  console.log(`—— ${shown}  diff（库上 → 本地）——`);
-  spawnSync("git", ["diff", "--no-index", "--color=always", "--", shelfAbsPath, localAbs], { stdio: "inherit" });
-}
-
-const SYNC_TAG = {
-  "local-ahead": "本地领先",
-  "both-changed": "双方都改过",
-  merged: "已合并，待推送",
-  "merge-conflict": "已合并，还有冲突标记没解决",
-  removed: "已从货架移除",
-  ambiguous: "同名多义",
-  "local-missing": "本地文件不存在",
-  "mirror-mismatch": "正本与入库副本不一致",
-};
+// ---- 子命令：sync / status（按账本与货架对账，SHELF 决策 #19 / #39）----
 
 export async function cmdShelfSync(argv, { status = false } = {}) {
   const { flags } = parseArgs(status ? "status" : "sync", argv);
   const dryRun = status || !!flags["--dry-run"];
+  const doMerge = !!flags["--merge"];
+  const doPush = !!flags["--push"];
+  if (dryRun && (doMerge || doPush)) fail(1, "✗ status / --dry-run 只读，不能和 --merge / --push 一起用");
   const cwd = process.cwd();
 
   const ctx = resolveShelfContext({ forWrite: true }); // 对账必须对着真最新：等同写操作，强制刷新
   let keepEphemeral = false;
   try {
     const manifest = loadManifest();
-    if (!dryRun) manifest.aiDir ??= detectAiDir(cwd).name;
-    const health = healthChecks(manifest, { fix: !dryRun, links: true });
-    const entries = Object.entries(manifest.shelf ?? {});
-    if (entries.length === 0) {
-      console.log("账本为空（.shelf.json 没有 shelf 段记录）——先 shelf init / pull / create。");
-      run.data = { dryRun, items: [], counts: {}, pending: 0, health };
-      if (!dryRun) saveManifest(manifest);
+    if (!dryRun && manifest.agents?.length) manifest.aiDir ??= detectAiDir(cwd).name;
+    const tpl = templateOf(ctx, manifest);
+    const plan = tpl ? planOf(ctx, manifest, tpl) : null;
+    const health = healthChecks(manifest, plan, { fix: !dryRun, links: true });
+    if (!Object.keys(manifest.shelf ?? {}).length && !plan) {
+      console.log("账本为空（.shelf.json 没有记录）——先 shelf init。");
+      run.data = { dryRun, items: [], counts: {}, health };
       return;
     }
 
-    const c = { same: 0, updated: 0, refreshed: 0, pushed: 0, cleaned: 0, skipped: 0, planted: 0 };
-    const items = [];
-    const pending = [];
-    const pend = (item, state, next) => {
-      item.state = state;
-      item.next = next;
-      pending.push(item);
-    };
+    // 模板新增的货 + 已记账的逐件对账
+    const items = plan ? await installMissing(ctx, manifest, plan, { dryRun }) : [];
+    const done = new Set(items.map((i) => i.key));
+    for (const key of Object.keys(manifest.shelf ?? {})) {
+      if (done.has(key)) continue;
+      items.push(await reconcileEntry(ctx, manifest, key, { dryRun, restore: false, plan }));
+    }
 
-    for (const [key, rec] of entries) {
-      let effKey = key;
-      let target = shelfAbs(ctx, effKey);
-      const item = { key, shown: displayPath(key), localPath: rec.localPath ?? null };
-      items.push(item);
-      const lp = q(rec.localPath ?? "");
-
-      // 植入物（JASKILL 这类）：植入后归项目，不对账
-      if (rec.planted || PLANTED_KEYS.has(key)) {
-        item.state = "planted";
-        c.planted++;
-        continue;
-      }
-
-      const localAbs = path.resolve(cwd, rec.localPath ?? "");
-      const localExists = !!rec.localPath && fs.existsSync(localAbs);
-
-      // 情形 5：库上路径没了 → 按名字找回（搬家）或报告下架
-      if (!fs.existsSync(target)) {
-        const hits = findByBasename(ctx.shelfDir, path.basename(effKey));
-        if (hits.length === 1) {
-          item.movedTo = hits[0];
-          if (dryRun) {
-            console.log(`↪ ${item.shown} 已被移动到 ${displayPath(hits[0])}（只读，暂不改账）`);
-          } else {
-            delete manifest.shelf[effKey];
-            manifest.shelf[hits[0]] = rec;
-            clearMergeState(cwd, effKey);
-            console.log(`↪ ${item.shown} 已被移动到 ${displayPath(hits[0])}，记账已更新`);
-          }
-          effKey = hits[0];
-          target = shelfAbs(ctx, effKey);
-          item.key = effKey;
-          item.shown = displayPath(effKey);
-        } else {
-          const state = hits.length === 0 ? "removed" : "ambiguous";
-          if (hits.length) item.candidates = hits.map(displayPath);
-          if (!run.interactive || dryRun) {
-            console.log(`⚠ 待决 ${item.shown}：${SYNC_TAG[state]}${hits.length ? `（${hits.length} 处）` : ""}`);
-            pend(item, state, [`shelf forget ${q(key)}`]);
+    // --merge：双改的物品三方合并；--push：本地领先与合并干净的推上货架（冲突留给人）
+    if (doMerge) {
+      for (const it of items.filter((i) => i.state === "both-changed")) {
+        const rec = manifest.shelf[it.key];
+        if (rec.mirror) {
+          const m = reconcileMirror(rec);
+          if (m.state === "mismatch") {
+            Object.assign(it, { state: "mirror-mismatch", next: [`git diff --no-index ${q(rec.mirror)} ${q(rec.localPath)}`] });
             continue;
           }
-          const act = await choose(`⚠ ${item.shown} ${SYNC_TAG[state]}。[r]清记账 / [s]跳过? `, [{ key: "r" }, { key: "s" }]);
-          if (act === "r") {
-            delete manifest.shelf[effKey];
-            clearMergeState(cwd, effKey);
-            console.log(`✓ 已清记账 ${item.shown}（本地文件未动；想重新上架用 shelf create）`);
-            item.state = "cleaned";
-            c.cleaned++;
-          } else {
-            item.state = "skipped";
-            c.skipped++;
-          }
-          continue;
         }
-      }
-      const shown = item.shown;
-
-      // 情形 6：本地文件没了 → 孤儿记账
-      if (!localExists) {
-        if (!run.interactive || dryRun) {
-          console.log(`⚠ 待决 ${shown}：本地文件不存在（${rec.localPath ?? "无 localPath"}）`);
-          pend(item, "local-missing", [`shelf pull ${q(effKey)} --force`, `shelf forget ${q(effKey)}`]);
-          continue;
-        }
-        const act = await choose(
-          `⚠ ${shown} 的本地文件不存在（${rec.localPath ?? "无 localPath"}）。[p]重新拉取 / [r]清记账 / [s]跳过? `,
-          [{ key: "p" }, { key: "r" }, { key: "s" }],
-        );
-        if (act === "p") {
-          writeWithMirror(target, localAbs, rec.mirror);
-          manifest.shelf[effKey] = { ...rec, contentHash: contentHash(target), sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
-          console.log(`↓ 已重新拉取 ${shown}`);
-          item.state = "updated";
-          c.updated++;
-        } else if (act === "r") {
-          delete manifest.shelf[effKey];
-          console.log(`✓ 已清记账 ${shown}`);
-          item.state = "cleaned";
-          c.cleaned++;
-        } else {
-          item.state = "skipped";
-          c.skipped++;
-        }
-        continue;
-      }
-
-      // 入库副本必须和正本一致，否则谁覆盖谁都会丢东西，交给人定
-      if (rec.mirror) {
-        const mirrorAbs = path.resolve(cwd, rec.mirror);
-        item.mirror = rec.mirror;
-        if (!fs.existsSync(mirrorAbs) || contentHash(mirrorAbs) !== contentHash(localAbs)) {
-          console.log(`⚠ 待决 ${shown}：${rec.localPath} 与入库副本 ${rec.mirror} 不一致（以哪份为准由你定）`);
-          pend(item, "mirror-mismatch", fs.existsSync(mirrorAbs)
-            ? [`git diff --no-index ${q(rec.mirror)} ${lp}`]
-            : [`shelf mirror ${lp} ${q(rec.mirror)}`]);
-          continue;
-        }
-      }
-
-      const S = contentHash(target);
-      const L = contentHash(localAbs);
-      const R = rec.contentHash;
-      const ms = getMergeState(cwd, effKey);
-
-      if (S === R && L === R) {
-        item.state = "same";
-        c.same++;
-        continue;
-      }
-
-      // 内容已和货架一致，只是账本落后（别处推了同样的内容 / merge 后结果恰好等于货架）→ 只刷新账本
-      if (L === S) {
-        item.state = "refreshed";
-        c.refreshed++;
-        if (dryRun) {
-          console.log(`= ${shown} 与货架一致（账本将刷新）`);
-        } else {
-          manifest.shelf[effKey] = { ...rec, contentHash: S, sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
-          clearMergeState(cwd, effKey);
-          console.log(`= ${shown} 与货架一致，账本已刷新`);
-        }
-        continue;
-      }
-
-      // 情形 2：库上有新版、本地没动 → 自动覆盖本地（零损失）
-      if (S !== R && L === R) {
-        c.updated++;
-        if (dryRun) {
-          item.state = "would-update";
-          console.log(`↓ 将更新本地：${shown}`);
-          continue;
-        }
-        writeWithMirror(target, localAbs, rec.mirror);
-        manifest.shelf[effKey] = { ...rec, contentHash: S, sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
-        clearMergeState(cwd, effKey);
-        item.state = "updated";
-        console.log(`↓ 已更新本地：${shown}`);
-        continue;
-      }
-
-      // merge 过、货架之后没再变：等 push（冲突标记没删干净的先改）
-      if (ms && ms.headHash === S) {
-        const left = conflictMarkerFiles(readTreeFs(localAbs, path.basename(effKey)));
-        if (left.length) item.conflicts = left;
-        console.log(`⚠ 待决 ${shown}：${left.length ? `已合并，还有冲突标记没解决（${left.join(", ")}）` : `已合并货架 ${sha7(ms.headCommit)} 的改动，待推送`}`);
-        pend(item, left.length ? "merge-conflict" : "merged", [`shelf push ${lp}`]);
-        continue;
-      }
-
-      // 情形 3/4：本地有改动（本地领先，或双方都改）
-      const both = S !== R;
-      const state = both ? "both-changed" : "local-ahead";
-      if (!run.interactive || dryRun) {
-        const d = diffSummary(target, localAbs);
-        item.files = d;
-        console.log(`⚠ 待决 ${shown}（${SYNC_TAG[state]}）：本地相对库上 新增 ${d.added.length} / 删除 ${d.removed.length} / 修改 ${d.changed.length}`);
-        pend(item, state, both ? [`shelf diff ${lp}`, `shelf merge ${lp}`] : [`shelf push ${lp}`]);
-        continue;
-      }
-
-      showLineDiff(target, localAbs, shown);
-      const keys = [{ key: "p" }, { key: "o" }, ...(both ? [{ key: "m" }] : []), { key: "s" }];
-      const act = await choose(
-        `${shown}（${SYNC_TAG[state]}）。[p]本地推上库 / [o]库覆盖本地 / ${both ? "[m]三方合并 / " : ""}[s]跳过? `,
-        keys,
-      );
-      if (act === "s") {
-        item.state = "skipped";
-        c.skipped++;
-        continue;
-      }
-      if (act === "o") {
-        writeWithMirror(target, localAbs, rec.mirror);
-        manifest.shelf[effKey] = { ...rec, contentHash: S, sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
-        clearMergeState(cwd, effKey);
-        console.log(`↓ 已用库上版本覆盖本地：${shown}`);
-        item.state = "overwritten";
-        c.updated++;
-        continue;
-      }
-      if (act === "m") {
-        const savedData = run.data;
-        let r;
         try {
-          r = await mergeCore(ctx, effKey, rec);
+          const r = mergeItem(ctx, it.key, rec);
+          printMergeResult(it.key, rec, r);
+          it.files = r.files;
+          if (r.state === "conflict") {
+            Object.assign(it, { state: "merge-conflict", conflicts: r.conflicts.map((f) => f.path), next: [`shelf push ${q(rec.localPath)}`] });
+          } else if (r.state === "same-as-shelf") {
+            Object.assign(it, { state: "refreshed", pending: false, next: undefined });
+          } else {
+            Object.assign(it, { state: "merged", next: [`shelf push ${q(rec.localPath)}`] });
+          }
         } catch (err) {
           if (!(err instanceof ShelfExit)) throw err;
           console.log(err.message);
-          run.data = savedData;
-          item.state = "skipped";
-          c.skipped++;
-          continue;
-        }
-        run.data = savedData;
-        item.state = r.conflicts.length ? "merge-conflict" : "merged";
-        if (r.conflicts.length) {
-          pend(item, "merge-conflict", [`shelf push ${lp}`]);
-          continue;
-        }
-        const now = await choose(`合并干净。现在推上库? [p]推 / [s]稍后? `, [{ key: "p" }, { key: "s" }]);
-        if (now === "s") {
-          pend(item, "merged", [`shelf push ${lp}`]);
-          continue;
-        }
-      } else if (both) {
-        // p：本地推上库，覆盖库上的改动前二次确认
-        const ok = await choose(`库上的改动将被你的本地版本覆盖，确认? [y]es / [n]o? `, [{ key: "y" }, { key: "n" }]);
-        if (ok === "n") {
-          item.state = "skipped";
-          c.skipped++;
-          continue;
+          it.error = err.message;
         }
       }
-      const { secrets } = guardScan(localAbs);
-      if (secrets.length > 0) {
-        console.log(`✗ ${shown} 含疑似凭据文件（${secrets.map((x) => x.rel).join(", ")}），sync 不代推，已跳过——确要推请单独 shelf push --force-secret`);
-        item.state = "skipped";
-        c.skipped++;
-        continue;
+    }
+    if (doPush) {
+      for (const it of items.filter((i) => i.state === "local-ahead" || i.state === "merged")) {
+        const rec = manifest.shelf[it.key];
+        const localAbs = path.resolve(cwd, rec.localPath);
+        const { secrets } = guardScan(localAbs);
+        if (secrets.length) {
+          console.log(`✗ ${it.shown} 含疑似凭据文件（${secrets.map((x) => x.rel).join(", ")}），sync 不代推——确要推请单独 shelf push --force-secret`);
+          it.error = "secrets";
+          continue;
+        }
+        const r = applyAndCommit(ctx, it.key, localAbs, manifest, "update");
+        keepEphemeral = r.keepEphemeral || keepEphemeral;
+        Object.assign(it, { state: "pushed", pending: false, next: undefined, commit: r.commit });
       }
-      const r = applyAndCommit(ctx, effKey, localAbs, manifest, "update");
-      keepEphemeral = r.keepEphemeral || keepEphemeral;
-      item.state = "pushed";
-      item.commit = r.commit;
-      c.pushed++;
+    }
+    // 人在终端、没带自动化参数：逐条待决当场问
+    if (run.interactive && !dryRun && !doMerge && !doPush) {
+      for (const it of items.filter((i) => i.pending)) {
+        if (await promptPending(ctx, manifest, it)) keepEphemeral = true;
+      }
     }
 
-    let localStat = null;
-    let unregistered = [];
-    if (!dryRun) {
-      localStat = await reconcileLocalSkills(manifest);
-      unregistered = unregisteredLocalSkills(manifest, Object.keys(manifest.local ?? {}));
-    } else {
-      unregistered = unregisteredLocalSkills(manifest, Object.keys(manifest.local ?? {}));
-    }
+    // 已装技能声明的固定目录（frontmatter 的 metadata.shelf-scaffold）：缺的补上，只建目录、放 .gitkeep；只读时只报不建
+    const scaffold = manifest.agents?.length
+      ? applyScaffold(
+        cwd,
+        planScaffold(plan?.scaffold ?? [], { aiDir: aiDirOf(manifest), skillsHomeAbs: path.resolve(cwd, skillsHomeOf(manifest)) })
+          .filter((i) => i.kind === "dir"),
+        { date: todayISO(), name: projectName(cwd), dryRun },
+      )
+      : { created: [], existed: [] };
 
-    // 像入库副本、却没登记的（ai/jaAgents/CLAUDE.md 这类）提示一句
-    const mirrorHints = [];
-    for (const [key, rec] of Object.entries(manifest.shelf ?? {})) {
-      if (rec.mirror || rec.planted || !rec.localPath) continue;
-      const cand = `${aiDirOf(manifest)}/jaAgents/${path.basename(rec.localPath)}`;
-      const candAbs = path.resolve(cwd, cand);
-      const localAbs = path.resolve(cwd, rec.localPath);
-      if (!fs.existsSync(candAbs) || !fs.existsSync(localAbs) || samePath(normRel(cand), normRel(rec.localPath))) continue;
-      if (fs.statSync(candAbs).isFile() !== fs.statSync(localAbs).isFile()) continue;
-      mirrorHints.push({ key, localPath: rec.localPath, mirror: cand, command: `shelf mirror ${q(rec.localPath)} ${q(cand)}` });
-    }
-
+    let local = null;
+    if (!dryRun) local = await reconcileLocalSkills(manifest);
+    const jaskill = jaskillCheck(manifest);
+    // 模板里已经没有、当初由模板装进来的货：本地保留，提示一句
+    const dropped = plan
+      ? Object.entries(manifest.shelf ?? {}).filter(([k, r]) => r.fromTemplate && !plan.items.some((i) => i.key === k)).map(([k]) => k)
+      : [];
     if (!dryRun) saveManifest(manifest);
 
-    const plantedItems = items.filter((i) => i.state === "planted");
-    // 汇总行只列非零的类别（一致与待决总是列出）
+    const pending = items.filter((i) => i.pending);
+    const c = countStates(items);
     const parts = [
-      [c.same, "一致", true],
-      [c.updated, dryRun ? "待更新本地" : "更新本地"],
-      [c.pushed, "推上库"],
-      [c.refreshed, "账本刷新"],
-      [c.cleaned, "清账"],
-      [c.skipped, "跳过"],
-      [c.planted, "植入不对账"],
-      [health.linksFixed, "链接修复"],
+      [c.same, "一致", true], [c["would-update"], "待更新本地"], [c.updated, "更新本地"], [c["would-install"], "模板待装"],
+      [c.installed, "模板新装"], [c.refreshed, "账本刷新"], [c.pushed, "推上库"], [c.cleaned, "清账"], [c.restored, "补拉"],
+      [c.planted, "植入不对账"], [health.linksFixed, "链接修复"], [scaffold.created.length, dryRun ? "目录待补" : "目录补上"],
       [pending.length, "待决", true],
-    ].filter(([n, , always]) => always || n > 0).map(([n, label]) => `${n} ${label}`);
+    ].filter(([n, , always]) => always || n > 0).map(([n, label]) => `${n ?? 0} ${label}`);
     console.log("");
-    console.log(
-      `${status ? "Status" : `Sync${dryRun ? "（dry-run）" : ""}`}: ${parts.join(" · ")}` +
-      (localStat && (localStat.registered || localStat.refreshed || localStat.missing)
-        ? `；本地技能: ${localStat.registered} 新登记 / ${localStat.refreshed} 指纹更新 / ${localStat.missing} 缺失`
-        : ""),
-    );
-    for (const i of plantedItems) {
-      console.log(`植入，不对账: ${i.localPath ?? i.shown}（货架 ${i.shown}；要重新植入: shelf pull ${q(i.key)} --force）`);
+    console.log(`${status ? "Status" : `Sync${dryRun ? "（dry-run）" : ""}`}: ${parts.join(" · ")}`
+      + (local && (local.registered || local.refreshed || local.missing)
+        ? `；本地技能: ${local.registered} 新登记 / ${local.refreshed} 指纹更新 / ${local.missing} 缺失`
+        : ""));
+    const planted = items.filter((x) => x.state === "planted");
+    if (planted.length) {
+      console.log(`植入，不对账（之后归项目维护）: ${planted.map((i) => i.localPath ?? i.shown).join(" · ")}`
+        + `——要重新植入某件: shelf pull <本地路径> --force`);
     }
-    for (const x of pending) {
-      console.log(`  · ${x.shown}（${SYNC_TAG[x.state]}）→ ${x.next.join("  或  ")}`);
+    if (scaffold.created.length) {
+      console.log(`${dryRun ? "· 技能声明的固定目录将补上" : "✓ 补上技能声明的固定目录"}: ${scaffold.created.join(" · ")}`);
     }
-    for (const name of unregistered) {
-      console.log(`· 本地技能 ${name} 还没登记在 JASKILL.md——补一行（何时读 / 上游），agent 才知道什么场景用它`);
-    }
-    for (const h of mirrorHints) {
-      console.log(`· ${h.mirror} 像是 ${h.localPath} 的入库副本——登记后 pull 两处一起写、push 前核对两处一致：${h.command}`);
-    }
+    printPending(pending);
+    printJaskill(jaskill);
+    for (const k of dropped) console.log(`· 模板已不再包含 ${displayPath(k)}（本地保留；不要了: shelf forget ${q(k)}）`);
 
     run.data = {
       dryRun,
+      template: plan ? { name: plan.name, builtin: plan.builtin } : null,
       items: items.map(({ shown, ...rest }) => rest), // shown 只是给人看的展示名，--json 里省掉
       counts: { ...c, pending: pending.length },
-      planted: plantedItems.map((i) => ({ key: i.key, localPath: i.localPath })),
       health,
-      local: localStat,
-      unregisteredLocalSkills: unregistered,
-      mirrorHints,
+      scaffold: dryRun ? { wouldCreate: scaffold.created } : { created: scaffold.created },
+      local,
+      jaskill,
+      droppedFromTemplate: dropped,
     };
     // 文本模式里每条待决的下一步已经跟在清单后面，只有 --json 才汇总进 next
-    if (run.json) for (const x of pending) suggest(...x.next);
+    if (run.json) for (const x of pending) suggest(...(x.next ?? []));
+    if (items.some((i) => i.state === "merge-conflict")) setExit(3);
     if (pending.length) setExit(2);
   } finally {
     if (!keepEphemeral) ctx.cleanup();

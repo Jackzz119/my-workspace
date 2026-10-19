@@ -3,19 +3,20 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  tmpRoot, makeRemote, machine, project, ledger, read, exists, isLink, isJunction, git, DEFAULT_SHELF,
+  tmpRoot, makeRemote, pushToRemote, machine, project, ledger, read, exists, isLink, isJunction, git, cloneProject,
+  DEFAULT_SHELF, BARE_SHELF, TEMPLATE_FILES, SKILL_MD,
 } from "./helpers.mjs";
 
 const WIN = process.platform === "win32";
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-function assertLinked(p, rel) {
+function assertLinked(p, rel, home = "ai/jaSkills") {
   assert.ok(isLink(p, rel), `${rel} 应该是链接`);
   if (WIN) assert.ok(isJunction(p, rel), `${rel} 在 Windows 上应该是 junction`);
-  assert.ok(exists(p, `${rel}/intj/SKILL.md`), `${rel} 应该能读到正本里的技能`);
+  assert.equal(fs.realpathSync(path.join(p, ...rel.split("/"))), fs.realpathSync(path.join(p, ...home.split("/"))));
 }
 
-test("init：新项目一条命令接入（协议、通用技能、链接、gitignore、ai 脚手架），重跑幂等", (t) => {
+test("init：新项目按 ai 模板一次接入（协议正本 + 根目录副本、通用技能、脚本、植入物、链接、gitignore、脚手架），重跑幂等", (t) => {
   const root = tmpRoot(t, "init");
   const m = machine(root, "a", makeRemote(root));
   const p = project(root, "web", { "package.json": '{"name":"web-app"}', ".gitignore": "node_modules\n" });
@@ -23,51 +24,67 @@ test("init：新项目一条命令接入（协议、通用技能、链接、giti
 
   const r = m.json(p, "init", "--agents", "claude,codex");
   assert.equal(r.code, 0, r.out);
-  assert.equal(r.json.data.aiDir, "ai");
-  assert.equal(read(p, "CLAUDE.md"), DEFAULT_SHELF["agents/claude/CLAUDE.md"]);
-  assert.equal(read(p, "AGENTS.md"), DEFAULT_SHELF["agents/codex/AGENTS.md"]);
+  assert.equal(r.json.data.mode, "fresh");
+  assert.deepEqual(r.json.data.template, { name: "ai", builtin: false });
+  // 协议：正本在 ai/jaAgents（入库），根目录是副本
+  for (const [doc, src] of [["CLAUDE.md", "agents/claude/CLAUDE.md"], ["AGENTS.md", "agents/codex/AGENTS.md"]]) {
+    assert.equal(read(p, `ai/jaAgents/${doc}`), DEFAULT_SHELF[src]);
+    assert.equal(read(p, doc), DEFAULT_SHELF[src]);
+  }
+  assert.equal(read(p, "ai/jaAgents/MULTICA.md"), DEFAULT_SHELF["agents/multica/MULTICA.md"]);
+  // 技能、脚本
+  for (const s of ["intj", "feature", "monet", "project-audit"]) assert.ok(exists(p, `ai/jaSkills/${s}/SKILL.md`), s);
+  assert.ok(!exists(p, "note.md") && !exists(p, "ai/note.md"), "模板以外的货不自动装");
+  assert.equal(read(p, "ai/scripts/sync-worktree.sh"), TEMPLATE_FILES["templates/ai/files/ai/scripts/sync-worktree.sh"]);
+  assert.equal(read(p, "ai/scripts/bootstrap.sh"), TEMPLATE_FILES["templates/ai/files/ai/scripts/bootstrap.sh"]);
+  // 植入物：渲染占位符
+  assert.match(read(p, "ai/PROJECT.md"), /^# web-app\n\n> 最后更新：\d{4}-\d{2}-\d{2}\n/);
+  assert.match(read(p, "ai/check-docs.json"), /"\^ai\/sessions\/"/);
+  assert.doesNotMatch(read(p, "ai/check-docs.json"), /\{\{ai\}\}/);
+  assert.equal(read(p, ".worktreeinclude"), TEMPLATE_FILES["templates/ai/files/.worktreeinclude"]);
+  assert.equal(read(p, ".claude/settings.json"), TEMPLATE_FILES["templates/ai/files/.claude/settings.json"]);
   assert.equal(read(p, "ai/JASKILL.md"), DEFAULT_SHELF["docs/JASKILL.md"]);
-  for (const s of ["intj", "feature", "monet"]) assert.ok(exists(p, `ai/jaSkills/${s}/SKILL.md`), s);
-  assert.ok(!exists(p, "ai/jaSkills/project-audit"), "通用包之外的技能不自动装");
-
+  // 链接、gitignore
   assertLinked(p, ".claude/skills");
   assertLinked(p, ".agents/skills");
-  assert.ok(!exists(p, ".codex"), "Codex 不再用 .codex/skills");
-
+  assert.ok(!exists(p, ".codex"));
   const gi = read(p, ".gitignore");
-  for (const line of ["/CLAUDE.md", "/AGENTS.md", "/.claude/skills", "/.agents/skills"]) {
-    assert.match(gi, new RegExp(`^${esc(line)}$`, "m"), line);
-  }
-  assert.doesNotMatch(gi, /^CLAUDE\.md$/m, "不写裸 CLAUDE.md（会误伤入库副本）");
+  for (const line of ["/CLAUDE.md", "/AGENTS.md", "/.claude/skills", "/.agents/skills"]) assert.match(gi, new RegExp(`^${esc(line)}$`, "m"), line);
   const status = git(root, p, ["status", "--porcelain", "--untracked-files=all"]);
-  assert.doesNotMatch(status, /\.claude\/skills|\.agents\/skills|CLAUDE\.md|AGENTS\.md/, status);
-  assert.match(status, /ai\/jaSkills\/intj\/SKILL\.md/, "技能正本进项目 git");
-
-  for (const rel of ["ai/PROJECT.md", "ai/TODO.md", "ai/features/.gitkeep", "ai/sessions/.gitkeep", "ai/design_system/.gitkeep"]) {
-    assert.ok(exists(p, rel), rel);
+  assert.doesNotMatch(status, /^\?\? (CLAUDE|AGENTS)\.md$/m, "根目录副本不入库");
+  assert.doesNotMatch(status, /\.claude\/skills|\.agents\/skills/, "链接不入库");
+  for (const tracked of ["ai/jaAgents/CLAUDE.md", "ai/jaSkills/intj/SKILL.md", "ai/scripts/sync-worktree.sh", ".claude/settings.json", ".shelf.json"]) {
+    assert.match(status, new RegExp(esc(tracked)), `${tracked} 应该进项目 git`);
   }
-  assert.ok(!exists(p, "ai/project-audit"), "没装 project-audit 就不建它的目录");
-  assert.match(read(p, "ai/PROJECT.md"), /^# web-app\n/);
-
+  // 固定目录：各技能在 frontmatter 里声明，.gitkeep 只放在最深一层
+  for (const rel of [
+    "ai/features", "ai/sessions", "ai/design_system/concept", "ai/design_system/img", "ai/design_system/uiux",
+    "ai/design_system/codex-visual", "ai/project-audit/runs", "ai/project-audit/scripts",
+  ]) assert.ok(exists(p, `${rel}/.gitkeep`), rel);
+  assert.ok(!exists(p, "ai/design_system/.gitkeep") && !exists(p, "ai/project-audit/.gitkeep"), "父目录不放 .gitkeep");
+  // 账本
   const L = ledger(p);
   assert.equal(L.aiDir, "ai");
   assert.deepEqual(L.agents, ["claude", "codex"]);
+  assert.equal(L.template.name, "ai");
+  assert.deepEqual([L.shelf["agents/claude/CLAUDE.md"].localPath, L.shelf["agents/claude/CLAUDE.md"].mirror], ["ai/jaAgents/CLAUDE.md", "CLAUDE.md"]);
   assert.equal(L.shelf["docs/JASKILL.md"].planted, true);
-  assert.equal(L.shelf["docs/JASKILL.md"].localPath, "ai/JASKILL.md");
-  assert.equal(L.shelf["skills/_common/intj"].localPath, "ai/jaSkills/intj");
+  assert.equal(L.shelf["templates/ai/files/ai/PROJECT.md"].planted, true);
+  assert.equal(L.shelf["skills/_common/intj"].fromTemplate, true);
 
   const giBefore = read(p, ".gitignore");
   const ledgerBefore = read(p, ".shelf.json");
   const again = m.json(p, "init");
   assert.equal(again.code, 0, again.out);
+  assert.equal(again.json.data.mode, "restore");
   assert.deepEqual(again.json.data.scaffold.created, []);
   assert.deepEqual(again.json.data.gitignoreAdded, []);
-  assert.ok(again.json.data.items.every((i) => ["up-to-date", "planted-kept"].includes(i.action)), JSON.stringify(again.json.data.items));
+  assert.ok(again.json.data.items.every((i) => ["same", "planted"].includes(i.state)), JSON.stringify(again.json.data.items));
   assert.equal(read(p, ".gitignore"), giBefore);
   assert.equal(read(p, ".shelf.json"), ledgerBefore);
 });
 
-test("init：.NET 项目的 ai 资料区叫 AI，链接和账本都跟着走", (t) => {
+test("init：.NET 项目的 ai 资料区叫 AI，协议正本、技能、链接、脚手架都跟着走", (t) => {
   const root = tmpRoot(t, "dotnet");
   const m = machine(root, "a", makeRemote(root));
   const p = project(root, "game", { "Game.sln": "", "src/Game/Game.csproj": "<Project />" });
@@ -75,87 +92,102 @@ test("init：.NET 项目的 ai 资料区叫 AI，链接和账本都跟着走", (
   assert.equal(r.code, 0, r.out);
   assert.equal(r.json.data.aiDir, "AI");
   assert.ok(fs.readdirSync(p).includes("AI"), "磁盘上就是大写 AI");
-  assert.ok(exists(p, "AI/jaSkills/intj/SKILL.md"));
-  assert.ok(exists(p, "AI/JASKILL.md"));
-  assert.ok(exists(p, "AI/PROJECT.md"));
-  assertLinked(p, ".claude/skills");
-  assert.equal(fs.realpathSync(path.join(p, ".claude", "skills")), fs.realpathSync(path.join(p, "AI", "jaSkills")));
+  for (const rel of ["AI/jaAgents/CLAUDE.md", "AI/jaSkills/intj/SKILL.md", "AI/JASKILL.md", "AI/PROJECT.md", "AI/scripts/sync-worktree.sh", "CLAUDE.md"]) {
+    assert.ok(exists(p, rel), rel);
+  }
+  assert.ok(!exists(p, "AGENTS.md"), "只接 claude 时不植 AGENTS.md");
+  assert.match(read(p, "AI/check-docs.json"), /"\^AI\/sessions\/"/);
+  assertLinked(p, ".claude/skills", "AI/jaSkills");
   assert.equal(ledger(p).shelf["skills/_common/intj"].localPath, "AI/jaSkills/intj");
 });
 
-test("init：非交互首次不带 --agents 退出 2 并给出命令；--ai-dir 不合法退出 1", (t) => {
+test("init：非交互首次不带 --agents 按模板默认接 claude + codex；参数不合法退出 1", (t) => {
   const root = tmpRoot(t, "noagents");
   const m = machine(root, "a", makeRemote(root));
   const p = project(root, "p");
   const r = m.json(p, "init");
-  assert.equal(r.code, 2);
-  assert.deepEqual(r.json.next, ["shelf init --agents claude,codex"]);
-  assert.equal(m.run(p, "init", "--agents", "claude", "--ai-dir", "a/b").code, 1);
-  assert.equal(m.run(p, "init", "--agents", "nope").code, 1);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.data.agents, ["claude", "codex"]);
+  assert.ok(exists(p, "AGENTS.md") && exists(p, "CLAUDE.md"));
+  const q2 = project(root, "q");
+  assert.equal(m.run(q2, "init", "--agents", "claude", "--ai-dir", "a/b").code, 1);
+  assert.equal(m.run(q2, "init", "--agents", "nope").code, 1);
+  assert.equal(m.run(q2, "init", "--template", "nope").code, 1);
 });
 
-test("老项目的 .codex/skills（链接或实体目录）在 sync 时迁到 .agents/skills", (t) => {
-  const root = tmpRoot(t, "codex");
-  const m = machine(root, "a", makeRemote(root));
+test("换设备：只有入库文件的 clone，init 按账本还原（链接、根目录副本、补拉、更新、未登记技能入账、JASKILL 核对）", (t) => {
+  const root = tmpRoot(t, "restore");
+  const remote = makeRemote(root);
+  const a = machine(root, "old-pc", remote);
+  const p = project(root, "app", { "package.json": '{"name":"app"}' });
+  assert.equal(a.run(p, "init", "--agents", "claude,codex").code, 0);
+  // 项目自己的技能（没登记）、外加一件不在模板里的货；两件记过账的货没提交：新设备上缺
+  fs.mkdirSync(path.join(p, "ai", "jaSkills", "my-local"));
+  fs.writeFileSync(path.join(p, "ai", "jaSkills", "my-local", "SKILL.md"), "---\nname: my-local\n---\n");
+  assert.equal(a.run(p, "pull", "docs/note.md").code, 0);
+  fs.rmSync(path.join(p, "note.md"));
+  fs.rmSync(path.join(p, "ai", "jaSkills", "project-audit"), { recursive: true });
+  fs.writeFileSync(path.join(p, "ai", "JASKILL.md"), "# 本项目技能\n\n| 技能 | 何时读 | 上游 |\n| --- | --- | --- |\n| `gone-skill` | 早就删了 | 自建 |\n");
+  const copy = cloneProject(root, p, "app-on-new-pc");
+  assert.ok(!exists(copy, "CLAUDE.md") && !exists(copy, ".claude/skills"), "新 clone 里没有 gitignored 的东西");
 
-  // ① 老版 init 留下的链接
-  const p = project(root, "old-link", { ".codex/config.toml": "model = 'x'\n" });
-  assert.equal(m.run(p, "init", "--agents", "claude,codex").code, 0);
-  fs.unlinkSync(path.join(p, ".agents", "skills"));
-  fs.rmdirSync(path.join(p, ".agents"));
-  fs.symlinkSync(path.join(p, "ai", "jaSkills"), path.join(p, ".codex", "skills"), "junction");
-  const r = m.run(p, "sync");
+  pushToRemote(root, remote, { "skills/_common/feature/SKILL.md": SKILL_MD("feature", "货架新版") });
+  const b = machine(root, "new-pc", remote);
+  const r = b.json(copy, "init");
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /\.codex\/skills → \.agents\/skills/);
-  assert.ok(!exists(p, ".codex/skills"));
-  assert.ok(exists(p, ".codex/config.toml"), ".codex 里别的东西不动");
+  assert.equal(r.json.data.mode, "restore");
+  assertLinked(copy, ".claude/skills");
+  assertLinked(copy, ".agents/skills");
+  assert.equal(read(copy, "CLAUDE.md"), read(copy, "ai/jaAgents/CLAUDE.md"), "根目录副本按 ai/jaAgents 补回");
+  const byKey = Object.fromEntries(r.json.data.items.map((i) => [i.key, i.state]));
+  assert.equal(byKey["skills/project-audit"], "restored");
+  assert.equal(byKey["docs/note.md"], "restored");
+  assert.equal(read(copy, "note.md"), DEFAULT_SHELF["docs/note.md"]);
+  assert.equal(byKey["skills/_common/feature"], "updated");
+  assert.equal(read(copy, "ai/jaSkills/feature/SKILL.md"), SKILL_MD("feature", "货架新版"));
+  assert.ok(ledger(copy).local["my-local"], "没记账的技能登记进 local 段");
+  assert.deepEqual(r.json.data.jaskill.unregistered, ["my-local"]);
+  assert.deepEqual(r.json.data.jaskill.stale, ["gone-skill"]);
+});
+
+test("1.x 账本迁移：协议正本从根目录挪到 ai/jaAgents（根目录变副本），JASKILL 补 planted，.codex/skills 迁走", (t) => {
+  const root = tmpRoot(t, "migrate");
+  const m = machine(root, "a", makeRemote(root));
+  const p = project(root, "old", { ".codex/config.toml": "model = 'x'\n" });
+  assert.equal(m.run(p, "init", "--agents", "claude,codex").code, 0);
+  // 退回 1.x 的样子：正本在根目录、ai/jaAgents 没有、JASKILL 没标记、Codex 用 .codex/skills
+  const L = ledger(p);
+  L.shelf["agents/claude/CLAUDE.md"].localPath = "CLAUDE.md";
+  delete L.shelf["agents/claude/CLAUDE.md"].mirror;
+  delete L.shelf["docs/JASKILL.md"].planted;
+  delete L.template;
+  fs.writeFileSync(path.join(p, ".shelf.json"), JSON.stringify(L, null, 2) + "\n");
+  fs.rmSync(path.join(p, "ai", "jaAgents", "CLAUDE.md"));
+  fs.writeFileSync(path.join(p, "CLAUDE.md"), read(p, "CLAUDE.md") + "本项目加的一行\n");
+  fs.unlinkSync(path.join(p, ".agents", "skills"));
+  fs.symlinkSync(path.join(p, "ai", "jaSkills"), path.join(p, ".codex", "skills"), "junction");
+
+  const r = m.json(p, "sync");
+  assert.equal(r.code, 2, r.out); // 迁完后 CLAUDE.md 是「本地领先」待决
+  const after = ledger(p);
+  assert.deepEqual([after.shelf["agents/claude/CLAUDE.md"].localPath, after.shelf["agents/claude/CLAUDE.md"].mirror], ["ai/jaAgents/CLAUDE.md", "CLAUDE.md"]);
+  assert.match(read(p, "ai/jaAgents/CLAUDE.md"), /本项目加的一行/, "根目录那份的改动搬进正本");
+  assert.equal(after.shelf["docs/JASKILL.md"].planted, true);
+  assert.equal(r.json.data.items.find((i) => i.key === "agents/claude/CLAUDE.md").state, "local-ahead");
+  assert.ok(!exists(p, ".codex/skills") && exists(p, ".codex/config.toml"));
   assertLinked(p, ".agents/skills");
   assert.ok(exists(p, "ai/jaSkills/intj/SKILL.md"), "删链接不能删到正本");
-
-  // ② 复制镜像时代的实体目录：独有技能并进正本，.codex 空了一并删
-  const q = project(root, "old-copy");
-  assert.equal(m.run(q, "init", "--agents", "claude,codex").code, 0);
-  fs.unlinkSync(path.join(q, ".agents", "skills"));
-  fs.cpSync(path.join(q, "ai", "jaSkills"), path.join(q, ".codex", "skills"), { recursive: true });
-  fs.mkdirSync(path.join(q, ".codex", "skills", "extra-skill"));
-  fs.writeFileSync(path.join(q, ".codex", "skills", "extra-skill", "SKILL.md"), "---\nname: extra-skill\n---\n");
-  const r2 = m.json(q, "sync");
-  assert.equal(r2.code, 0, r2.out);
-  assert.equal(r2.json.data.health.codexMigrated, true);
-  assert.ok(!exists(q, ".codex"));
-  assert.ok(exists(q, "ai/jaSkills/extra-skill/SKILL.md"));
-  assertLinked(q, ".agents/skills");
-  assert.match(read(q, ".gitignore"), /^\/\.agents\/skills$/m);
-  assert.ok(ledger(q).local["extra-skill"], "外来技能登记进 local 段");
 });
 
-test("已有账本里的 docs/JASKILL.md 自动补 planted；植入物不对账、不推，pull --force 重新植入", (t) => {
-  const root = tmpRoot(t, "planted");
-  const m = machine(root, "a", makeRemote(root));
-  const p = project(root, "p");
-  assert.equal(m.run(p, "init", "--agents", "claude").code, 0);
-  const L = ledger(p);
-  delete L.shelf["docs/JASKILL.md"].planted; // 老账本
-  fs.writeFileSync(path.join(p, ".shelf.json"), JSON.stringify(L, null, 2) + "\n");
-  fs.writeFileSync(path.join(p, "ai", "JASKILL.md"), "# 本项目自己的登记表\n");
-
-  const st = m.json(p, "status");
-  assert.equal(st.code, 0, st.out);
-  assert.equal(st.json.data.items.find((i) => i.key === "docs/JASKILL.md").state, "planted");
-  assert.equal(ledger(p).shelf["docs/JASKILL.md"].planted, undefined, "status 只读，不改账本");
-
-  const sy = m.run(p, "sync");
-  assert.equal(sy.code, 0, sy.out);
-  assert.match(sy.out, /植入，不对账: ai\/JASKILL\.md/);
-  assert.equal(ledger(p).shelf["docs/JASKILL.md"].planted, true);
-
-  const push = m.run(p, "push", "ai/JASKILL.md", "--yes");
-  assert.equal(push.code, 1);
-  assert.match(push.out, /归项目维护/);
-  assert.equal(m.run(p, "merge", "ai/JASKILL.md").code, 1);
-
-  const re = m.run(p, "pull", "docs/JASKILL.md", "--force");
-  assert.equal(re.code, 0, re.out);
-  assert.equal(read(p, "ai/JASKILL.md"), DEFAULT_SHELF["docs/JASKILL.md"]);
-  assert.equal(ledger(p).shelf["docs/JASKILL.md"].planted, true);
+test("货架上没有 templates/ai 时用内置配方，同样落 ai/jaAgents + 根目录副本", (t) => {
+  const root = tmpRoot(t, "builtin");
+  const m = machine(root, "a", makeRemote(root, BARE_SHELF));
+  const p = project(root, "p", { "package.json": '{"name":"bare"}' });
+  const r = m.json(p, "init", "--agents", "claude");
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.data.template, { name: "ai", builtin: true });
+  assert.equal(read(p, "CLAUDE.md"), BARE_SHELF["agents/claude/CLAUDE.md"]);
+  assert.ok(exists(p, "ai/jaAgents/CLAUDE.md") && exists(p, "ai/jaAgents/MULTICA.md"));
+  assert.match(read(p, "ai/PROJECT.md"), /^# bare\n/);
+  assert.ok(!exists(p, "ai/scripts"), "内置配方没有模板自带的文件");
 });

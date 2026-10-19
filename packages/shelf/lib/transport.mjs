@@ -13,13 +13,14 @@ const refreshStamp = path.join(os.homedir(), ".shelf", ".last-refresh");
 const REFRESH_INTERVAL_MS = 60 * 1000; // 只为去重连环命令，不是保鲜策略：每次操作都会刷新
 const NL = String.fromCharCode(10);
 
-// shelf 传输层（SHELF 决策 #4 / #16 / #17）解析顺序：
+// shelf 传输层（SHELF 决策 #4 / #16 / #17 / #40）解析顺序：
 //   1. SHELF_HOME / ATK_HOME 环境变量指定的 clone
-//   2. CLI 自身所在的 clone（monorepo 内直跑 / npm link 都命中）
-//   3. ~/.shelfrc 的 home
-//   4. 托管档口 ~/.shelf/home（存在即用；每次操作都刷新，写操作强制先拉）
-//   5. npx 快照（包内带 shelf/ 但无 .git）：读操作直接用
-//   6. 都没有：自动 clone 出托管档口；快照场景或显式 ephemeral 时走一次性 clone
+//   2. ~/.shelfrc 的 home
+//   3. 托管档口 ~/.shelf/home（存在即用；每次操作都刷新，写操作强制先拉）
+//   4. npx 快照（包内带 shelf/ 但无 .git）：读操作直接用
+//   5. 都没有：自动 clone 出托管档口；快照场景或显式 ephemeral 时走一次性 clone
+// CLI 自身所在的 git clone（monorepo 里直跑、npm link）不再自动当货架：货架与项目解耦，
+// 在 monorepo 里用 shelf 也和任何项目一样走托管档口；要用某个 clone 就显式设 SHELF_HOME。
 
 function git(args, cwd, opts = {}) {
   return execFileSync("git", args, {
@@ -125,8 +126,6 @@ export function resolveShelfContext({ forWrite = false } = {}) {
   const explicit = [process.env.SHELF_HOME, process.env.ATK_HOME, rc.home]
     .find((r) => hasShelf(r) && isGitRepo(r));
   if (explicit) return homeContext(explicit);
-
-  if (hasShelf(repoRoot) && isGitRepo(repoRoot)) return homeContext(repoRoot);
 
   if (hasShelf(managedHomeDir) && isGitRepo(managedHomeDir)) {
     // 货架前期高频更新：写操作无条件先拉最新（避免基于旧内容提交被远端拒收），

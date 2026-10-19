@@ -16,15 +16,15 @@ export const COMMANDS = {
   },
   status: {
     usage: "shelf status",
-    summary: "只读对账（等同 sync --dry-run）：每件物品是一致、待更新还是待决，附下一步命令",
+    summary: "只读对账（等同 sync --dry-run）：每件物品是一致、待更新还是待决，模板新增了什么，附下一步命令",
     flags: {},
-    examples: ["shelf status --json"],
+    examples: ["shelf status"],
   },
   sync: {
-    usage: "shelf sync [--dry-run]",
-    summary: "按账本对账：货架新版且本地没动 → 自动更新本地；本地改过 / 双改 / 搬家下架 → 列为待决（附下一步命令）",
-    flags: { "--dry-run": "bool" },
-    examples: ["shelf sync", "shelf sync --dry-run"],
+    usage: "shelf sync [--merge] [--push] [--dry-run]",
+    summary: "同步 ai 工作流：装上模板新增的货，货架新版且本地没动的自动更新；--merge 三方合并双改的，--push 把本地领先与合并干净的推上货架，冲突留给人",
+    flags: { "--dry-run": "bool", "--merge": "bool", "--push": "bool" },
+    examples: ["shelf sync", "shelf sync --merge --push", "shelf sync --dry-run"],
   },
   diff: {
     usage: "shelf diff <货架路径或本地路径> [--stat]",
@@ -62,17 +62,17 @@ export const COMMANDS = {
     flags: {},
     examples: ["shelf forget skills/old-skill"],
   },
-  mirror: {
-    usage: "shelf mirror <本地路径> [<副本路径> | --off]",
-    summary: "登记 / 查看 / 取消入库副本（如 CLAUDE.md ↔ ai/jaAgents/CLAUDE.md）：pull 两处一起写，push 前核对两处一致",
-    flags: { "--off": "bool" },
-    examples: ["shelf mirror CLAUDE.md ai/jaAgents/CLAUDE.md", "shelf mirror CLAUDE.md --off"],
-  },
   init: {
-    usage: "shelf init [--agents claude,codex,kimi|all] [--ai-dir <名>]",
-    summary: "项目接入（幂等）：植入协议、通用技能、技能链接、gitignore、ai 文件夹脚手架；重跑 = 补缺失 + 体检",
-    flags: { "--agents": "value", "--ai-dir": "value" },
-    examples: ["shelf init --agents claude,codex", "shelf init --agents all --ai-dir AI"],
+    usage: "shelf init [--agents claude,codex,kimi|all] [--ai-dir <名>] [--template <名>]",
+    summary: "初始化 ai 工作流（幂等）：没有账本 = 按模板新接入；有账本 = 按账本还原补齐（换设备 / 新 worktree）。协议、技能、链接、gitignore、脚手架、本地技能登记一次到位",
+    flags: { "--agents": "value", "--ai-dir": "value", "--template": "value" },
+    examples: ["shelf init", "shelf init --agents claude,codex", "shelf init --agents all --ai-dir AI"],
+  },
+  template: {
+    usage: "shelf template [ls | show [<名>]]",
+    summary: "看货架上的模板：ls 列出有哪些，show 展开某个模板会装哪些货、落在哪（按本项目的 agent 与 ai 区）",
+    flags: {},
+    examples: ["shelf template", "shelf template show ai"],
   },
   agents: {
     usage: "shelf agents [add <名>]",
@@ -103,15 +103,15 @@ export const COMMANDS = {
 };
 
 export const ORDER = [
-  "browse", "ls", "status", "sync", "diff", "merge", "pull", "push", "create",
-  "forget", "mirror", "init", "agents", "adopt", "home", "version", "help",
+  "init", "sync", "status", "diff", "merge", "push", "pull", "create", "forget",
+  "template", "ls", "browse", "agents", "adopt", "home", "version", "help",
 ];
 
 export const EXIT_CODES = [
   { code: 0, meaning: "成功 / 无需变更 / 全部一致" },
-  { code: 1, meaning: "参数错误、未知命令或参数、找不到物品、重名、凭据拦截、副本不一致、植入物不推" },
-  { code: 2, meaning: "要人确认：变更清单已打印（加 --yes 重跑）；sync / status 有待决；diff 有差异；pull 因本地改动没覆盖" },
-  { code: 3, meaning: "冲突：货架在你上次拉取后被改过、多个同名无法自动选、merge 有冲突、冲突标记还没解决" },
+  { code: 1, meaning: "参数错误、未知命令或参数、找不到物品或模板、重名、凭据拦截、正本与副本各改各的、植入物不推" },
+  { code: 2, meaning: "要人或 agent 处理：变更清单已打印（加 --yes 重跑）；init / sync / status 有待决；diff 有差异；pull 因本地改动没覆盖" },
+  { code: 3, meaning: "冲突：货架在你上次拉取后被改过、多个同名无法自动选、merge / sync --merge 有冲突、冲突标记还没解决" },
   { code: 4, meaning: "提交或推送失败（货架已回滚到改动前）" },
 ];
 
@@ -158,12 +158,18 @@ export function usageText() {
     const c = COMMANDS[n];
     lines.push(`  ${c.usage}`, `      ${c.summary}`);
   }
-  lines.push("", "全局参数: --json 只输出一份 JSON（给 agent / 脚本；隐含非交互） · --help 看某个命令的用法", "", "退出码:");
+  lines.push(
+    "",
+    "输出：终端里是给人看的文字；输出不是终端（agent / 脚本 / 管道）时默认一份 JSON。--json / --text 强制其一，也可设 SHELF_OUTPUT=json|text",
+    "全局参数: --json · --text · --help（看某个命令的用法）",
+    "",
+    "退出码:",
+  );
   for (const e of EXIT_CODES) lines.push(`  ${e.code}  ${e.meaning}`);
   lines.push(
     "",
-    "货架定位：SHELF_HOME 环境变量 > CLI 所在 clone > ~/.shelfrc > 托管档口 ~/.shelf/home（自动创建）",
-    "非交互（agent / 管道 / --json / SHELF_NONINTERACTIVE=1）时绝不等键盘：要确认的退出 2，冲突退出 3",
+    "货架定位：SHELF_HOME 环境变量 > ~/.shelfrc > 托管档口 ~/.shelf/home（自动创建）",
+    "非交互（agent / 管道 / JSON 输出 / SHELF_NONINTERACTIVE=1）时绝不等键盘：要确认的退出 2，冲突退出 3",
   );
   return lines.join("\n");
 }
@@ -172,7 +178,7 @@ export function commandHelp(name) {
   const c = COMMANDS[name];
   const lines = [`用法: ${c.usage}`, "", c.summary];
   const flags = Object.keys(c.flags);
-  if (flags.length) lines.push("", "参数: " + flags.join(" ") + " （另有全局 --json）");
+  if (flags.length) lines.push("", "参数: " + flags.join(" ") + " （另有全局 --json / --text）");
   if (c.examples?.length) lines.push("", "例子:", ...c.examples.map((e) => "  " + e));
   return lines.join("\n");
 }
