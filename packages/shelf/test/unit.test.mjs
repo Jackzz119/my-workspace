@@ -2,11 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { tmpRoot, writeFiles } from "./helpers.mjs";
+import { fileURLToPath } from "node:url";
+import { tmpRoot, writeFiles, TEST_SCAFFOLD } from "./helpers.mjs";
 import { diffLines, splitLines, unifiedHunks, diffTrees, statText, isBinary } from "../lib/textdiff.mjs";
 import { parseArgs } from "../lib/spec.mjs";
 import { ShelfExit } from "../lib/output.mjs";
 import { detectAiDir, planScaffold, applyScaffold, declaredScaffold, isDotnetProject } from "../lib/scaffold.mjs";
+import { BUILTIN_AI, expandTemplate, renderText } from "../lib/template.mjs";
 import { mergeTrees, conflictMarkerFiles, mapHash, readTreeFs, writeTree, MARK_OURS, MARK_THEIRS } from "../lib/threeway.mjs";
 import { contentHash } from "../lib/version.mjs";
 
@@ -85,9 +87,10 @@ test("planScaffold：按已装技能决定目录，技能可在 frontmatter 自�
     "ai/jaSkills/feature/SKILL.md": "---\nname: feature\n---\n",
     "ai/jaSkills/painter/SKILL.md": "---\nname: painter\nmetadata:\n  shelf-scaffold: \"art/refs, ../escape, /abs\"\n---\n",
   });
-  const items = planScaffold(root, "ai", path.join(root, "ai", "jaSkills"));
+  const plan = expandTemplate(BUILTIN_AI, { shelfDir: root, agents: ["claude"], aiDir: "ai" });
+  const items = planScaffold(plan.scaffold, { aiDir: "ai", skillsHomeAbs: path.join(root, "ai", "jaSkills") });
   assert.deepEqual(items.map((i) => i.rel).sort(), ["ai/PROJECT.md", "ai/TODO.md", "ai/art/refs", "ai/features", "ai/sessions"]);
-  assert.deepEqual(items.find((i) => i.rel === "ai/features").by, ["feature", "intj"]);
+  assert.deepEqual(items.find((i) => i.rel === "ai/features").by.sort(), ["feature", "intj"]);
   assert.deepEqual(declaredScaffold(path.join(root, "ai/jaSkills/painter/SKILL.md")), ["art/refs"]);
 
   fs.mkdirSync(path.join(root, "ai", "features"), { recursive: true });
@@ -99,6 +102,65 @@ test("planScaffold：按已装技能决定目录，技能可在 frontmatter 自�
   assert.match(fs.readFileSync(path.join(root, "ai", "TODO.md"), "utf8"), /## Epics & Milestones/);
   const again = applyScaffold(root, items, { date: "2026-10-18", name: "demo" });
   assert.equal(again.created.length, 0);
+});
+
+test("真技能的固定目录声明拼起来就是 ai 区骨架；测试货架的同名技能与之一致；父目录不单列", (t) => {
+  const SKILLS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "shelf", "skills");
+  const skills = ["_common/intj", "_common/feature", "_common/monet", "_common/ui-tailor", "_common/codex-visual", "project-audit"]
+    .map((rel) => ({ name: path.basename(rel), skillMd: path.join(SKILLS, ...rel.split("/"), "SKILL.md") }));
+  assert.deepEqual(planScaffold([], { aiDir: "ai", skills }).map((i) => i.rel).sort(), [
+    "ai/design_system/codex-visual", "ai/design_system/concept", "ai/design_system/img", "ai/design_system/uiux",
+    "ai/features", "ai/project-audit/runs", "ai/project-audit/scripts", "ai/sessions",
+  ]);
+  for (const s of skills.filter((x) => TEST_SCAFFOLD[x.name])) {
+    assert.equal(declaredScaffold(s.skillMd).join(", "), TEST_SCAFFOLD[s.name], s.name);
+  }
+  // 内置配方兜底的骨架和真技能的声明一致（老货架上还没声明的技能也建同一副骨架）
+  const builtin = expandTemplate(BUILTIN_AI, { shelfDir: SKILLS, agents: ["claude"], aiDir: "ai" }).scaffold
+    .filter((x) => x.dir).map((x) => x.dir).sort();
+  assert.deepEqual(builtin, planScaffold([], { aiDir: "ai", skills }).map((i) => i.rel).sort());
+
+  const root = tmpRoot(t, "leaf");
+  writeFiles(root, { "s/a/SKILL.md": "---\nname: a\nmetadata:\n  shelf-scaffold: \"x, x/y, z\"\n---\n" });
+  const leaf = planScaffold([], { aiDir: "ai", skillsHomeAbs: path.join(root, "s") });
+  assert.deepEqual(leaf.map((i) => i.rel).sort(), ["ai/x/y", "ai/z"]);
+  applyScaffold(root, leaf, { date: "2026-10-19", name: "demo" });
+  assert.ok(fs.existsSync(path.join(root, "ai", "x", "y", ".gitkeep")) && !fs.existsSync(path.join(root, "ai", "x", ".gitkeep")));
+});
+
+test("expandTemplate：按 agent 过滤、{ai} 代入、files/ 指向模板目录、/* 一个子目录一件；renderText 只换认得的占位符", (t) => {
+  const root = tmpRoot(t, "tpl");
+  writeFiles(root, {
+    "agents/claude/CLAUDE.md": "c",
+    "agents/codex/AGENTS.md": "a",
+    "skills/_common/intj/SKILL.md": "i",
+    "skills/_common/vc/SKILL.md": "v",
+    "templates/ai/template.json": "{}",
+    "templates/ai/files/ai/x.sh": "x",
+  });
+  const tpl = {
+    name: "ai",
+    key: "templates/ai",
+    items: [
+      { from: "agents/claude/CLAUDE.md", to: "{ai}/jaAgents/CLAUDE.md", copy: "CLAUDE.md", agents: ["claude"] },
+      { from: "agents/codex/AGENTS.md", to: "{ai}/jaAgents/AGENTS.md", copy: "AGENTS.md", agents: ["codex"] },
+      { from: "skills/common/*", to: "{ai}/jaSkills/" },
+      { from: "files/ai/x.sh", to: "{ai}/scripts/x.sh" },
+      { from: "agents/nope.md", to: "x", optional: true },
+      { from: "agents/missing.md", to: "y" },
+    ],
+    scaffold: [{ dir: "{ai}/features" }],
+  };
+  const plan = expandTemplate(tpl, { shelfDir: root, agents: ["claude"], aiDir: "AI" });
+  assert.deepEqual(plan.items.map((i) => [i.key, i.dest, i.copy]), [
+    ["agents/claude/CLAUDE.md", "AI/jaAgents/CLAUDE.md", "CLAUDE.md"],
+    ["skills/_common/intj", "AI/jaSkills/intj", null],
+    ["skills/_common/vc", "AI/jaSkills/vc", null],
+    ["templates/ai/files/ai/x.sh", "AI/scripts/x.sh", null],
+  ]);
+  assert.deepEqual(plan.missing, ["agents/missing.md"]);
+  assert.equal(plan.scaffold[0].dir, "AI/features");
+  assert.equal(renderText("# {{project}} {{date}} {{ai}} {{other}}", { project: "p", date: "d", ai: "AI" }), "# p d AI {{other}}");
 });
 
 test("mergeTrees：只一边改的直接取，两边改的交给 git merge-file，删改冲突按 git 的方式留文件", () => {

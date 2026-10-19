@@ -101,15 +101,18 @@ test("merge：改同一处 → 留标准冲突标记、列文件、退出 3；�
   const text = read(p, skillPath);
   assert.match(text, /^<<<<<<< 本地\nline 5 LOCAL\n=======\nline 5 SHELF\n>>>>>>> 货架 [0-9a-f]{7}$/m);
 
-  const early = m.json(p, "push", "ai/jaSkills/intj", "--yes");
+  // agent 常传它刚改的那个文件：物品里面的路径归到整件（不会按文件名在全架里找同名 SKILL.md）
+  const early = m.json(p, "push", skillPath, "--yes");
   assert.equal(early.code, 3, early.out);
+  assert.equal(early.json.data.key, "skills/_common/intj");
   assert.deepEqual(early.json.data.conflicts, ["SKILL.md"]);
   assert.equal(m.json(p, "merge", "ai/jaSkills/intj").code, 3, "冲突没解决不能再 merge");
   assert.equal(m.json(p, "status").json.data.items.find((i) => i.key === "skills/_common/intj").state, "merge-conflict");
 
   fs.writeFileSync(path.join(p, ...skillPath.split("/")), replaceLine(SKILL_MD("intj"), "line 5", "line 5 BOTH"));
-  const push = m.json(p, "push", "ai/jaSkills/intj", "--yes");
+  const push = m.run(p, "push", skillPath.replace(/\//g, "\\"), "--yes");
   assert.equal(push.code, 0, push.out);
+  assert.match(push.out, /在已记账的 ai\/jaSkills\/intj 里面，按整件处理/);
   assert.match(readRemoteFile(root, remote, "skills/_common/intj/SKILL.md"), /line 5 BOTH/);
   assert.equal(m.run(p, "sync").code, 0);
 });
@@ -134,19 +137,18 @@ test("merge：新增 / 删除按同样逻辑——货架加的文件进来，本
   assert.equal(readRemoteFile(root, remote, "skills/_common/intj/notes.md"), "local only\n");
 });
 
-test("merge：单文件物品（CLAUDE.md）也能三方合并，登记了入库副本时两处一起写", (t) => {
+test("merge：单文件物品（协议）也能三方合并；只改了根目录副本也算本地改动，结果正本和副本一起写", (t) => {
   const { root, remote, m, p } = setup(t, "merge-file");
-  assert.equal(m.run(p, "mirror", "CLAUDE.md", "ai/jaAgents/CLAUDE.md").code, 0);
   pushToRemote(root, remote, { "agents/claude/CLAUDE.md": "# Claude 协议\n\n规则一（货架）\n规则二\n规则三\n" });
-  const local = "# Claude 协议\n\n规则一\n规则二\n规则三（本地）\n";
-  fs.writeFileSync(path.join(p, "CLAUDE.md"), local);
-  fs.writeFileSync(path.join(p, "ai", "jaAgents", "CLAUDE.md"), local);
+  fs.writeFileSync(path.join(p, "CLAUDE.md"), "# Claude 协议\n\n规则一\n规则二\n规则三（本地）\n");
 
   const mg = m.json(p, "merge", "CLAUDE.md");
   assert.equal(mg.code, 0, mg.out);
-  assert.equal(read(p, "CLAUDE.md"), "# Claude 协议\n\n规则一（货架）\n规则二\n规则三（本地）\n");
-  assert.equal(read(p, "ai/jaAgents/CLAUDE.md"), read(p, "CLAUDE.md"));
-  assert.equal(m.run(p, "push", "ai/jaAgents/CLAUDE.md", "--yes").code, 0, "用副本路径也能定位到这件物品");
+  const expected = "# Claude 协议\n\n规则一（货架）\n规则二\n规则三（本地）\n";
+  assert.equal(read(p, "ai/jaAgents/CLAUDE.md"), expected);
+  assert.equal(read(p, "CLAUDE.md"), expected);
+  assert.equal(m.run(p, "push", "CLAUDE.md", "--yes").code, 0, "用根目录副本的路径也能定位到这件物品");
+  assert.equal(readRemoteFile(root, remote, "agents/claude/CLAUDE.md"), expected);
   assert.equal(m.run(p, "sync").code, 0);
 });
 
