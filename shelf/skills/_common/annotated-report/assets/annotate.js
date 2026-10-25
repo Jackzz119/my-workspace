@@ -1,7 +1,10 @@
 // annotate.js — annotation layer for HTML report pages (ES2020, no dependencies; inline it with ./inline.mjs, which
 // drops whole-line comments and indentation, so multi-line strings here hold neither). Note selected text, a tapped
-// element or nothing (留言); notes stay marked on the page, live in localStorage (keyed by data-source and title) and
-// copy out as one compact list to paste into any agent's chat.
+// element or nothing (留言); notes stay marked on the page and copy out as one compact list to paste into any
+// agent's chat. Where the page is a claude.ai artifact published with capabilities {db: {}}, every note is also a
+// document in that artifact's own database (collection `annotations`): it survives cleared browser storage and an
+// expired session, follows the reader to other devices, and an agent reads and clears it there. localStorage
+// (keyed by data-source and title) is the cache and, anywhere else, the only store.
 (() => {
     'use strict';
     if (window.__annotate) return;
@@ -103,7 +106,58 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
                 n && n.id && n.note ? [{ ...n, kind: /^[ten]$/.test(n.kind) ? n.kind : 'e', loc: n.loc || '' }] : []
             );
     const save = () =>
-        (S.volatile = !attempt(() => (localStorage.setItem(S.key, JSON.stringify(S.notes)), true), false));
+        (S.volatile =
+            !attempt(() => (localStorage.setItem(S.key, JSON.stringify(S.notes)), true), false) && !S.cloud);
+    // The artifact's database, once it answers (claude.use('db'); null anywhere else). A note confirmed there carries
+    // `cloud`; a confirmed note the database no longer has was cleared elsewhere (another device, or the agent after
+    // handling the round) and goes here too, while one written before the database answered is sent up.
+    const CLOUD = 'annotations';
+    const fields = (n) => {
+        const doc = { source: cfg.source, title: squash(document.title), at: n.at, kind: n.kind, loc: n.loc };
+        Object.assign(doc, { quote: n.quote, note: n.note });
+        if (n.kind !== 'n' && n.path) Object.assign(doc, { path: n.path, off: n.off || 0 });
+        return doc;
+    };
+    const send = (n) => {
+        if (!S.cloud) return;
+        S.cloud
+            .doc(n.id)
+            .set(fields(n))
+            .then(() => ((n.cloud = 1), save()))
+            .catch(() => toast('没存进报告，先留在这台设备上'));
+    };
+    const unsend = (id) => S.cloud && S.cloud.doc(id).delete().catch(() => {});
+    const connect = async () => {
+        const db = await Promise.resolve(attempt(() => window.claude.use('db'), null)).catch(() => null);
+        const col = db && attempt(() => db.collection(CLOUD), null);
+        if (!col) return;
+        S.cloud = col;
+        let settled = false;
+        col.onSnapshot(
+            (snap) => {
+                const remote = snap.docs
+                    .map((d) => ({ ...d.data(), id: d.id, cloud: 1 }))
+                    .filter((n) => n.note && (!n.source || n.source === cfg.source));
+                const there = new Set(remote.map((n) => n.id));
+                // until the database has answered for itself, nothing here is taken as cleared
+                const definitive = !snap.metadata.fromCache;
+                const mine = S.notes.filter((n) => !there.has(n.id) && !(definitive && n.cloud));
+                if (definitive && !settled) {
+                    settled = true;
+                    for (const n of mine) send(n);
+                }
+                S.notes = remote
+                    .map((n) => ({ ...n, kind: /^[ten]$/.test(n.kind) ? n.kind : 'e', loc: n.loc || '' }))
+                    .concat(mine)
+                    .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+                for (const id of [...S.marks.keys()]) if (!S.notes.some((n) => n.id === id)) S.marks.delete(id);
+                save();
+                paint();
+                if (S.panel && S.panel.matches('.ann-drawer')) openDrawer();
+            },
+            () => {} // a lost connection keeps what is here; the cache still holds it
+        );
+    };
     // the copied list: a two-line header, then per note its number, [place]「quote」 and the note verbatim below
     const exportText = () => {
         const items = S.notes.map((n, i) => {
@@ -118,7 +172,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
     window.__annotate = {
         notes: () => S.notes.map((n) => ({ ...n })),
         exportText,
-        clear: () => ((S.notes = []), S.marks.clear(), save(), paint())
+        clear: () => (S.notes.forEach((n) => unsend(n.id)), (S.notes = []), S.marks.clear(), save(), paint())
     };
 
     const make = (html) => {
@@ -352,6 +406,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         if (t.el) S.marks.set(id, { el: t.el, range: t.range || null });
         S.notes.push(n);
         save();
+        send(n);
         closePanel();
         if (t.range) getSelection().removeAllRanges();
         paint();
@@ -395,9 +450,11 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         title.textContent = `批注清单（${S.notes.length}）`;
         hint.textContent = S.volatile
             ? '这里存不住，刷新就会丢，记得复制'
-            : S.notes.length
-              ? ''
-              : '还没有批注：选中文字点「批注这段」，点「批注」再点内容，或者直接「留言」';
+            : !S.notes.length
+              ? '还没有批注：选中文字点「批注这段」，点「批注」再点内容，或者直接「留言」'
+              : S.cloud
+                ? '批注存在这份报告里：换设备、隔几天再打开都还在'
+                : '';
         let on = null;
         S.notes.forEach((n, i) => {
             const li = make(ITEM);
@@ -435,6 +492,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
             if (!clean(ta.value)) return ta.focus();
             n.note = clean(ta.value);
             save();
+            send(n);
             back();
             toast('改好了');
         };
@@ -446,6 +504,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
     };
     // one note, or all of them
     const drop = (n) => {
+        for (const gone of n ? [n] : S.notes) unsend(gone.id);
         S.notes = n ? S.notes.filter((x) => x !== n) : [];
         if (n) S.marks.delete(n.id);
         else S.marks.clear();
@@ -583,6 +642,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
             for (const type of ['resize', 'scroll']) visualViewport.addEventListener(type, () => fit());
         if (window.ResizeObserver) new ResizeObserver(later).observe(document.body);
         paint();
+        connect();
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
     else start();
