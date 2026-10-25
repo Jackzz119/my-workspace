@@ -593,7 +593,9 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         (S.panel ? closePanel() : S.picking ? setPicking(false) : hideChip());
 
     const start = () => {
-        S.key = `annotate:${cfg.source || location.pathname}|${squash(document.title)}`;
+        // annotate2: notes the browser-only layer kept for a page that is now republished were handled from the
+        // copied list already; under a new key they are not sent up into the database as if they were new
+        S.key = `annotate2:${cfg.source || location.pathname}|${squash(document.title)}`;
         S.notes = load();
         const probe = S.key + ':probe';
         S.volatile = !attempt(() => (localStorage.setItem(probe, 1), localStorage.removeItem(probe), 1));
