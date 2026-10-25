@@ -4,7 +4,9 @@
 // agent's chat. Where the page is a claude.ai artifact published with capabilities {db: {}}, every note is also a
 // document in that artifact's own database (collection `annotations`): it survives cleared browser storage and an
 // expired session, follows the reader to other devices, and an agent reads and clears it there. localStorage
-// (keyed by data-source and title) is the cache and, anywhere else, the only store.
+// (keyed by data-source and title) is the cache and, anywhere else, the only store. Published with {assets: {}} as
+// well, a note can carry pictures (pasted, dropped or picked): they go into the artifact's assets and the note keeps
+// their ids; without that capability the picture button stays hidden.
 (() => {
     'use strict';
     if (window.__annotate) return;
@@ -77,6 +79,14 @@ display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hi
 .ann-drawer>.ann-acts{position:sticky;bottom:0;padding-top:8px;background:var(--ann-bg);box-shadow:0 40px var(--ann-bg)}
 .ann-link{min-height:36px;padding:0 8px;border:0;background:none;color:var(--ann-hi);font-size:14px}
 .ann-bad{color:var(--ann-bad)}
+.ann-imgs{display:flex;flex-wrap:wrap;gap:6px}
+.ann-thumb{position:relative;width:64px;height:64px;border:1px solid var(--ann-line);border-radius:8px;overflow:hidden;background:var(--ann-soft)}
+.ann-see{display:block;width:100%;height:100%;padding:0;border:0;background:none;cursor:zoom-in}
+.ann-see img{display:block;width:100%;height:100%;object-fit:cover}
+.ann-rm{position:absolute;top:3px;right:3px;width:22px;height:22px;padding:0;border:0;border-radius:11px;background:#000b;color:#fff;font-size:12px;cursor:pointer}
+.ann-drop{outline:2px dashed var(--ann-ring);outline-offset:-6px}
+.ann-view{position:fixed;inset:0;display:grid;place-items:center;padding:16px;background:#000d;cursor:zoom-out}
+.ann-view img{max-width:100%;max-height:100%;border-radius:6px}
 html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
 @media (pointer:coarse){html[data-annotating] body :not([data-annotate-ui]){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .ann-btn,.ann-chip,.ann-link{min-height:44px}}
@@ -84,9 +94,10 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
     // static markup; page and reader text goes in through textContent only
     const X = '<button type="button" class="ann-x" aria-label="关闭">✕</button>';
     const ROOT = `<div class="ann-root"><style>${STYLE}</style><div class="ann-pins"></div><div class="ann-ring" hidden></div><button type="button" class="ann-chip" hidden>批注这段</button><div class="ann-banner" hidden></div><div class="ann-dock"><button type="button" class="ann-btn ann-free">留言</button><button type="button" class="ann-btn ann-list" hidden>清单<span class="ann-badge"></span></button><button type="button" class="ann-btn ann-pill" aria-pressed="false"></button></div><div class="ann-toast" role="status" hidden></div><div class="ann-scrim" hidden></div></div>`;
-    const COMPOSER = `<div class="ann-panel ann-composer" role="dialog" aria-label="写批注"><div class="ann-head"><span class="ann-loc"></span>${X}</div><blockquote class="ann-quote"></blockquote><textarea class="ann-ta" rows="4" enterkeyhint="done" placeholder="写下你的意见…（回车存下，Shift+回车换行）" aria-label="批注内容"></textarea><p class="ann-hint" aria-live="polite"></p><div class="ann-row"><button type="button" class="ann-btn ann-primary">存下来</button></div></div>`;
+    const COMPOSER = `<div class="ann-panel ann-composer" role="dialog" aria-label="写批注"><div class="ann-head"><span class="ann-loc"></span>${X}</div><blockquote class="ann-quote"></blockquote><textarea class="ann-ta" rows="4" enterkeyhint="done" placeholder="写下你的意见…（回车存下，Shift+回车换行）" aria-label="批注内容"></textarea><div class="ann-imgs" hidden></div><p class="ann-hint" aria-live="polite"></p><div class="ann-row"><input type="file" accept="image/*" multiple hidden><button type="button" class="ann-btn ann-pic" hidden>图片</button><button type="button" class="ann-btn ann-primary">存下来</button></div></div>`;
     const DRAWER = `<div class="ann-panel ann-drawer" role="dialog" aria-label="批注清单"><div class="ann-head"><strong></strong>${X}</div><p class="ann-hint" aria-live="polite"></p><ol class="ann-items"></ol><textarea class="ann-ta" readonly hidden aria-label="批注清单全文"></textarea><div class="ann-row ann-acts"></div></div>`;
-    const ITEM = `<li class="ann-item"><div class="ann-meta"><span class="ann-loc"></span></div><button type="button" class="ann-jump" title="跳到原处"><span class="ann-quote"></span></button><div class="ann-note"></div></li>`;
+    const ITEM = `<li class="ann-item"><div class="ann-meta"><span class="ann-loc"></span></div><button type="button" class="ann-jump" title="跳到原处"><span class="ann-quote"></span></button><div class="ann-note"></div><div class="ann-imgs" hidden></div></li>`;
+    const THUMB = '<span class="ann-thumb"><button type="button" class="ann-see" aria-label="看大图"><img alt=""></button></span>';
 
     const squash = (s) => (s ? String(s) : '').replace(/\s+/g, ' ').trim();
     const clip = (s, n, chars = Array.from(s)) => (chars.length > n ? chars.slice(0, n - 1).join('') + '…' : s);
@@ -98,13 +109,14 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
             return fallback;
         }
     };
+    // a note says something, in words or in pictures
+    const kept = (n) => !!(n && n.id && (n.note || (Array.isArray(n.imgs) && n.imgs.length)));
+    const tidy = (n) => ({ ...n, kind: /^[ten]$/.test(n.kind) ? n.kind : 'e', loc: n.loc || '', note: n.note || '' });
     // storage can be missing or throw (private mode, blocked site data): the notes then live for this visit only
     const load = () =>
         []
             .concat(attempt(() => JSON.parse(localStorage.getItem(S.key)), []) || [])
-            .flatMap((n) =>
-                n && n.id && n.note ? [{ ...n, kind: /^[ten]$/.test(n.kind) ? n.kind : 'e', loc: n.loc || '' }] : []
-            );
+            .flatMap((n) => (kept(n) ? [tidy(n)] : []));
     const save = () =>
         (S.volatile =
             !attempt(() => (localStorage.setItem(S.key, JSON.stringify(S.notes)), true), false) && !S.cloud);
@@ -116,6 +128,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         const doc = { source: cfg.source, title: squash(document.title), at: n.at, kind: n.kind, loc: n.loc };
         Object.assign(doc, { quote: n.quote, note: n.note });
         if (n.kind !== 'n' && n.path) Object.assign(doc, { path: n.path, off: n.off || 0 });
+        if (n.imgs && n.imgs.length) doc.imgs = n.imgs;
         return doc;
     };
     const send = (n) => {
@@ -126,9 +139,19 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
             .then(() => ((n.cloud = 1), save()))
             .catch(() => toast('没存进报告，先留在这台设备上'));
     };
-    const unsend = (id) => S.cloud && S.cloud.doc(id).delete().catch(() => {});
+    // a deleted note takes its pictures with it: nothing else points at them
+    const unsend = (n) => {
+        if (S.cloud) S.cloud.doc(n.id).delete().catch(() => {});
+        if (S.assets) for (const id of n.imgs || []) S.assets.delete(id).catch(() => {});
+    };
+    const use = (name) => Promise.resolve(attempt(() => window.claude.use(name), null)).catch(() => null);
     const connect = async () => {
-        const db = await Promise.resolve(attempt(() => window.claude.use('db'), null)).catch(() => null);
+        use('assets').then((assets) => {
+            S.assets = assets || null;
+            const pic = S.assets && S.panel && S.panel.querySelector('.ann-pic');
+            if (pic) pic.hidden = false;
+        });
+        const db = await use('db');
         const col = db && attempt(() => db.collection(CLOUD), null);
         if (!col) return;
         S.cloud = col;
@@ -137,7 +160,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
             (snap) => {
                 const remote = snap.docs
                     .map((d) => ({ ...d.data(), id: d.id, cloud: 1 }))
-                    .filter((n) => n.note && (!n.source || n.source === cfg.source));
+                    .filter((n) => kept(n) && (!n.source || n.source === cfg.source));
                 const there = new Set(remote.map((n) => n.id));
                 // until the database has answered for itself, nothing here is taken as cleared
                 const definitive = !snap.metadata.fromCache;
@@ -147,7 +170,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
                     for (const n of mine) send(n);
                 }
                 S.notes = remote
-                    .map((n) => ({ ...n, kind: /^[ten]$/.test(n.kind) ? n.kind : 'e', loc: n.loc || '' }))
+                    .map(tidy)
                     .concat(mine)
                     .sort((a, b) => String(a.at).localeCompare(String(b.at)));
                 for (const id of [...S.marks.keys()]) if (!S.notes.some((n) => n.id === id)) S.marks.delete(id);
@@ -158,12 +181,14 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
             () => {} // a lost connection keeps what is here; the cache still holds it
         );
     };
-    // the copied list: a two-line header, then per note its number, [place]「quote」 and the note verbatim below
+    // the copied list: a two-line header, then per note its number, [place]「quote」, the note verbatim below and the
+    // asset ids of its pictures (an agent fetches them from the report)
     const exportText = () => {
         const items = S.notes.map((n, i) => {
             const at =
                 n.kind === 'n' ? '[留言]' : (n.loc ? `[${n.loc}]` : '') + (n.quote ? `「${clip(n.quote, 100)}」` : '');
-            return `${i + 1}. ${at || '[页面]'}\n${n.note}`;
+            const imgs = n.imgs && n.imgs.length ? `\n附图 ${n.imgs.length} 张（报告里的资源 id）：${n.imgs.join(' ')}` : '';
+            return `${i + 1}. ${at || '[页面]'}${n.note ? '\n' + n.note : ''}${imgs}`;
         });
         const title = squash(document.title) || '无标题';
         const head = `批注｜${title}${cfg.source ? `（${cfg.source}）` : ''}\n逐条处理，回复按编号说改了什么。`;
@@ -172,7 +197,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
     window.__annotate = {
         notes: () => S.notes.map((n) => ({ ...n })),
         exportText,
-        clear: () => (S.notes.forEach((n) => unsend(n.id)), (S.notes = []), S.marks.clear(), save(), paint())
+        clear: () => (S.notes.forEach((n) => unsend(n)), (S.notes = []), S.marks.clear(), save(), paint())
     };
 
     const make = (html) => {
@@ -383,25 +408,107 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         flash(m);
     };
 
+    // Pictures: a phone photo is several MB, so anything big or of a type the assets store refuses is redrawn as a
+    // JPEG no longer than 2000px on a side. They go up when the note is saved; a list shows them by their asset id.
+    const PIC_TYPE = /^image\/(png|jpeg|gif|webp)$/;
+    const PIC_MAX = 6;
+    const PIC_ERR = { too_large: '图片太大了', unsupported_type: '这种图片传不了', quota_or_state: '报告的存储满了' };
+    const shrink = async (file) => {
+        if (PIC_TYPE.test(file.type) && file.size <= 2e6) return file;
+        const bmp = await createImageBitmap(file);
+        const k = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+        const c = Object.assign(document.createElement('canvas'), {
+            width: Math.round(bmp.width * k),
+            height: Math.round(bmp.height * k)
+        });
+        const g = c.getContext('2d');
+        g.fillStyle = '#fff';
+        g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(bmp, 0, 0, c.width, c.height);
+        return new Promise((ok, no) => c.toBlob((b) => (b ? ok(b) : no(b)), 'image/jpeg', 0.86));
+    };
+    const viewPic = (src) => {
+        const v = make('<div class="ann-view" role="dialog" aria-label="看图"><img alt=""></div>');
+        v.firstChild.src = src;
+        v.onclick = () => v.remove();
+        root.append((S.view = v));
+    };
+    const thumb = (src, remove) => {
+        const t = make(THUMB);
+        t.querySelector('img').src = src;
+        t.firstChild.onclick = () => viewPic(src);
+        const rm = remove && t.appendChild(button('✕', 'ann-rm', remove));
+        if (rm) rm.setAttribute('aria-label', '去掉这张图');
+        return t;
+    };
+
     const openComposer = (t, pt) => {
         closePanel();
         hideChip();
         const panel = make(COMPOSER);
-        const [loc, quote, ta, hint, store] = $(panel, '.ann-loc .ann-quote textarea .ann-hint .ann-primary');
+        const parts = '.ann-loc .ann-quote textarea .ann-imgs .ann-hint input .ann-pic .ann-primary';
+        const [loc, quote, ta, imgs, hint, input, pic, store] = $(panel, parts);
         loc.textContent = t.kind === 'n' ? '留言' : t.loc || '批注';
         Object.assign(quote, { textContent: t.quote || '', hidden: !t.quote });
         if (S.volatile) hint.textContent = '这里存不住，刷新就会丢，写完记得在「清单」里复制';
-        store.onclick = () => (clean(ta.value) ? add(t, clean(ta.value)) : (hint.textContent = '先写点什么'));
+        // the pictures picked so far: a preview each, until the note is saved and they have asset ids
+        const pics = [];
+        const unpick = (p) => (URL.revokeObjectURL(p.url), pics.splice(pics.indexOf(p), 1), showPics());
+        const showPics = () => {
+            imgs.replaceChildren(...pics.map((p) => thumb(p.url, () => unpick(p))));
+            imgs.hidden = !pics.length;
+        };
+        const take = async (files) => {
+            for (const f of [...files].filter((f) => /^image\//.test(f.type))) {
+                if (pics.length >= PIC_MAX) {
+                    hint.textContent = `一条最多 ${PIC_MAX} 张图`;
+                    break;
+                }
+                const blob = await shrink(f).catch(() => null);
+                if (blob) pics.push({ blob, url: URL.createObjectURL(blob) });
+                else hint.textContent = '有一张图读不了，换一张试试';
+            }
+            showPics();
+        };
+        pic.hidden = !S.assets;
+        pic.onclick = () => input.click();
+        input.onchange = () => (take(input.files), (input.value = ''));
+        ta.addEventListener('paste', (e) => {
+            const files = e.clipboardData ? [...e.clipboardData.files] : [];
+            if (S.assets && files.some((f) => /^image\//.test(f.type))) (e.preventDefault(), take(files));
+        });
+        panel.ondragover = (e) => S.assets && (e.preventDefault(), panel.classList.add('ann-drop'));
+        panel.ondragleave = () => panel.classList.remove('ann-drop');
+        panel.ondrop = (e) => {
+            panel.classList.remove('ann-drop');
+            if (S.assets && e.dataTransfer) (e.preventDefault(), take(e.dataTransfer.files));
+        };
+        // a picture already up is not sent again when a later one failed and the note is saved once more
+        store.onclick = async () => {
+            const note = clean(ta.value);
+            if (!note && !pics.length) return (hint.textContent = '先写点什么');
+            if (store.disabled) return;
+            store.disabled = true;
+            if (pics.length) hint.textContent = '正在上传图片…';
+            try {
+                for (const p of pics) p.id = p.id || (await S.assets.upload(p.blob, { type: p.blob.type })).id;
+                add(t, note, pics.map((p) => p.id));
+            } catch (err) {
+                store.disabled = false;
+                hint.textContent = (err && PIC_ERR[err.code]) || '图片没传上去，再存一次试试';
+            }
+        };
         field(ta, () => store.click());
-        Object.assign(S, { t, ta });
+        Object.assign(S, { t, ta, pics });
         show(panel, pt);
         if (t.el) frame(ring, t.el);
         ring.hidden = !(hovered = t.el || null);
         ta.focus({ preventScroll: true });
     };
-    const add = (t, note) => {
+    const add = (t, note, imgs) => {
         const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
         const n = { id, at: new Date().toISOString(), kind: t.kind, loc: t.loc || '', quote: t.quote || '', note };
+        if (imgs && imgs.length) n.imgs = imgs;
         if (t.kind !== 'n') Object.assign(n, { path: t.path, off: t.off });
         if (t.el) S.marks.set(id, { el: t.el, range: t.range || null });
         S.notes.push(n);
@@ -434,10 +541,11 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         S.panel.style.bottom = `${Math.max(0, innerHeight - vv.height - vv.offsetTop)}px`;
         S.panel.style.maxHeight = `${Math.round(Math.min(vv.height * 0.92, innerHeight * 0.8))}px`;
     };
-    const typed = () => S.ta && clean(S.ta.value);
+    const typed = () => S.ta && (clean(S.ta.value) || (S.pics && S.pics.length));
     const closePanel = () => {
         if (S.panel) S.panel.remove();
-        Object.assign(S, { panel: null, t: null, ta: null });
+        for (const p of S.pics || []) URL.revokeObjectURL(p.url);
+        Object.assign(S, { panel: null, t: null, ta: null, pics: null });
         scrim.hidden = ring.hidden = !(hovered = null);
     };
 
@@ -458,14 +566,18 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         let on = null;
         S.notes.forEach((n, i) => {
             const li = make(ITEM);
-            const [meta, where, jumper, quote, text] = $(li, '.ann-meta .ann-loc .ann-jump .ann-quote .ann-note');
+            const parts = '.ann-meta .ann-loc .ann-jump .ann-quote .ann-note .ann-imgs';
+            const [meta, where, jumper, quote, text, imgs] = $(li, parts);
             where.textContent = `${i + 1} · ${n.kind === 'n' ? '留言' : n.loc || '页面'}`;
             if (n.kind === 'n' || !n.quote) jumper.remove();
             else {
                 jumper.onclick = () => jump(n);
                 quote.textContent = `「${n.quote}」`;
             }
-            text.textContent = n.note;
+            Object.assign(text, { textContent: n.note, hidden: !n.note });
+            // an asset id read back from the database is shown from the artifact's own path for it
+            imgs.replaceChildren(...(n.imgs || []).map((id) => thumb('/_blob/' + id)));
+            imgs.hidden = !(n.imgs && n.imgs.length);
             const del = twice('删', '确认删除', 'ann-link ann-bad', () => drop(n));
             meta.append(
                 button('改', 'ann-link', () => edit(li, n)),
@@ -489,7 +601,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         const row = make('<div class="ann-row"></div>');
         const back = () => openDrawer(n.id);
         const keep = () => {
-            if (!clean(ta.value)) return ta.focus();
+            if (!clean(ta.value) && !(n.imgs && n.imgs.length)) return ta.focus();
             n.note = clean(ta.value);
             save();
             send(n);
@@ -504,7 +616,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
     };
     // one note, or all of them
     const drop = (n) => {
-        for (const gone of n ? [n] : S.notes) unsend(gone.id);
+        for (const gone of n ? [n] : S.notes) unsend(gone);
         S.notes = n ? S.notes.filter((x) => x !== n) : [];
         if (n) S.marks.delete(n.id);
         else S.marks.clear();
@@ -585,12 +697,19 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         });
         if (hit) setTimeout(() => getSelection().isCollapsed && openDrawer(hit.id));
     };
-    // Escape closes the panel, then leaves annotate mode; not while an IME candidate is open (Escape cancels it)
+    // Escape closes a picture, then the panel, then leaves annotate mode; not while an IME candidate is open (Escape
+    // cancels it)
     const onKey = (e) =>
         e.key === 'Escape' &&
         !e.isComposing &&
         e.keyCode !== 229 &&
-        (S.panel ? closePanel() : S.picking ? setPicking(false) : hideChip());
+        (S.view && S.view.isConnected
+            ? S.view.remove()
+            : S.panel
+              ? closePanel()
+              : S.picking
+                ? setPicking(false)
+                : hideChip());
 
     const start = () => {
         // annotate2: notes the browser-only layer kept for a page that is now republished were handled from the
