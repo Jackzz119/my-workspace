@@ -1,6 +1,6 @@
 # Multica 开工协议
 
-本文件是 **Multica runtime（云端 agent）的工作协议**，进 git、团队共用、**跨项目通用**。真源在 `ai/jaAgents/MULTICA.md`；每个 Multica worktree 开工时由 `ai/scripts/bootstrap.sh` 把它复制成 worktree 根目录的 `CLAUDE.md`（Claude 系 agent）或 `AGENTS.md`（Codex 系 agent）；根目录已有 runtime 注入的身份简报时不覆盖（见 §零）。你此刻读到的是副本，要改就改真源。
+本文件是 **Multica runtime（云端 agent）的工作协议**，进 git、团队共用、**跨项目通用**。真源在 `ai/jaAgents/MULTICA.md`；每个 Multica worktree 开工时由 `ai/scripts/bootstrap.sh` 把它复制成 worktree 根目录的 `CLAUDE.md`（Claude 系 agent）或 `AGENTS.md`（Codex 系 agent）；根目录已有 runtime 注入的身份简报时追加在简报下面（见 §零）。你此刻读到的是副本，要改就改真源。
 
 本文件只写**所有 Multica 工作流都成立**的规则，不写任何项目、任何具体 agent 或 squad 的情况。项目专属的东西各有各的家，这里只指路：
 
@@ -43,13 +43,13 @@ bash ai/scripts/bootstrap.sh
 它会：
 
 1. 把 `ai/jaSkills/` 下的**全部**技能复制进你自己的技能目录——Claude 系 agent 是 `.claude/skills/`，Codex 系是 `.agents/skills/`（按环境变量自动判断，判断不了就两边都建）
-2. 把 `ai/jaAgents/MULTICA.md` 复制成根目录的 `CLAUDE.md` 或 `AGENTS.md`
+2. 把 `ai/jaAgents/MULTICA.md` 复制成根目录的 `CLAUDE.md` 或 `AGENTS.md`；那里已经有 runtime 注入的身份简报时，追加在简报下面
 3. 主检出里被 git 忽略的环境配置文件（`.env`、`.env.local`、`.env.<环境>` 等，不含 `.env.example` 这类入库样板），本 worktree 缺的照同一相对路径补过来：主检出那份是指向仓库里的相对链接就建同样的链接（目标读不到就不建），其余复制成独立文件；已有的不覆盖，内容不读不打印，目标没被 git 忽略就不补
 4. 落点全部 gitignored，不会混进你的提交
 
 项目自己的补充步骤（比如给 app 建指向根 `.env` 的链接）放在 `ai/scripts/worktree.local.sh`，脚本补完上面几样后会跑它，以它的输出为准。
 
-> 根目录已有 runtime 注入的身份简报时，脚本会报「跳过 1 份」并以退出码 1 结束——**这是正常的**，技能照样复制完了。**不要加 `--force`**：它会把身份简报换成本文件，身份与报告规则就从上下文里消失了。这时协议正文直接读 `ai/jaAgents/MULTICA.md`。
+> 根目录已有 runtime 注入的身份简报时，脚本把本文件追加在简报下面，用 `BEGIN` / `END` 标记包住，报「追加在身份简报之后 1 份」；再跑只替换这一块，简报原样保留。**不要加 `--force`**：它会把身份简报整份换成本文件，身份与报告规则就从上下文里消失了。
 
 跑完后**从头读一遍生成的协议文档**（就是本文件），按 §一 准备上下文，然后才开始真正干活。脚本重复执行安全；下一轮 turn 回到同一 worktree 时再跑一次也无妨。
 
