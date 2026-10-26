@@ -221,12 +221,16 @@ td { font-variant-numeric: tabular-nums; }
 /* Findings: a severity chip beside each entry */
 ul.bugs { margin: 0.75rem 0 1.4rem; padding: 0; list-style: none; }
 ul.bugs > li {
-    display: grid;
-    grid-template-columns: 2.4rem minmax(0, 1fr);
-    gap: 12px;
     margin: 0;
     padding: 12px 0;
     border-top: 1px solid var(--rule);
+}
+/* Two columns only when the entry really has a chip: without one (no p1/p2/p3, or no [[anchor]])
+   the li holds bare inline content, and a grid would make every text run, <strong> and <code> its own cell */
+ul.bugs > li:has(> .sev) {
+    display: grid;
+    grid-template-columns: 2.4rem minmax(0, 1fr);
+    gap: 12px;
 }
 ul.bugs > li:last-child { border-bottom: 1px solid var(--rule); }
 ul.bugs.p1 { --sev: var(--p1); }
