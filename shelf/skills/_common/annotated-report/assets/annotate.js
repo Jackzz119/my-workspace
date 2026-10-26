@@ -60,6 +60,7 @@ font-weight:700;line-height:20px}
 .ann-pop{position:absolute;width:min(380px,calc(100vw - 16px));max-height:min(72vh,560px)}
 .ann-side{position:fixed;right:14px;bottom:70px;width:400px;max-height:74vh}
 .ann-sheet{position:fixed;left:0;right:0;bottom:0;max-height:80vh;border-radius:16px 16px 0 0;padding-bottom:var(--ann-b)}
+.ann-sheet.ann-top{top:max(8px,env(safe-area-inset-top));bottom:auto;left:8px;right:8px;border-radius:16px;padding-bottom:16px}
 .ann-head,.ann-row,.ann-meta{display:flex;align-items:center;gap:8px}
 .ann-row{flex-wrap:wrap;justify-content:flex-end}
 .ann-head>:first-child,.ann-meta>:first-child{flex:1}
@@ -108,6 +109,8 @@ img:not(.ann-root img){cursor:zoom-in}
 .ann-pop{transform-origin:24px 0}
 .ann-side{transform-origin:100% 100%}
 .ann-sheet{animation:ann-sheet .54s var(--ann-spring) both}
+@keyframes ann-drop{from{translate:0 -110%}}
+.ann-sheet.ann-top{animation-name:ann-drop}
 .ann-chip,.ann-toast,.ann-banner{animation:ann-rise .54s var(--ann-spring) both}
 .ann-scrim,.ann-view{animation:ann-fade .22s ease-out both}
 .ann-view img{animation:ann-pop .54s var(--ann-spring) both}
@@ -559,6 +562,8 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         const narrow = innerWidth <= 640;
         scrim.hidden = !narrow;
         panel.classList.add(narrow ? 'ann-sheet' : pt ? 'ann-pop' : 'ann-side');
+        // writing on a phone: the keyboard takes the lower half, so the box hangs from the top instead
+        if (narrow && panel.matches('.ann-composer')) panel.classList.add('ann-top');
         panel.querySelector('.ann-x').onclick = closePanel;
         root.append((S.panel = panel));
         S.shown = Date.now();
@@ -569,11 +574,24 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         const x = Math.min(Math.max(8, pt.x - 20), document.documentElement.clientWidth - w - 8);
         place(panel, x - o.left, y - o.top);
     };
-    // keep the bottom sheet above the on-screen keyboard
+    // Keep a sheet in what the eye sees. Fixed panels stand in the layout viewport (clientHeight); iPhone's
+    // innerHeight shrinks with the keyboard, so it cannot tell how far the keyboard covers. In a frame (an
+    // artifact page) the keyboard is not seen at all, so a sheet being written in hangs from the top and
+    // takes at most 44% of the height, which stays above an iPhone keyboard with its suggestion bar.
     const fit = (vv = window.visualViewport) => {
-        if (!vv || !S.panel || !S.panel.matches('.ann-sheet')) return;
-        S.panel.style.bottom = `${Math.max(0, innerHeight - vv.height - vv.offsetTop)}px`;
-        S.panel.style.maxHeight = `${Math.round(Math.min(vv.height * 0.92, innerHeight * 0.8))}px`;
+        const p = S.panel;
+        if (!p || !p.matches('.ann-sheet')) return;
+        // (a page without a doctype reports the whole document there; innerHeight is the best it has)
+        const layout = document.compatMode === 'CSS1Compat' ? document.documentElement.clientHeight : innerHeight;
+        const [seen, above] = vv ? [vv.height, vv.offsetTop] : [innerHeight, 0];
+        if (p.matches('.ann-top')) {
+            p.style.bottom = '';
+            p.style.top = `calc(${Math.max(0, above)}px + max(8px, env(safe-area-inset-top)))`;
+            p.style.maxHeight = `${Math.round(Math.min(seen - 16, layout * 0.44))}px`;
+        } else {
+            p.style.bottom = `${Math.max(0, layout - seen - above)}px`;
+            p.style.maxHeight = `${Math.round(Math.min(seen * 0.92, layout * 0.8))}px`;
+        }
     };
     const typed = () => S.ta && (clean(S.ta.value) || (S.pics && S.pics.length));
     // leave quickly and plainly (no spring), then go; without motion, at once
@@ -587,7 +605,15 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
     };
     const closePanel = (instant) => {
         if (S.panel && instant === true) S.panel.remove();
-        else if (S.panel) leave(S.panel, S.panel.matches('.ann-sheet') ? { translate: '0 100%' } : { opacity: 0, scale: '.96' });
+        else if (S.panel)
+            leave(
+                S.panel,
+                S.panel.matches('.ann-top')
+                    ? { translate: '0 -110%' }
+                    : S.panel.matches('.ann-sheet')
+                      ? { translate: '0 100%' }
+                      : { opacity: 0, scale: '.96' }
+            );
         for (const p of S.pics || []) URL.revokeObjectURL(p.url);
         Object.assign(S, { panel: null, t: null, ta: null, pics: null });
         scrim.hidden = ring.hidden = !(hovered = null);
@@ -659,7 +685,11 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         row.append(button('取消', 'ann-btn', back), button('保存', 'ann-btn ann-primary', keep));
         for (const b of li.querySelectorAll('.ann-meta button')) b.remove();
         li.querySelector('.ann-note').replaceWith(ta, row);
+        // editing in the phone's list: the list moves up out of the keyboard's way, this note in view
+        const sheet = li.closest('.ann-sheet');
+        if (sheet) (sheet.classList.add('ann-top', 'ann-still'), fit());
         ta.focus();
+        ta.scrollIntoView({ block: 'nearest' });
     };
     // one note, or all of them
     const drop = (n) => {
