@@ -89,7 +89,7 @@ make_link() {   # make_link <相对目标> <链接路径>
     local abs; abs="$(cygpath -w "$(cd "$(dirname "$link")" && cd "$target" && pwd)")"
     if cmd //c mklink /J "$(cygpath -w "$link")" "$abs" > /dev/null; then echo "  （没有符号链接权限，建的是 junction）"; return; fi
   fi
-  echo "✗ 建不成链接 $link → $target；不会用复制代替，请开 Windows 开发者模式或手动建 junction" >&2
+  echo "✗ 建不成链接 $link → ${target}；不会用复制代替，请开 Windows 开发者模式或手动建 junction" >&2
   exit 1
 }
 
@@ -143,11 +143,11 @@ sync_doc() {
   if [[ -n "$MAIN_ROOT" && -f "$MAIN_ROOT/$name" ]]; then src="$MAIN_ROOT/$name"
   elif [[ -f "$SRC_DOCS_FALLBACK/$name" ]]; then src="$SRC_DOCS_FALLBACK/$name"
   else
-    echo "⚠ $name：主检出根目录和 $SRC_DOCS_FALLBACK/ 都没有，跳过"; docs_missing=$((docs_missing+1)); return
+    echo "⚠ ${name}：主检出根目录和 $SRC_DOCS_FALLBACK/ 都没有，跳过"; docs_missing=$((docs_missing+1)); return
   fi
   local shown_src="${src#$ROOT/}"
   if [[ ! -e "$name" ]]; then
-    echo "✓ 创建 $name（来自 $shown_src）"
+    echo "✓ 创建 ${name}（来自 ${shown_src}）"
     run cp "$src" "$name"; docs_created=$((docs_created+1)); return
   fi
   # 已包含源内容（逐字节相同或作为整段出现）→ 不动
@@ -176,26 +176,26 @@ mcp_state="跳过"
 sync_mcp_json() {
   local name=".mcp.json" main_real=""
   if [[ -z "$MAIN_ROOT" ]]; then
-    echo "= $name：本目录是主检出，它就是真源"; mcp_state="主检出"; return
+    echo "= ${name}：本目录是主检出，它就是真源"; mcp_state="主检出"; return
   fi
   main_real="$(cd "$MAIN_ROOT" 2>/dev/null && pwd -P)" || true
   if [[ -z "$main_real" || ! -f "$main_real/$name" ]]; then
-    echo "⚠ $name：主检出没有这个文件，跳过"; mcp_state="无源"; return
+    echo "⚠ ${name}：主检出没有这个文件，跳过"; mcp_state="无源"; return
   fi
   # Claude Code looks for .mcp.json in the working directory and every parent, so a worktree nested
   # inside the main checkout already sees the main file; a copy here would shadow it and go stale.
   if [[ "$ROOT" == "$main_real"/* ]]; then
     if [[ -e "$name" ]]; then
-      echo "⚠ $name：本目录在主检出里面，本来就读得到主检出那份；这里另有一份会盖住它（令牌换过就过期），不需要就删掉"
+      echo "⚠ ${name}：本目录在主检出里面，本来就读得到主检出那份；这里另有一份会盖住它（令牌换过就过期），不需要就删掉"
       mcp_state="嵌套·另有一份"
     else
-      echo "= $name：本目录在主检出里面，Claude 会往上读到主检出那份，不复制"
+      echo "= ${name}：本目录在主检出里面，Claude 会往上读到主检出那份，不复制"
       mcp_state="嵌套·不需要"
     fi
     return
   fi
   if [[ ! -e "$name" ]]; then
-    echo "✓ 复制 $name（来自主检出；含令牌，.gitignore 已忽略它）"
+    echo "✓ 复制 ${name}（来自主检出；含令牌，.gitignore 已忽略它）"
     run cp "$main_real/$name" "$name"; mcp_state="已复制"; return
   fi
   if cmp -s "$main_real/$name" "$name"; then
