@@ -105,6 +105,9 @@ function parseStudioArguments(raw) {
   // 不传 = 沿用 ~/.codex/config.toml 的 model（默认行为不变）
   let model = null;
   let out = null;
+  // the image model Codex calls through the API (OPENAI_API_KEY) instead of its own image tool
+  let imageModel = null;
+  let ignoreQuota = false;
   const images = [];
 
   while (rest) {
@@ -156,6 +159,25 @@ function parseStudioArguments(raw) {
       continue;
     }
 
+    if (token === "--image-model") {
+      const next = takeRequiredValue(token, first.rest);
+      imageModel = next.token;
+      rest = next.rest;
+      continue;
+    }
+
+    if (token.startsWith("--image-model=")) {
+      imageModel = token.slice("--image-model=".length);
+      rest = first.rest;
+      continue;
+    }
+
+    if (token === "--ignore-quota") {
+      ignoreQuota = true;
+      rest = first.rest;
+      continue;
+    }
+
     if (ROLE_FLAGS.has(token)) {
       const next = takeRequiredValue(token, first.rest);
       images.push({ role: ROLE_FLAGS.get(token), input: next.token });
@@ -180,7 +202,79 @@ function parseStudioArguments(raw) {
     throw new Error(`Too many images (${images.length}); attach at most ${MAX_ATTACHED_IMAGES}.`);
   }
 
-  return { mode, model, out, images, brief: rest.trim() };
+  if (imageModel && !/^gpt-image-/.test(imageModel)) {
+    throw new Error(`--image-model takes a GPT Image model (gpt-image-2.5, gpt-image-2.5-flare, ...), not "${imageModel}".`);
+  }
+
+  return { mode, model, out, imageModel, ignoreQuota, images, brief: rest.trim() };
+}
+
+// Below this much of either window left, a run would likely stop halfway: go to the API instead.
+const QUOTA_LOW_PERCENT = 90;
+
+/**
+ * The subscription quota as Codex last saw it: the newest rate-limit reading in its session logs
+ * (~/.codex/sessions/**\/rollout-*.jsonl). `primary` is the 5-hour window, `secondary` the weekly one.
+ * A window whose reset time has passed counts as fresh. Null when no reading is found.
+ */
+function readCodexQuota(now = Date.now()) {
+  const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  const root = path.join(codexHome, "sessions");
+  if (!fs.existsSync(root)) return null;
+  const logs = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".jsonl")) logs.push({ full, mtime: fs.statSync(full).mtimeMs });
+    }
+  };
+  walk(root);
+  logs.sort((a, b) => b.mtime - a.mtime);
+  for (const log of logs.slice(0, 20)) {
+    const text = fs.readFileSync(log.full, "utf8");
+    const lines = text.split("\n").filter((line) => line.includes('"rate_limits"'));
+    for (let i = lines.length - 1; i >= 0; i--) {
+      let limits = null;
+      try {
+        const found = JSON.stringify(JSON.parse(lines[i])).match(/"rate_limits":(\{.*?"plan_type":[^}]*\})/);
+        limits = found ? JSON.parse(found[1]) : null;
+      } catch {
+        continue;
+      }
+      if (!limits?.primary) continue;
+      const windowOf = (w) =>
+        w ? { used: w.resets_at * 1000 <= now ? 0 : w.used_percent, resetsAt: new Date(w.resets_at * 1000) } : null;
+      const primary = windowOf(limits.primary);
+      const secondary = windowOf(limits.secondary);
+      const used = Math.max(primary?.used ?? 0, secondary?.used ?? 0);
+      return { primary, secondary, readAt: new Date(log.mtime), low: used >= QUOTA_LOW_PERCENT };
+    }
+  }
+  return null;
+}
+
+function describeQuota(quota) {
+  if (!quota) return "unknown (no reading in Codex's session logs yet)";
+  const part = (name, w) => (w ? `${name} ${w.used}% used, resets ${w.resetsAt.toLocaleString()}` : `${name} n/a`);
+  return `${part("5h", quota.primary)}; ${part("week", quota.secondary)} (read ${quota.readAt.toLocaleString()})`;
+}
+
+// What Codex is told when the user asked for a particular image model: generate through the imagegen
+// skill's CLI path with OPENAI_API_KEY (its built-in tool cannot pick a model).
+function imageModelInstruction(imageModel) {
+  const family = imageModel.replace(/-(flare|sunburst)(-\d{4}-\d{2}-\d{2})?$/, "");
+  const pinned = imageModel !== family;
+  return [
+    "",
+    "## Image model (required by the user)",
+    `Generate every image with ${pinned ? `\`${imageModel}\`` : `the ${family} family`} through the imagegen skill's CLI path`,
+    "(`scripts/image_gen.py --model <model>`, OPENAI_API_KEY is set in the environment), not the built-in image tool.",
+    pinned
+      ? ""
+      : `Choose the variant yourself and say which in the report: \`${family}-flare\` (the default: faster, for most images) or \`${family}-sunburst\` (slower, tighter control across edits and fine detail, for precise local edits of an existing picture).`,
+    "If the API call fails, stop and report the error; do not fall back to another model."
+  ].join("\n");
 }
 
 function resolveImages(images, cwd) {
@@ -404,7 +498,7 @@ async function handleRun(argv) {
   }
 
   if (!parsed.brief) {
-    console.error("Usage: node scripts/codex-visual.mjs run [--mode auto|audit|design|compare] [--model <slug>] [--out <dir>] [--target <image> ...] [--candidate <image> ...] [--ref <image> ...] <brief>");
+    console.error("Usage: node scripts/codex-visual.mjs run [--mode auto|audit|design|compare] [--model <slug>] [--image-model <gpt-image-...>] [--ignore-quota] [--out <dir>] [--target <image> ...] [--candidate <image> ...] [--ref <image> ...] <brief>");
     process.exitCode = 1;
     return;
   }
@@ -425,12 +519,22 @@ async function handleRun(argv) {
     return;
   }
 
+  // every run looks at the subscription first: out of it, or nearly, the caller goes to the API
+  const quota = readCodexQuota();
+  console.log(`CODEX_VISUAL_QUOTA: ${quota?.low ? "low" : "ok"} — ${describeQuota(quota)}`);
+  if (quota?.low && !parsed.ignoreQuota) {
+    console.log(`CODEX_VISUAL_FALLBACK: node "${path.join(SCRIPT_DIR, "image-api.mjs")}" --model gpt-image-2.5-flare|gpt-image-2.5-sunburst ...`);
+    console.error("Codex's subscription quota is used up or nearly so; generate through the API instead (see SKILL.md), or pass --ignore-quota.");
+    process.exitCode = 3;
+    return;
+  }
+
   const outputDirectory = createOutputDirectory(cwd, new Date(), parsed.out);
   const protocol = fs.readFileSync(PROTOCOL_PATH, "utf8");
   const instruction = buildInstruction({
     mode: parsed.mode,
     images,
-    brief: parsed.brief,
+    brief: parsed.imageModel ? `${parsed.brief}\n${imageModelInstruction(parsed.imageModel)}` : parsed.brief,
     outputDirectory,
     protocol
   });
@@ -514,6 +618,9 @@ function handleStatus() {
   console.log(`Image attachment: ${report.imageAttachment ? "yes" : "no"}`);
   console.log(`imagegen skill: ${report.imagegenSkill ?? "not found"}`);
   console.log(`Visual protocol: ${report.protocol ?? "not found"}`);
+  const quota = readCodexQuota();
+  console.log(`Subscription quota: ${quota?.low ? "LOW" : "ok"} — ${describeQuota(quota)}`);
+  console.log(`OPENAI_API_KEY: ${process.env.OPENAI_API_KEY ? "set" : "not set"} (direct API path: scripts/image-api.mjs)`);
   console.log("Billing note: use `codex login` with your ChatGPT account if you intend to consume Codex subscription usage rather than API billing.");
   if (!report.ready) process.exitCode = 1;
 }
@@ -564,6 +671,8 @@ if (invokedDirectly()) {
 }
 
 export {
+  readCodexQuota,
+  imageModelInstruction,
   buildInstruction,
   compareSemver,
   createOutputDirectory,

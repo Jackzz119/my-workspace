@@ -1,6 +1,6 @@
 ---
 name: codex-visual
-description: 把一个视觉任务（视觉检测、设计评审、出设计稿、改版探索、A/B 比稿、视觉对标、参考板）委派给 Codex CLI，拿回报告与图并独立复核。用户点名 Codex（「让 codex 看一眼」「用 codex 出图 / 比稿」），或 monet / ui-tailor 在设计流程中需要出图、审图、比稿、第二意见时使用；会消耗 Codex 订阅额度，用户没点名时先问。
+description: 把一个视觉任务（视觉检测、设计评审、出设计稿、改版探索、A/B 比稿、视觉对标、参考板）委派给 Codex CLI，拿回报告与图并独立复核；每次调用先看订阅额度，用完或快用完时改用 OPENAI_API_KEY 直连 gpt-image-2.5 出图，用户点名 image 2.5 时让 Codex 走 API。用户点名 Codex（「让 codex 看一眼」「用 codex 出图 / 比稿」「用 2.5」），或 monet / ui-tailor 在设计流程中需要出图、审图、比稿、第二意见时使用；会消耗 Codex 订阅额度或 API 费用，用户没点名时先问。
 allowed-tools: Bash(node:*), Bash(codex:*), Read, Glob
 metadata:
   shelf-scaffold: "design_system/codex-visual"
@@ -26,7 +26,22 @@ metadata:
 node "${CLAUDE_SKILL_DIR}/scripts/codex-visual.mjs" status
 ```
 
-`Ready: yes` 才继续。要点：需 `codex login`（ChatGPT 账号走订阅额度）、Node ≥ 18.18、codex-cli ≥ 0.142。
+`Ready: yes` 才继续。要点：需 `codex login`（ChatGPT 账号走订阅额度）、Node ≥ 18.18、codex-cli ≥ 0.142。`status` 还会报订阅额度（`Subscription quota`）和 `OPENAI_API_KEY` 在不在。
+
+## 生图走哪条路（用户 2026-10-26 定）
+
+**每次调用 Codex 前都看额度**：`run` 开头会自动读 Codex 自己会话日志里最新的额度记录，打出 `CODEX_VISUAL_QUOTA: ok|low — 5h …% / week …%`。5 小时或一周的窗口任一用到 90% 以上算 `low`：这时 `run` 不调 Codex，以退出码 3 结束，并打出 `CODEX_VISUAL_FALLBACK`。额度记录是 Codex 上次跑时留下的，不是实时查询；重置时间已过的窗口按满额算。
+
+| 情况 | 怎么生图 | 模型 |
+|---|---|---|
+| 用户点名 image 2.5（「用 2.5」「gpt-image-2.5」） | 照常 `run`，加 `--image-model gpt-image-2.5`：Codex 改走 imagegen 的命令行路径，用 `OPENAI_API_KEY` 调 API | flare 还是 sunburst 由 Codex 自己定，报告里写明用了哪个；用户点名了具体一个就传那个全名 |
+| 用户没点名 | 照常 `run`，Codex 用订阅额度，走它自带的出图工具 | Codex 默认 |
+| 额度用完或快用完（`low`，退出码 3） | **不再调 Codex**，调用者直接用 `scripts/image-api.mjs` 调 API，brief 照样自己写 | 调用者定 flare 或 sunburst（见下） |
+
+- **flare 还是 sunburst**：flare 是默认，出图快、质量已高于 gpt-image-2，适合新画面和大多数图；sunburst 更慢，多轮修改时控制更紧、细节更稳，适合在一张已有画面上做精确的局部修改（去掉一个物件、修一道痕）。两者单价相同。
+- **直连 API**：`node scripts/image-api.mjs --model gpt-image-2.5-sunburst --image <原图> [--image <参考图>] [--mask <遮罩.png>] --prompt-file <brief.txt> --size 1536x1024 --quality high --out <输出.png>`。带 `--image` 走编辑接口（第一张是被改的那张），不带走生成接口；输出旁边写一份同名 `.json`（模型、接口、尺寸、用量、提示词）。直连没有 Codex 的自审报告，复核由调用者自己做，并在当轮报告里说明这张图是直连 API 出的。
+- **花的钱不一样**：订阅额度不额外花钱；API 按张计费，记在 `OPENAI_API_KEY` 的账上。额度 `low` 时转 API 是用户定的规矩，不用再问；但一轮要出很多张时先在报告里说一声数量。
+- 用户明确说「这次也用 Codex」时可加 `--ignore-quota` 硬跑，跑到一半额度用完的风险由此承担。
 
 ## 准备委派
 
