@@ -33,9 +33,9 @@ export const COMMANDS = {
     examples: ["shelf diff ai/jaSkills/intj", "shelf diff skills/common/intj --stat"],
   },
   merge: {
-    usage: "shelf merge <货架路径或本地路径>",
-    summary: "三方合并「双方都改过」的物品：以上次拉取的版本为基准合并货架 HEAD 与本地，结果写回本地（账本等 push 成功才更新）",
-    flags: {},
+    usage: "shelf merge <货架路径或本地路径> [--take-mirror]",
+    summary: "三方合并「双方都改过」的物品：以上次拉取的版本为基准合并货架 HEAD 与本地，结果写回本地（账本等 push 成功才更新）；--take-mirror 见 push",
+    flags: { "--take-mirror": "bool" },
     examples: ["shelf merge ai/jaSkills/intj"],
   },
   pull: {
@@ -45,10 +45,10 @@ export const COMMANDS = {
     examples: ["shelf pull skills/common/intj", "shelf pull ai/jaSkills/intj --force", "shelf pull docs/JASKILL.md --force"],
   },
   push: {
-    usage: "shelf push <本地路径> [--yes] [--force] [--force-secret]",
-    summary: "更新货架上已有的物品：按账本 / 名字自动定位；不带 --yes 先列变更清单（退出 2）",
-    flags: { "--yes": "bool", "--force": "bool", "--force-secret": "bool" },
-    examples: ["shelf push ai/jaSkills/intj", "shelf push ai/jaSkills/intj --yes"],
+    usage: "shelf push <本地路径> [--yes] [--force] [--force-secret] [--take-mirror]",
+    summary: "更新货架上已有的物品：按账本 / 名字自动定位；不带 --yes 先列变更清单（退出 2）。根目录副本改过、正本没动时先列差异停下（退出 2），人看过、确认后加 --take-mirror 把副本的改动收进正本再推",
+    flags: { "--yes": "bool", "--force": "bool", "--force-secret": "bool", "--take-mirror": "bool" },
+    examples: ["shelf push ai/jaSkills/intj", "shelf push ai/jaSkills/intj --yes", "shelf push ai/jaAgents/CLAUDE.md --take-mirror"],
   },
   create: {
     usage: "shelf create <本地路径> [--to <货架目录>] [--yes] [--force-secret]",
@@ -110,7 +110,7 @@ export const ORDER = [
 export const EXIT_CODES = [
   { code: 0, meaning: "成功 / 无需变更 / 全部一致" },
   { code: 1, meaning: "参数错误、未知命令或参数、找不到物品或模板、重名、凭据拦截、正本与副本各改各的、植入物不推" },
-  { code: 2, meaning: "要人或 agent 处理：变更清单已打印（加 --yes 重跑）；init / sync / status 有待决；diff 有差异；pull 因本地改动没覆盖" },
+  { code: 2, meaning: "要人或 agent 处理：变更清单已打印（加 --yes 重跑）；副本改过、正本没动（看过差异后加 --take-mirror 重跑）；init / sync / status 有待决；diff 有差异；pull 因本地改动没覆盖" },
   { code: 3, meaning: "冲突：货架在你上次拉取后被改过、多个同名无法自动选、merge / sync --merge 有冲突、冲突标记还没解决" },
   { code: 4, meaning: "提交或推送失败（货架已回滚到改动前）" },
 ];

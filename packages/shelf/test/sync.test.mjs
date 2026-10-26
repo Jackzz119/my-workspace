@@ -77,14 +77,41 @@ test("sync --merge --push：双改的干净合并后自动推，本地领先的�
   assert.equal(m.run(p, "sync", "--dry-run", "--push").code, 1, "只读和推送不能一起用");
 });
 
-test("副本：只改根目录 CLAUDE.md → sync 同步回 ai/jaAgents 再推；两份各改各的 → 待决，push 退出 1 并列差异", (t) => {
+test("副本：只改根目录 CLAUDE.md → 待决不自动收进正本，push 停下列差异，--take-mirror 确认后才收进正本再推；两份各改各的 → push 退出 1", (t) => {
   const { root, remote, m, p } = setup(t, "mirror");
+  const before = read(p, "ai/jaAgents/CLAUDE.md");
   edit(p, "CLAUDE.md", (s) => s + "agent 在根目录加的一条\n");
   const r = m.json(p, "sync", "--push");
-  assert.equal(r.code, 0, r.out);
+  assert.equal(r.code, 2, r.out);
+  assert.equal(stateOf(r, "agents/claude/CLAUDE.md"), "mirror-ahead");
+  assert.equal(read(p, "ai/jaAgents/CLAUDE.md"), before, "副本 → 正本不自动同步");
+  assert.deepEqual(r.json.data.items.find((i) => i.key === "agents/claude/CLAUDE.md").next, [
+    "git diff --no-index ai/jaAgents/CLAUDE.md CLAUDE.md", "shelf push ai/jaAgents/CLAUDE.md --take-mirror", "shelf pull ai/jaAgents/CLAUDE.md --force",
+  ]);
+  assert.equal(m.json(p, "pull", "agents/claude/CLAUDE.md").json.data.items[0].state, "mirror-ahead", "pull 也不碰");
+
+  const ask = m.json(p, "push", "CLAUDE.md", "--yes");
+  assert.equal(ask.code, 2, ask.out);
+  assert.equal(ask.json.data.mirror.state, "mirror-ahead");
+  assert.equal(ask.json.data.mirror.files[0].path, "CLAUDE.md");
+  assert.equal(read(p, "ai/jaAgents/CLAUDE.md"), before, "没确认就不动正本");
+  assert.ok(ask.json.next.includes("shelf push ai/jaAgents/CLAUDE.md --take-mirror"));
+
+  const ok = m.json(p, "push", "CLAUDE.md", "--yes", "--take-mirror");
+  assert.equal(ok.code, 0, ok.out);
   assert.match(read(p, "ai/jaAgents/CLAUDE.md"), /根目录加的一条/);
-  assert.equal(stateOf(r, "agents/claude/CLAUDE.md"), "pushed");
   assert.match(readRemoteFile(root, remote, "agents/claude/CLAUDE.md"), /根目录加的一条/);
+  assert.equal(m.json(p, "sync").code, 0);
+
+  edit(p, "CLAUDE.md", (s) => s + "不要的一条\n");
+  assert.equal(m.run(p, "pull", "ai/jaAgents/CLAUDE.md", "--force").code, 0);
+  assert.equal(read(p, "CLAUDE.md"), read(p, "ai/jaAgents/CLAUDE.md"), "不要副本的改动：pull --force 两处一起覆盖");
+  assert.doesNotMatch(read(p, "CLAUDE.md"), /不要的一条/);
+
+  edit(p, "ai/jaAgents/CLAUDE.md", (s) => s + "正本单边改\n");
+  assert.equal(m.json(p, "sync").code, 2, "正本领先货架，待决推");
+  assert.match(read(p, "CLAUDE.md"), /正本单边改/, "正本 → 副本照旧自动同步");
+  assert.equal(m.run(p, "push", "ai/jaAgents/CLAUDE.md", "--yes").code, 0);
 
   pushToRemote(root, remote, { "agents/claude/CLAUDE.md": "# Claude 协议\n\n规则一（新）\n规则二\n规则三\n" });
   assert.equal(m.run(p, "sync").code, 0);

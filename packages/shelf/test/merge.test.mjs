@@ -137,12 +137,15 @@ test("merge：新增 / 删除按同样逻辑——货架加的文件进来，本
   assert.equal(readRemoteFile(root, remote, "skills/_common/intj/notes.md"), "local only\n");
 });
 
-test("merge：单文件物品（协议）也能三方合并；只改了根目录副本也算本地改动，结果正本和副本一起写", (t) => {
+test("merge：单文件物品（协议）也能三方合并；只改了根目录副本要先确认（--take-mirror）才算本地改动，结果正本和副本一起写", (t) => {
   const { root, remote, m, p } = setup(t, "merge-file");
   pushToRemote(root, remote, { "agents/claude/CLAUDE.md": "# Claude 协议\n\n规则一（货架）\n规则二\n规则三\n" });
   fs.writeFileSync(path.join(p, "CLAUDE.md"), "# Claude 协议\n\n规则一\n规则二\n规则三（本地）\n");
 
-  const mg = m.json(p, "merge", "CLAUDE.md");
+  const ask = m.json(p, "merge", "CLAUDE.md");
+  assert.equal(ask.code, 2, ask.out);
+  assert.ok(ask.json.next.includes("shelf merge ai/jaAgents/CLAUDE.md --take-mirror"));
+  const mg = m.json(p, "merge", "CLAUDE.md", "--take-mirror");
   assert.equal(mg.code, 0, mg.out);
   const expected = "# Claude 协议\n\n规则一（货架）\n规则二\n规则三（本地）\n";
   assert.equal(read(p, "ai/jaAgents/CLAUDE.md"), expected);

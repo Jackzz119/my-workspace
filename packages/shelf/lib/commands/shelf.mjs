@@ -237,9 +237,11 @@ function entryFields(ctx, srcAbs, destAbs) {
 // ---- 正本与根目录副本（SHELF 决策 #38）----
 
 // 正本（localPath，进项目 git）与副本（mirror，比如给 agent 读的根目录 CLAUDE.md，gitignore）：
-// 缺哪份补哪份；只有一份相对账本记的内容改过，就把它同步给另一份；两份各改各的才算不一致，交给人定。
-// dryRun 只判断不动手；返回 { state: none | ok | synced | mismatch | both-missing, note?, hash? }
-function reconcileMirror(entry, { dryRun = false } = {}) {
+// 缺哪份补哪份；只有正本改过就同步给副本；只有副本改过（mirror-ahead）不自动收进正本——副本 → 正本
+// 要人先看过差异，确认后带 takeMirror（push / merge 的 --take-mirror）才同步（SHELF 决策 #45）；
+// 两份各改各的才算不一致，交给人定。
+// dryRun 只判断不动手；返回 { state: none | ok | synced | mirror-ahead | mismatch | both-missing, note?, hash? }
+function reconcileMirror(entry, { dryRun = false, takeMirror = false } = {}) {
   if (!entry.mirror || !entry.localPath) return { state: "none" };
   const cwd = process.cwd();
   const p = path.resolve(cwd, entry.localPath);
@@ -257,19 +259,36 @@ function reconcileMirror(entry, { dryRun = false } = {}) {
   const hp = contentHash(p);
   const hm = contentHash(m);
   if (hp === hm) return { state: "ok", hash: hp };
-  if (hp === entry.contentHash) return sync(m, p, `${entry.mirror} 改过，同步回正本 ${entry.localPath}`);
+  if (hp === entry.contentHash) {
+    if (!takeMirror) return { state: "mirror-ahead", hash: hm };
+    return sync(m, p, `${entry.mirror} 的改动已确认，收进正本 ${entry.localPath}`);
+  }
   if (hm === entry.contentHash) return sync(p, m, `${entry.localPath} 改过，同步到副本 ${entry.mirror}`);
   return { state: "mismatch" };
 }
 
-// push / merge 之前：副本先对齐；两份各改各的就列出差异停下，不替人选
-function requireMirrorInSync(entry) {
-  const r = reconcileMirror(entry);
+// push / merge 之前：副本先对齐；只有副本改过就列出差异停下等确认（retry 是带 --take-mirror 的同一条命令），
+// 两份各改各的就列出差异停下，不替人选
+function requireMirrorInSync(entry, { takeMirror = false, retry } = {}) {
+  const r = reconcileMirror(entry, { takeMirror });
   if (r.state === "synced") console.log(`↪ ${r.note}`);
   if (r.state === "both-missing") fail(1, `✗ 本地没有 ${entry.localPath}，也没有副本 ${entry.mirror}`);
-  if (r.state !== "mismatch") return;
   const cwd = process.cwd();
   const fk = path.basename(entry.localPath);
+  if (r.state === "mirror-ahead") {
+    const d = diffTrees(
+      readTreeFs(path.resolve(cwd, entry.localPath), fk),
+      readTreeFs(path.resolve(cwd, entry.mirror), fk),
+      { labelA: entry.localPath, labelB: entry.mirror },
+    );
+    console.error(`✗ 副本 ${entry.mirror} 改过、正本 ${entry.localPath} 没动（正本 → 副本）：`);
+    console.error(statText(d));
+    run.data.mirror = { path: entry.mirror, state: "mirror-ahead", files: d.files };
+    suggest(`git diff --no-index ${q(entry.localPath)} ${q(entry.mirror)}`, retry, `shelf pull ${q(entry.localPath)} --force`);
+    fail(2, `✗ 已停下：副本 → 正本要先把差异给人看。确认收进正本 → 加 --take-mirror 重跑；`
+      + `不要副本的改动 → shelf pull ${q(entry.localPath)} --force（用货架版本覆盖正本与副本）`);
+  }
+  if (r.state !== "mismatch") return;
   const d = diffTrees(
     readTreeFs(path.resolve(cwd, entry.mirror), fk),
     readTreeFs(path.resolve(cwd, entry.localPath), fk),
@@ -342,6 +361,12 @@ async function pullEntry(ctx, realRel, manifest, counters, ask, destAbs, opts = 
   if (recorded?.mirror && !opts.force && fs.existsSync(destAbs)) {
     const r = reconcileMirror(recorded);
     if (r.state === "synced") console.log(`↪ ${r.note}`);
+    if (r.state === "mirror-ahead") {
+      console.log(`! ${shown}：副本 ${recorded.mirror} 改过、正本没动——没动；先看差异，收进正本用 shelf push ${q(recorded.localPath)} --take-mirror`);
+      Object.assign(item, { state: "mirror-ahead", action: "kept-local" });
+      counters.blocked++;
+      return;
+    }
     if (r.state === "mismatch") {
       console.log(`! ${shown}：正本和副本 ${recorded.mirror} 各改各的——没动，先对齐两份`);
       Object.assign(item, { state: "mirror-mismatch", action: "kept-local" });
@@ -810,7 +835,12 @@ export async function cmdShelfPush(argv) {
     fail(1, `✗ ${found.entry.localPath ?? positionals[0]} 是模板植入、之后归项目维护的文件（货架 ${displayPath(found.key)}），不推回货架——推上去会把模板变成本项目的内容。`
       + `要改货架上的模板，到货架 clone 里改（shelf home 看位置）`);
   }
-  if (found?.entry.mirror) requireMirrorInSync(found.entry);
+  if (found?.entry.mirror) {
+    requireMirrorInSync(found.entry, {
+      takeMirror: !!flags["--take-mirror"],
+      retry: `shelf push ${q(found.entry.localPath)} --take-mirror`,
+    });
+  }
   const localAbs = path.resolve(process.cwd(), found?.entry.localPath ?? positionals[0]);
   if (!fs.existsSync(localAbs)) fail(1, `✗ 本地路径不存在: ${found?.entry.localPath ?? positionals[0]}`);
   const localPosix = toPosix(path.relative(process.cwd(), localAbs));
@@ -1135,6 +1165,7 @@ export async function cmdShelfDiff(argv) {
     if (entry.mirror) {
       const r = reconcileMirror(entry, { dryRun: true });
       if (r.state === "synced") console.warn(`! ${r.note.replace("同步", "要同步")}（diff 只读，没动；sync / push 时会做）`);
+      if (r.state === "mirror-ahead") console.warn(`! 副本 ${entry.mirror} 改过、正本没动——下面比的是正本；副本的改动先给人看，确认后 push --take-mirror`);
       if (r.state === "mismatch") console.warn(`! ${entry.localPath} 和副本 ${entry.mirror} 各改各的——下面比的是正本`);
     }
     const headSha = headCommit(ctx.root);
@@ -1266,7 +1297,7 @@ function printMergeResult(key, entry, r) {
 }
 
 export async function cmdShelfMerge(argv) {
-  const { positionals } = parseArgs("merge", argv);
+  const { flags, positionals } = parseArgs("merge", argv);
   if (positionals.length !== 1) fail(1, "用法: " + COMMANDS.merge.usage);
   const manifest = loadManifest();
   const found = resolveEntry(manifest, positionals[0], { within: true });
@@ -1278,7 +1309,9 @@ export async function cmdShelfMerge(argv) {
   if (entry.planted || PLANTED_KEYS.has(key)) {
     fail(1, `✗ ${entry.localPath ?? key} 是模板植入、之后归项目维护的文件，不和货架对账，也不合并（要重新植入: shelf pull ${key} --force）`);
   }
-  if (entry.mirror) requireMirrorInSync(entry);
+  if (entry.mirror) {
+    requireMirrorInSync(entry, { takeMirror: !!flags["--take-mirror"], retry: `shelf merge ${q(entry.localPath)} --take-mirror` });
+  }
   const ctx = resolveShelfContext({ forWrite: true });
   try {
     run.data = { key, shown: displayPath(key), localPath: entry.localPath ?? null };
@@ -1627,6 +1660,7 @@ const SYNC_TAG = {
   removed: "已从货架移除",
   ambiguous: "同名多义",
   "local-missing": "本地文件不存在",
+  "mirror-ahead": "副本改过、正本没动，等人确认",
   "mirror-mismatch": "正本与副本各改各的",
   "untracked-differs": "本地已有同名文件、内容和货架不同（没记过账）",
 };
@@ -1735,6 +1769,9 @@ async function reconcileEntry(ctx, manifest, key, { dryRun, restore, plan }) {
   let mirrorHash = null;
   if (rec.mirror) {
     const r = reconcileMirror(rec, { dryRun });
+    if (r.state === "mirror-ahead") {
+      return pend("mirror-ahead", [`git diff --no-index ${lp} ${q(rec.mirror)}`, `shelf push ${lp} --take-mirror`, `shelf pull ${lp} --force`]);
+    }
     if (r.state === "mismatch") {
       return pend("mirror-mismatch", [`git diff --no-index ${q(rec.mirror)} ${lp}`]);
     }
@@ -1807,8 +1844,8 @@ async function reconcileEntry(ctx, manifest, key, { dryRun, restore, plan }) {
 }
 
 // 人在终端跑 sync、没带 --merge / --push 时，逐条待决当场问
-function showLineDiff(shelfAbsPath, localAbs, shown) {
-  console.log(`—— ${shown}  diff（库上 → 本地）——`);
+function showLineDiff(shelfAbsPath, localAbs, shown, label = "库上 → 本地") {
+  console.log(`—— ${shown}  diff（${label}）——`);
   spawnSync("git", ["diff", "--no-index", "--color=always", "--", shelfAbsPath, localAbs], { stdio: "inherit" });
 }
 
@@ -1841,6 +1878,22 @@ async function promptPending(ctx, manifest, item) {
       delete manifest.shelf[item.key];
       console.log(`✓ 已清记账 ${item.shown}`);
       resolved("cleaned");
+    }
+    return;
+  }
+  if (item.state === "mirror-ahead") {
+    const mirrorAbs = path.resolve(cwd, rec.mirror);
+    showLineDiff(localAbs, mirrorAbs, item.shown, "正本 → 副本");
+    const act = await choose(`${item.shown}（${SYNC_TAG[item.state]}）。[k]副本的改动收进正本 / [o]正本覆盖副本 / [s]跳过? `,
+      [{ key: "k" }, { key: "o" }, { key: "s" }]);
+    if (act === "k") {
+      writeLocal(mirrorAbs, localAbs);
+      console.log(`↪ 已收进正本 ${rec.localPath}——推上货架: shelf push ${q(rec.localPath)}`);
+      Object.assign(item, { state: "local-ahead", next: [`shelf push ${q(rec.localPath)}`] });
+    } else if (act === "o") {
+      writeLocal(localAbs, mirrorAbs);
+      console.log(`↓ 已用正本覆盖副本 ${rec.mirror}`);
+      resolved("same");
     }
     return;
   }
@@ -2321,6 +2374,10 @@ export async function cmdShelfSync(argv, { status = false } = {}) {
         const rec = manifest.shelf[it.key];
         if (rec.mirror) {
           const m = reconcileMirror(rec);
+          if (m.state === "mirror-ahead") {
+            Object.assign(it, { state: "mirror-ahead", next: [`git diff --no-index ${q(rec.localPath)} ${q(rec.mirror)}`, `shelf push ${q(rec.localPath)} --take-mirror`] });
+            continue;
+          }
           if (m.state === "mismatch") {
             Object.assign(it, { state: "mirror-mismatch", next: [`git diff --no-index ${q(rec.mirror)} ${q(rec.localPath)}`] });
             continue;

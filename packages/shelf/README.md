@@ -68,7 +68,7 @@ shelf sync --merge --push     # 同步：拿货架新版、三方合并双改、
 |---|---|---|
 | 0 | 成功 / 无需变更 / 全部一致 | — |
 | 1 | 参数错误、未知命令或参数、找不到物品或模板、重名、凭据拦截、正本与副本各改各的、植入物不推 | 按 `error.message` 改 |
-| 2 | 要人或 agent 处理：变更清单已打印；`init` / `sync` / `status` 有待决；`diff` 有差异；`pull` 因本地改动没覆盖 | 按 `next` 走（确认后加 `--yes`） |
+| 2 | 要人或 agent 处理：变更清单已打印；`init` / `sync` / `status` 有待决；`diff` 有差异；`pull` 因本地改动没覆盖；`push` / `merge` 遇到副本改过、正本没动 | 按 `next` 走（确认后加 `--yes`；副本的差异先给人看，确认后加 `--take-mirror`） |
 | 3 | 冲突：货架在你上次拉取后被改过、多个同名无法自动选、`merge` / `sync --merge` 有冲突、冲突标记还没解决 | 解决冲突后 `push`；未经人明示不加 `--force` |
 | 4 | 提交或推送失败（货架已回滚到改动前） | 把错误原文转给人 |
 
@@ -88,7 +88,7 @@ shelf sync --merge --push     # 同步：拿货架新版、三方合并双改、
 - **未知参数直接报错**（退出 1），编造的参数不会被悄悄忽略。
 - 配套的操作手册是货架上的 `shelf-ops` 技能（随 ai 模板装进每个项目）。
 
-物品状态（`data.items[].state`）：`same` 一致 · `updated` / `would-update` 货架新版已更新 / 将更新 · `installed` / `would-install` 模板新增已装 / 将装 · `restored` 补拉 · `refreshed` 只刷新账本 · `planted` 植入物 · `pushed` 已推 · `local-ahead` 本地领先 · `both-changed` 双方都改过 · `merged` 已合并待推 · `merge-conflict` 合并后有冲突 · `removed` / `ambiguous` 下架 / 同名多义 · `local-missing` 本地没了 · `mirror-mismatch` 正本与副本各改各的 · `untracked-differs` 本地有同名文件、没记过账。
+物品状态（`data.items[].state`）：`same` 一致 · `updated` / `would-update` 货架新版已更新 / 将更新 · `installed` / `would-install` 模板新增已装 / 将装 · `restored` 补拉 · `refreshed` 只刷新账本 · `planted` 植入物 · `pushed` 已推 · `local-ahead` 本地领先 · `both-changed` 双方都改过 · `merged` 已合并待推 · `merge-conflict` 合并后有冲突 · `removed` / `ambiguous` 下架 / 同名多义 · `local-missing` 本地没了 · `mirror-ahead` 副本改过、正本没动（等人确认） · `mirror-mismatch` 正本与副本各改各的 · `untracked-differs` 本地有同名文件、没记过账。
 
 ## init：新接入与还原
 
@@ -96,7 +96,7 @@ shelf sync --merge --push     # 同步：拿货架新版、三方合并双改、
 - **有 `.shelf.json`**（换设备、新 clone、新 worktree）：按账本还原——建技能链接；按 `ai/jaAgents` 补根目录协议副本；账上有、本地缺的货从货架补拉；货架有新版且本地没动的更新；模板新增的货装上；`ai/jaSkills` 里没记账的技能登记进账本 `local` 段；核对 `ai/JASKILL.md`（没登记的项目技能、登记了却不存在的技能都会列出来）。
 - 已有的文件永不盲覆盖；重跑只补缺、只做零损失的更新。本地改过的列为待决（退出 2）。
 
-**协议的正本与副本**：`ai/jaAgents/CLAUDE.md` 是正本（进项目 git），根目录 `CLAUDE.md` 是给 agent 读的副本（gitignore）。改哪份都行——只改了一份，`sync` / `push` 会同步给另一份；两份各改各的才停下，交给人定。副本是复制出来的文件而不是链接：Windows 上给单个文件建符号链接要管理员权限或开发者模式，硬链接又会在 git 或编辑器整份重写文件时悄悄断开，Codex 读 `AGENTS.md` 也不认 `@` 引用。技能目录是整目录链接（Windows 上是 junction），不需要副本。副本由模板登记、`init` / `sync` 维护，没有手动登记的命令。
+**协议的正本与副本**：`ai/jaAgents/CLAUDE.md` 是正本（进项目 git），根目录 `CLAUDE.md` 是给 agent 读的副本（gitignore）。只改了正本，`sync` / `push` 自动同步给副本；只改了副本（`mirror-ahead`），不会自动收进正本——`sync` 列为待决、`pull` 不动它、`push` / `merge` 先列出差异退出 2，人看过差异、确认后加 `--take-mirror` 才把副本的改动收进正本再推；不要这些改动就 `shelf pull <正本> --force`。两份各改各的也停下，交给人定。副本是复制出来的文件而不是链接：Windows 上给单个文件建符号链接要管理员权限或开发者模式，硬链接又会在 git 或编辑器整份重写文件时悄悄断开，Codex 读 `AGENTS.md` 也不认 `@` 引用。技能目录是整目录链接（Windows 上是 junction），不需要副本。副本由模板登记、`init` / `sync` 维护，没有手动登记的命令。
 
 ## 双方都改过：diff → merge → push
 
