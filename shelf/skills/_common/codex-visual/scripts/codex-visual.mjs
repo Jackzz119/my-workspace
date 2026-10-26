@@ -545,7 +545,18 @@ async function main(argv = process.argv.slice(2)) {
   throw new Error(`Unknown command "${command}".\n${usage()}`);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Run when invoked directly. Compare real paths: the skill is usually reached through a linked
+// skills directory, and import.meta.url is the resolved file while argv[1] is the linked path.
+function invokedDirectly() {
+  if (!process.argv[1]) return false;
+  try {
+    return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return import.meta.url === pathToFileURL(process.argv[1]).href;
+  }
+}
+
+if (invokedDirectly()) {
   main().catch((error) => {
     console.error(`Error: ${error.message}`);
     process.exit(1);
