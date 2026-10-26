@@ -151,6 +151,12 @@ h2 code, h3 code { font-size: 0.82em; }
     background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 }
 
+/* Images: embedded in the page; images on consecutive lines sit side by side when there is room */
+.figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; margin: 1rem 0 1.3rem; }
+figure.img { margin: 0; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); overflow: hidden; }
+figure.img img { display: block; width: 100%; height: auto; }
+figure.img figcaption { padding: 7px 12px; border-top: 1px solid var(--rule); font-size: 0.8125rem; line-height: 1.5; color: var(--muted); }
+
 /* Code: one row per diff line, wrapped rather than scrolled */
 figure.code {
     margin: 1rem 0 1.3rem;

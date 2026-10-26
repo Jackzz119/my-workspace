@@ -14,6 +14,8 @@
 //   :::classes | anchor … ::: containers: lead (the summary, shown above the contents), card decision, callout.
 //   {.class …} or {caption: …} alone on a line applies to the next list or table; {.bugs .p1} adds severity chips.
 //   [[anchor]] at the start of a list item makes it an item of its own, with that anchor.
+//   ![caption](path) alone on a line embeds that image in the page (a local file, relative to the source, becomes a
+//     data URI; images on consecutive lines sit side by side); its anchor is 4.1-f2.
 //   inline: `code`, **bold**, [label](href); a repo path links under --repo-url, otherwise it shows as code.
 //
 // Template placeholders: {title} {source} {date} {toc} {lead} {body}.
@@ -27,6 +29,8 @@ const HEAD = /^(#{2,4})\s+(.*?)(?:\s+\{#([^\s{}]+)\})?\s*$/;
 const NUM = /^([一二三四五六七八九十百]+、|\d+(?:\.\d+)*\s|[A-Z]{1,3}-?\d+(?:\.\d+)*\s)/;
 const LIST = /^(\s*)([-*]|\d+\.)\s+(.*)$/;
 const ATTR = /^\{([^#].*)\}$/;
+const IMG = /^!\[([^\]]*)\]\(([^)]+)\)$/;
+const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml' };
 const SHELL = /^(bash|sh|shell|zsh|console|powershell|pwsh|ps1|cmd|bat)$/;
 const WIDE = /[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\ufe30-\ufe4f\uff00-\uffef]/; // CJK text and full-width marks
 
@@ -52,8 +56,11 @@ const joinLines = (lines) => {
     return text;
 };
 
-/** Renders `source` (the dialect) to { title, toc, lead, body, stats }; `repoUrl` is the base for repo-path links. */
-export function renderReport(source, { repoUrl = '' } = {}) {
+/**
+ * Renders `source` (the dialect) to { title, toc, lead, body, stats }; `repoUrl` is the base for repo-path links,
+ * `baseDir` the folder local image paths are read from.
+ */
+export function renderReport(source, { repoUrl = '', baseDir = process.cwd() } = {}) {
     const base = repoUrl && !repoUrl.endsWith('/') ? `${repoUrl}/` : repoUrl;
     const lines = source.replace(/\r\n?/g, '\n').split('\n');
     let title = '';
@@ -61,7 +68,7 @@ export function renderReport(source, { repoUrl = '' } = {}) {
     if (first >= 0 && /^#\s+\S/.test(lines[first])) title = lines.splice(first, 1)[0].replace(/^#\s+/, '').trim();
     const toc = [];
     const state = { anchor: 'top', counts: new Map(), lead: null };
-    const stats = { sections: 0, subsections: 0, items: 0, code: 0, tables: 0 };
+    const stats = { sections: 0, subsections: 0, items: 0, code: 0, tables: 0, images: 0, imageBytes: 0 };
     // explicit ids are reserved first, so a made-up id never takes one
     const ids = new Set(lines.map((line) => (line.match(HEAD) || [])[3]).filter(Boolean));
     let made = 0;
@@ -133,6 +140,27 @@ export function renderReport(source, { repoUrl = '' } = {}) {
             : '';
         const caption = `<figcaption><span class="path">${esc(rest.join(' ').trim())}</span><span class="lang">${esc(kind)}</span>${button}</figcaption>`;
         return `<figure class="code" data-lang="${esc(kind)}" data-anchor="${esc(anchor)}">${caption}<pre class="${pre}"><code>${code}</code></pre></figure>`;
+    };
+
+    // a run of image lines: each a figure with its caption, the run one grid; a local file goes in as a data URI so
+    // the page carries its own pictures
+    const figures = (run) => {
+        const items = run.map((line) => {
+            const [, alt, href] = line.trim().match(IMG);
+            let src = href.trim();
+            if (!/^(data:|https?:)/.test(src)) {
+                const file = path.resolve(baseDir, src);
+                const mime = MIME[path.extname(file).toLowerCase()];
+                if (!mime) throw new Error(`not an image type the page can embed: ${src}`);
+                const bytes = fs.readFileSync(file);
+                stats.imageBytes += bytes.length;
+                src = `data:${mime};base64,${bytes.toString('base64')}`;
+            }
+            stats.images++;
+            const caption = alt ? `<figcaption>${inline(alt)}</figcaption>` : '';
+            return `<figure class="img" data-anchor="${esc(count('f'))}"><img src="${esc(src)}" alt="${esc(alt)}" loading="lazy">${caption}</figure>`;
+        });
+        return `<div class="figs">${items.join('')}</div>`;
     };
 
     // a row's cells; a | inside a code span or written as \| stays in its cell
@@ -224,7 +252,7 @@ export function renderReport(source, { repoUrl = '' } = {}) {
 
     const startsBlock = (line) => {
         const s = line.trim();
-        return HEAD.test(line) || LIST.test(line) || /^(```|\||:::)/.test(s) || ATTR.test(s);
+        return HEAD.test(line) || LIST.test(line) || /^(```|\||:::)/.test(s) || ATTR.test(s) || IMG.test(s);
     };
     // a heading's anchor (its number, else its id) and inner HTML; ## and ### join the contents
     const heading = (level, raw, id) => {
@@ -320,6 +348,14 @@ export function renderReport(source, { repoUrl = '' } = {}) {
                 i++;
                 continue;
             }
+            if (IMG.test(s)) {
+                let j = i;
+                const run = [];
+                while (j < lines.length && IMG.test(lines[j].trim())) run.push(lines[j++]);
+                out.push(figures(run));
+                [i, attrs] = [j, null];
+                continue;
+            }
             if (s.startsWith('|')) {
                 let j = i;
                 const rows = [];
@@ -373,8 +409,8 @@ function tocHtml(toc) {
 }
 
 /** The finished page: `markdown` rendered into `template`, with the annotation layer inlined. */
-export function buildReport(markdown, { title, source = '', template, repoUrl } = {}) {
-    const report = renderReport(markdown, { repoUrl });
+export function buildReport(markdown, { title, source = '', template, repoUrl, baseDir } = {}) {
+    const report = renderReport(markdown, { repoUrl, baseDir });
     const shell = template ?? fs.readFileSync(path.join(here, 'report-template.html'), 'utf8');
     const now = new Date();
     const date = [now.getFullYear(), now.getMonth() + 1, now.getDate()]
@@ -410,7 +446,11 @@ if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.
         process.exit(1);
     }
     if (options.template) options.template = fs.readFileSync(options.template, 'utf8');
+    options.baseDir = path.dirname(path.resolve(files[0]));
     const { html, report } = buildReport(fs.readFileSync(files[0], 'utf8'), options);
+    // an artifact page holds at most 16 MB; past a few MB of pictures it is slow on a phone anyway
+    if (report.stats.imageBytes > 8e6)
+        process.stderr.write(`warning: ${(report.stats.imageBytes / 1e6).toFixed(1)} MB of images; use smaller JPEGs\n`);
     fs.mkdirSync(path.dirname(path.resolve(files[1])), { recursive: true });
     fs.writeFileSync(files[1], html);
     const summary = { page: path.resolve(files[1]), bytes: Buffer.byteLength(html), contents: report.entries };
