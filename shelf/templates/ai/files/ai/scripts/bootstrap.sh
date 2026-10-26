@@ -8,14 +8,18 @@
 #
 # Multica 给每个 issue 新开一个 git worktree，里面只有 tracked 文件：
 # `.claude/` / `.agents/` 与根目录 `CLAUDE.md` / `AGENTS.md` 全都 gitignored，所以一开始都不存在，
-# agent 一个技能也看不见、一份协议也读不到。本脚本把两样东西就地生出来：
+# agent 一个技能也看不见、一份协议也读不到；被 git 忽略的环境配置（.env 类）也不在。本脚本把三样东西就地生出来：
 #
 #   1. 技能：把 <ai>/jaSkills/ 下的全部技能复制进 agent 自己的技能目录
 #        Claude 系 → .claude/skills/<name>/
 #        Codex  系 → .agents/skills/<name>/
 #   2. 协议：把 <ai>/jaAgents/MULTICA.md 复制成根目录的 CLAUDE.md（Claude 系）或 AGENTS.md（Codex 系）
+#   3. 环境配置：主检出里被 git 忽略的 `.env` / `.env.local` / `.env.<环境>` …（不含 .example 等入库样板），
+#      本 worktree 缺的照同一相对路径补过来——主检出那份是指向仓库里的相对链接就建同样的链接（目标读不到就不建），
+#      其余复制成独立文件（权限 600）；已有的不覆盖、悬空链接只报告，内容不读不打印，目标没被 git 忽略就不补。
+#      之后若有 <ai>/scripts/worktree.local.sh（项目自己的补充步骤）就跑它。和 sync-worktree.sh 的第 4 步同一口径
 #
-# 落点全部 gitignored，不会混进提交。真源仍只有 <ai>/jaSkills/ 与 <ai>/jaAgents/MULTICA.md 两处，要改就改真源。
+# 落点全部 gitignored，不会混进提交（环境配置复制前逐个用 git check-ignore 验过）。真源仍只有 <ai>/jaSkills/ 与 <ai>/jaAgents/MULTICA.md 两处，要改就改真源。
 #
 # 用法：
 #   bash ai/scripts/bootstrap.sh                 # 按环境变量自动判断是 claude 还是 codex；判断不了就两边都建
@@ -47,7 +51,7 @@ while [[ $# -gt 0 ]]; do
     --agent) AGENT="${2:-}"; shift 2 ;;
     --agent=*) AGENT="${1#*=}"; shift ;;
     --force) FORCE=1; shift ;;
-    -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "✗ 未知参数：$1（用 --help 看用法）"; exit 2 ;;
   esac
 done
@@ -118,14 +122,61 @@ write_protocol() {
   protocols=$((protocols + 1))
 }
 
+# 主检出 = git worktree list 的第一行（整行取：路径里有空格也不截断）；本目录就是主检出时为空
+MAIN_ROOT="$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+if [[ -n "$MAIN_ROOT" && "$(cd "$MAIN_ROOT" 2>/dev/null && pwd -P)" == "$(pwd -P)" ]]; then MAIN_ROOT=""; fi
+
+envs=0
+# 链接目标落在仓库里（相对路径、解析后仍在本目录之下）才照建同样的链接；指到仓库外的复制内容，免得两边共用一份
+link_inside_repo() {   # link_inside_repo <链接在本目录里的路径> <链接目标>
+  [[ "$2" != /* ]] || return 1
+  local dir; dir="$(cd "$(dirname "$1")" && pwd -P)" || return 1
+  case "$(cd "$dir" && cd "$(dirname "$2")" 2>/dev/null && pwd -P)/" in "$(pwd -P)"/*) return 0 ;; *) return 1 ;; esac
+}
+fill_env() {
+  [[ -n "$MAIN_ROOT" ]] || return 0
+  local rel name src target found=0
+  while IFS= read -r rel; do
+    name="${rel##*/}"
+    case "$name" in .env|.env.*) ;; *) continue ;; esac
+    case "$name" in *.example|*.sample|*.template|*.dist) continue ;; esac
+    found=$((found + 1))
+    src="$MAIN_ROOT/$rel"
+    if [[ -L "$rel" && ! -e "$rel" ]]; then echo "⚠ ${rel}：是悬空链接（→ $(readlink "$rel")），已保留，请自行检查"; continue; fi
+    [[ -e "$rel" ]] && continue
+    [[ -d "$(dirname "$rel")" ]] || { echo "⚠ ${rel}：本 worktree 没有它所在的目录，跳过"; continue; }
+    git check-ignore -q "$rel" || { echo "⚠ ${rel}：没被 git 忽略，不补（免得混进提交）"; continue; }
+    if [[ -L "$src" ]] && target="$(readlink "$src")" && link_inside_repo "$rel" "$target"; then
+      ln -s "$target" "$rel"
+      if [[ ! -e "$rel" ]]; then rm "$rel"; echo "⚠ ${rel}：链接目标 $target 在本 worktree 读不到，不建悬空链接"; continue; fi
+    elif [[ -r "$src" && ! -d "$src" ]]; then
+      (umask 077; cp -L "$src" "$rel")
+    else
+      echo "⚠ ${rel}：主检出那份读不了，跳过"; continue
+    fi
+    envs=$((envs + 1))
+  done < <(git -C "$MAIN_ROOT" ls-files --others --ignored --exclude-standard --directory 2>/dev/null)
+  (( found )) || echo "= 环境配置：主检出里没有被 git 忽略的 .env 类文件"
+}
+
+# 项目自己的补充步骤（可选，不归模板管）：比如给 app 建指向根 .env 的链接。主检出里同样会跑
+run_local_hook() {
+  local hook="$AI_DIR/scripts/worktree.local.sh"
+  [[ -f "$hook" ]] || return 0
+  echo "→ 项目补充步骤：$hook"
+  MAIN_ROOT="$MAIN_ROOT" bash "$hook"
+}
+
 for side in "${SIDES[@]}"; do
   case "$side" in
     claude) fill_skills ".claude/skills"; write_protocol "CLAUDE.md" ;;
     codex)  fill_skills ".agents/skills"; write_protocol "AGENTS.md" ;;
   esac
 done
+fill_env
+run_local_hook
 
-echo "✓ agent=$AGENT · 复制技能 $copied 个$( ((kept)) && echo " · 保留 symlink $kept 条" ) · 生成协议 $protocols 份$( ((skipped)) && echo " · 跳过 $skipped 份（已有个人协议）" )"
+echo "✓ agent=$AGENT · 复制技能 $copied 个$( ((kept)) && echo " · 保留 symlink $kept 条" ) · 生成协议 $protocols 份$( ((skipped)) && echo " · 跳过 $skipped 份（已有个人协议）" )$( ((envs)) && echo " · 补环境配置 $envs 个（内容不输出）" )"
 for side in "${SIDES[@]}"; do
   case "$side" in
     claude) echo "→ 下一步：从头读一遍 ./CLAUDE.md，按其 §一 准备上下文，然后再开始干活" ;;
