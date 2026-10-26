@@ -85,8 +85,11 @@ display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hi
 .ann-see img{display:block;width:100%;height:100%;object-fit:cover}
 .ann-rm{position:absolute;top:3px;right:3px;width:22px;height:22px;padding:0;border:0;border-radius:11px;background:#000b;color:#fff;font-size:12px;cursor:pointer}
 .ann-drop{outline:2px dashed var(--ann-ring);outline-offset:-6px}
-.ann-view{position:fixed;inset:0;display:grid;place-items:center;padding:16px;background:#000d;cursor:zoom-out}
-.ann-view img{max-width:100%;max-height:100%;border-radius:6px}
+.ann-view{position:fixed;inset:0;display:grid;place-items:safe center;padding:16px;overflow:auto;background:#000d;cursor:zoom-out}
+.ann-view img{max-width:100%;max-height:100%;border-radius:6px;cursor:zoom-in}
+.ann-view img.ann-full{max-width:none;max-height:none;cursor:zoom-out}
+.ann-view .ann-shut{position:fixed;top:12px;right:12px;width:36px;height:36px;padding:0;border:0;border-radius:18px;background:#000b;color:#fff;font-size:16px;cursor:pointer}
+img:not(.ann-root img){cursor:zoom-in}
 html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
 @media (pointer:coarse){html[data-annotating] body :not([data-annotate-ui]){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .ann-btn,.ann-chip,.ann-link{min-height:44px}}
@@ -427,10 +430,15 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         g.drawImage(bmp, 0, 0, c.width, c.height);
         return new Promise((ok, no) => c.toBlob((b) => (b ? ok(b) : no(b)), 'image/jpeg', 0.86));
     };
+    // a picture over the page: fitted first; a tap on it shows it at full size (scroll around), a tap
+    // beside it, the ✕ or Escape closes it
     const viewPic = (src) => {
         const v = make('<div class="ann-view" role="dialog" aria-label="看图"><img alt=""></div>');
-        v.firstChild.src = src;
-        v.onclick = () => v.remove();
+        const img = v.firstChild;
+        img.src = src;
+        v.onclick = (e) => (e.target === img ? img.classList.toggle('ann-full') : v.remove());
+        v.append(button('✕', 'ann-shut', () => v.remove()));
+        v.lastChild.setAttribute('aria-label', '关闭');
         root.append((S.view = v));
     };
     const thumb = (src, remove) => {
@@ -627,6 +635,8 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
     const copy = async (manual, hint, text = exportText()) => {
         try {
             await navigator.clipboard.writeText(text);
+            // copied: the list has done its job, so it closes
+            closePanel();
             return toast('已复制，粘贴到对话里就行');
         } catch {
             // no async clipboard (some app views, plain http): select the text for a manual copy
@@ -669,7 +679,13 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
 
     // annotate mode: the tap is ours, so the page's links, buttons and details do not fire
     const onClick = (e) => {
-        if (!S.picking || inUI(e.target)) return;
+        // outside annotate mode a picture in the report opens large (not one that is a link)
+        if (!S.picking) {
+            const pic = !inUI(e.target) && e.target.closest && e.target.closest('img');
+            if (pic && !pic.closest('a')) viewPic(pic.currentSrc || pic.src);
+            return;
+        }
+        if (inUI(e.target)) return;
         e.preventDefault();
         e.stopImmediatePropagation();
         if (typed()) return S.ta.focus(); // a half-written note is not dropped by a tap elsewhere
