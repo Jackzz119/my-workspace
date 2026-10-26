@@ -66,8 +66,10 @@
 ## 没装 shelf 的机器、worktree、Multica
 
 - 装：`npm i -g @jackss119/shelf`，之后 `shelf init`
-- 装不了或没网：`bash ai/scripts/sync-worktree.sh`（建技能链接、按 `ai/jaAgents` 补根目录协议副本、复制主检出的 `.mcp.json`、补主检出里被 git 忽略的 `.env` 类文件，再跑项目的 `ai/scripts/worktree.local.sh`（有的话）；不对账）
-- Multica 的 worktree：`bash ai/scripts/bootstrap.sh`（技能复制进 agent 目录，`MULTICA.md` 复制成根目录协议，补主检出里被 git 忽略的 `.env` 类文件，再跑项目的 `ai/scripts/worktree.local.sh`）
+- 装不了或没网：`bash ai/scripts/sync-worktree.sh`（建技能链接、经 `protocol-mirror.sh` 让根目录协议副本和 `ai/jaAgents` 正本一致、复制主检出的 `.mcp.json` 与 `.claude/settings.json`（钩子在里面）、补主检出里被 git 忽略的 `.env` 类文件，再跑项目的 `ai/scripts/worktree.local.sh`（有的话）；不对账）
+- Multica 的 worktree：`bash ai/scripts/bootstrap.sh`（技能复制进 agent 目录，`MULTICA.md` 复制成根目录协议（已有 runtime 身份简报就追加在它下面），补主检出里被 git 忽略的 `.env` 类文件，再跑项目的 `ai/scripts/worktree.local.sh`）
+
+- 协议副本的钩子：模板的 `.claude/settings.json` 在 `SessionStart` / `UserPromptSubmit` 上挂了 `bash ai/scripts/protocol-mirror.sh --hook`——每条消息都对齐一次 `CLAUDE.md`，会话开场读到的协议过期就往上下文里插一句「先重读」，副本被人改过就提醒走 review；没事时一个字都不打印、约 50ms
 
 ## 模板写法（`templates/<名>/template.json`）
 
