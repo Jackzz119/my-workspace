@@ -66,8 +66,8 @@
 ## 没装 shelf 的机器、worktree、Multica
 
 - 装：`npm i -g @jackss119/shelf`，之后 `shelf init`
-- 装不了或没网：`bash ai/scripts/sync-worktree.sh`（建技能链接、按 `ai/jaAgents` 补根目录协议副本、复制主检出的 `.mcp.json`；不对账）
-- Multica 的 worktree：`bash ai/scripts/bootstrap.sh`（技能复制进 agent 目录，`MULTICA.md` 复制成根目录协议）
+- 装不了或没网：`bash ai/scripts/sync-worktree.sh`（建技能链接、按 `ai/jaAgents` 补根目录协议副本、复制主检出的 `.mcp.json`、补主检出里被 git 忽略的 `.env` 类文件，再跑项目的 `ai/scripts/worktree.local.sh`（有的话）；不对账）
+- Multica 的 worktree：`bash ai/scripts/bootstrap.sh`（技能复制进 agent 目录，`MULTICA.md` 复制成根目录协议，补主检出里被 git 忽略的 `.env` 类文件，再跑项目的 `ai/scripts/worktree.local.sh`）
 
 ## 模板写法（`templates/<名>/template.json`）
 

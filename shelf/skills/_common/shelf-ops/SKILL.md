@@ -19,6 +19,7 @@ shelf 是个人内容货架：一个 git 仓库（货架）放技能、协议和
   - `ai/jaSkills/<名>/` 是技能唯一正本，`.claude/skills`、`.agents/skills` 是指向它的链接
   - `ai/features/`、`ai/sessions/`、`ai/design_system/` 下的 `concept/ img/ uiux/ codex-visual/`、`ai/project-audit/` 下的 `runs/ scripts/` 是固定目录：各技能在 frontmatter 里声明，init / sync 缺了就建
   - `ai/JASKILL.md`、`ai/PROJECT.md`、`ai/TODO.md`、`ai/check-docs.json`、`.claude/settings.json`、`.worktreeinclude` 是植入物：装一次，之后归项目，shelf 不对账、不推
+- **新 worktree 补什么**（三个入口同一口径：桌面版按 `.worktreeinclude`、本机保底 `ai/scripts/sync-worktree.sh`、Multica 的 `ai/scripts/bootstrap.sh`）：技能链接、协议副本，以及**被 git 忽略的环境配置文件**（`.env`、`.env.local`、`.env.<环境>` 等，不含 `.env.example` 这类入库样板）——从主检出照同一相对路径补进来，主检出那份是指向仓库里的相对链接就建同样的链接；指向仓库外的链接与普通文件复制成独立文件；已有的不覆盖，内容不读不打印，目标没被 git 忽略就不补，不留悬空链接。项目要额外步骤（比如给 app 建指向根 `.env` 的链接），放进项目自己的 `ai/scripts/worktree.local.sh`（模板不管），两个脚本补完后会调用它，主检出里也跑
 
 ## 用户这样说 → 你这样做
 
