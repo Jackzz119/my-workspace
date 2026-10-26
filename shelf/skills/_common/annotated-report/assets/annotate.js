@@ -90,6 +90,31 @@ display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hi
 .ann-view img.ann-full{max-width:none;max-height:none;cursor:zoom-out}
 .ann-view .ann-shut{position:fixed;top:12px;right:12px;width:36px;height:36px;padding:0;border:0;border-radius:18px;background:#000b;color:#fff;font-size:16px;cursor:pointer}
 img:not(.ann-root img){cursor:zoom-in}
+/* motion: one damped spring (about 2% overshoot, settles in ~540 ms) for things arriving, hover and press; leaving is quick and plain */
+.ann-root{--ann-spring:linear(0, 0.004 1.1%, 0.023 2.8%, 0.063 4.9%, 0.125 7.2%, 0.204 9.8%, 0.297 12.5%, 0.397 15.4%, 0.499 18.4%, 0.597 21.6%, 0.688 24.9%, 0.769 28.3%, 0.837 31.9%, 0.893 35.5%, 0.937 39.2%, 0.969 43.1%, 0.992 47%, 1.007 51%, 1.015 55.1%, 1.019 59.2%, 1.02 63.5%, 1.018 67.8%, 1.016 72.2%, 1.013 76.7%, 1.01 81.2%, 1.007 85.8%, 1.005 90.5%, 1.003 95.2%, 1);--ann-out:cubic-bezier(.4,0,1,1)}
+.ann-btn,.ann-chip,.ann-link,.ann-x,.ann-pin,.ann-see,.ann-shut,.ann-jump{transition:scale .54s var(--ann-spring),background-color .2s,color .2s,box-shadow .2s,filter .2s}
+@media (hover:hover){.ann-btn:not(:disabled):hover,.ann-chip:hover,.ann-shut:hover{scale:1.04}
+.ann-btn:not(.ann-primary):not(.ann-pill[aria-pressed=true]):not(:disabled):hover{background:var(--ann-soft)}
+.ann-primary:not(:disabled):hover,.ann-pill[aria-pressed=true]:hover{filter:brightness(1.08)}
+.ann-pin:hover,.ann-see:hover{scale:1.12}
+.ann-link:hover,.ann-x:hover{scale:1.06}}
+.ann-btn:not(:disabled):active,.ann-chip:active,.ann-link:active,.ann-x:active,.ann-pin:active,.ann-see:active,.ann-shut:active,.ann-jump:active{scale:.94;transition-duration:.1s}
+@keyframes ann-pop{from{opacity:0;scale:.92;translate:0 8px}}
+@keyframes ann-rise{from{opacity:0;translate:0 12px;scale:.96}}
+@keyframes ann-sheet{from{translate:0 100%}}
+@keyframes ann-fade{from{opacity:0}}
+@keyframes ann-dot{from{scale:0}}
+.ann-pop,.ann-side{animation:ann-pop .54s var(--ann-spring) both}
+.ann-pop{transform-origin:24px 0}
+.ann-side{transform-origin:100% 100%}
+.ann-sheet{animation:ann-sheet .54s var(--ann-spring) both}
+.ann-chip,.ann-toast,.ann-banner{animation:ann-rise .54s var(--ann-spring) both}
+.ann-scrim,.ann-view{animation:ann-fade .22s ease-out both}
+.ann-view img{animation:ann-pop .54s var(--ann-spring) both}
+.ann-pin{animation:ann-dot .54s var(--ann-spring) both}
+.ann-item{animation:ann-rise .54s var(--ann-spring) both}
+.ann-still,.ann-still .ann-item{animation:none}
+@media (prefers-reduced-motion:reduce){.ann-root *{animation:none!important;transition:none!important}}
 html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
 @media (pointer:coarse){html[data-annotating] body :not([data-annotate-ui]){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .ann-btn,.ann-chip,.ann-link{min-height:44px}}
@@ -436,8 +461,9 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         const v = make('<div class="ann-view" role="dialog" aria-label="看图"><img alt=""></div>');
         const img = v.firstChild;
         img.src = src;
-        v.onclick = (e) => (e.target === img ? img.classList.toggle('ann-full') : v.remove());
-        v.append(button('✕', 'ann-shut', () => v.remove()));
+        const shut = () => leave(v, { opacity: 0 });
+        v.onclick = (e) => (e.target === img ? img.classList.toggle('ann-full') : e.target === v && shut());
+        v.append(button('✕', 'ann-shut', shut));
         v.lastChild.setAttribute('aria-label', '关闭');
         root.append((S.view = v));
     };
@@ -550,8 +576,18 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         S.panel.style.maxHeight = `${Math.round(Math.min(vv.height * 0.92, innerHeight * 0.8))}px`;
     };
     const typed = () => S.ta && (clean(S.ta.value) || (S.pics && S.pics.length));
-    const closePanel = () => {
-        if (S.panel) S.panel.remove();
+    // leave quickly and plainly (no spring), then go; without motion, at once
+    const leave = (el, to, ms = 160) => {
+        if (!el || matchMedia('(prefers-reduced-motion: reduce)').matches || !el.animate) return el && el.remove();
+        el.style.pointerEvents = 'none';
+        const done = () => el.remove();
+        el.animate([{}, to], { duration: ms, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' }).finished.then(done, done);
+        // a background tab may not run the animation at all; it goes anyway
+        setTimeout(done, ms + 120);
+    };
+    const closePanel = (instant) => {
+        if (S.panel && instant === true) S.panel.remove();
+        else if (S.panel) leave(S.panel, S.panel.matches('.ann-sheet') ? { translate: '0 100%' } : { opacity: 0, scale: '.96' });
         for (const p of S.pics || []) URL.revokeObjectURL(p.url);
         Object.assign(S, { panel: null, t: null, ta: null, pics: null });
         scrim.hidden = ring.hidden = !(hovered = null);
@@ -559,9 +595,12 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
 
     // the list, in writing order: a quote jumps to its place; each note can be edited or deleted
     const openDrawer = (focus) => {
-        closePanel();
+        // redrawn in place (after an edit or a delete) it does not arrive again
+        const again = !!(S.panel && S.panel.matches('.ann-drawer'));
+        closePanel(again);
         hideChip();
         const panel = make(DRAWER);
+        if (again) panel.classList.add('ann-still');
         const [title, hint, ol, manual, acts] = $(panel, 'strong .ann-hint ol textarea .ann-acts');
         title.textContent = `批注清单（${S.notes.length}）`;
         hint.textContent = S.volatile
@@ -720,7 +759,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         !e.isComposing &&
         e.keyCode !== 229 &&
         (S.view && S.view.isConnected
-            ? S.view.remove()
+            ? leave(S.view, { opacity: 0 })
             : S.panel
               ? closePanel()
               : S.picking
