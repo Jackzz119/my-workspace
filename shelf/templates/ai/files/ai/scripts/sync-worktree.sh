@@ -18,12 +18,10 @@
 #      - 已是指向 <ai>/jaSkills 的 symlink → 不动
 #      - 非空真目录（项目没 ignore 这个目录时会这样）→ 追加：真源里每个技能补一条按件链接，
 #        同名条目替换成链接（原内容删除并报告），不在真源里的条目原样保留
-#   2. 协议文档（根目录 CLAUDE.md / AGENTS.md 是副本，正本在 <ai>/jaAgents/，入库）
-#      源 = 主检出根目录的同名文件（本目录是 worktree 时）；没有则用 <ai>/jaAgents/ 的正本
-#      - 根目录没有 → 原样创建
-#      - 已有且已包含源内容（比如 .worktreeinclude 复制来的）→ 不动
-#      - 已有但内容不同 → 把源内容 append 在原文下面，用 BEGIN/END 标记包住；再跑只替换标记块
-#      - 本目录就是主检出且根目录已有 → 不动（正本与副本的一致由 shelf init / sync 维护）
+#   2. 协议文档（根目录 CLAUDE.md / AGENTS.md 是副本，正本是本检出 <ai>/jaAgents/ 下的同名文件，入库）：
+#      交给 <ai>/scripts/protocol-mirror.sh --sync，副本和正本永远一致、不追加（用户 2026-10-26 定）——
+#      没有就创建；没人改过的旧副本换成正本；副本被人改过就两份都不动、报告，等用户看过 diff 再定方向
+#      2b. Claude 侧的 .claude/settings.json（gitignored；里面挂着 protocol-mirror.sh 的钩子）：本目录没有、主检出有 → 复制
 #   3. MCP 配置 .mcp.json（gitignored，里面有令牌；只管 Claude 侧，Codex 不读它）
 #      源 = 主检出根目录的 .mcp.json；本目录就是主检出、或主检出没有这个文件 → 跳过
 #      - 本目录在主检出里面（桌面版的 .claude/worktrees/<名>）→ 不复制：Claude 会逐级往上读到主检出那份；
@@ -53,9 +51,6 @@ if [[ -z "$AI_DIR" ]]; then
   AI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && basename "$(pwd -P)")"   # 本脚本就在 <ai>/scripts/ 下
 fi
 SRC_SKILLS="$AI_DIR/jaSkills"
-SRC_DOCS_FALLBACK="$AI_DIR/jaAgents"
-BEGIN_MARK="<!-- BEGIN sync-worktree"
-END_MARK="<!-- END sync-worktree -->"
 
 AGENT="all"; DRY=0
 while [[ $# -gt 0 ]]; do
@@ -63,7 +58,7 @@ while [[ $# -gt 0 ]]; do
     --agent) AGENT="${2:-}"; shift 2 ;;
     --agent=*) AGENT="${1#*=}"; shift ;;
     --dry-run) DRY=1; shift ;;
-    -h|--help) sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "✗ 未知参数：$1（用 --help 看用法）"; exit 2 ;;
   esac
 done
@@ -140,44 +135,25 @@ sync_skills_dir() {
   echo "✓ $dir → $whole_rel"
 }
 
-docs_created=0; docs_appended=0; docs_same=0; docs_missing=0
-sync_doc() {
-  local name="$1" src=""
-  # 本目录就是主检出且根目录已有：不动（正本在 <ai>/jaAgents/，两份的一致由 shelf init / sync 维护）
-  if [[ -z "$MAIN_ROOT" && -e "$name" ]]; then
-    echo "= $name 已存在（本目录是主检出；正本在 $SRC_DOCS_FALLBACK/）"; docs_same=$((docs_same+1)); return
+docs_drift=0
+sync_doc() {   # sync_doc <claude|codex>：副本对齐交给 protocol-mirror.sh（它和钩子是同一套判断）
+  if [[ ! -f "$AI_DIR/scripts/protocol-mirror.sh" ]]; then
+    echo "⚠ 缺 $AI_DIR/scripts/protocol-mirror.sh（模板新增的货，跑一次 shelf sync 装上），协议副本没对齐"
+    docs_drift=$((docs_drift+1)); return
   fi
-  if [[ -n "$MAIN_ROOT" && -f "$MAIN_ROOT/$name" ]]; then src="$MAIN_ROOT/$name"
-  elif [[ -f "$SRC_DOCS_FALLBACK/$name" ]]; then src="$SRC_DOCS_FALLBACK/$name"
-  else
-    echo "⚠ ${name}：主检出根目录和 $SRC_DOCS_FALLBACK/ 都没有，跳过"; docs_missing=$((docs_missing+1)); return
-  fi
-  local shown_src="${src#$ROOT/}"
-  if [[ ! -e "$name" ]]; then
-    echo "✓ 创建 ${name}（来自 ${shown_src}）"
-    run cp "$src" "$name"; docs_created=$((docs_created+1)); return
-  fi
-  # 已包含源内容（逐字节相同或作为整段出现）→ 不动
-  if cmp -s "$src" "$name" || perl -0777 -e '
-      open my $a, "<", $ARGV[0] or exit 1; local $/; my $needle = <$a>;
-      open my $b, "<", $ARGV[1] or exit 1; my $hay = <$b>;
-      exit(index($hay, $needle) >= 0 ? 0 : 1)' "$src" "$name"; then
-    echo "= $name 已包含 $shown_src 的内容"; docs_same=$((docs_same+1)); return
-  fi
-  local block; block="$(printf '%s: from %s -->\n%s\n%s\n' "$BEGIN_MARK" "$shown_src" "$(cat "$src")" "$END_MARK")"
-  if grep -qF "$BEGIN_MARK" "$name"; then
-    echo "↻ $name 已有同步块，替换为最新 $shown_src"
-    BLOCK="$block"; export BLOCK
-    (( DRY )) || perl -0777 -i -pe '
-      my $b = quotemeta($ENV{BEGIN_MARK}); my $e = quotemeta($ENV{END_MARK});
-      s/$b.*?$e/$ENV{BLOCK}/s' "$name"
-  else
-    echo "＋ $name 已存在且内容不同，把 $shown_src 追加到原文下面"
-    (( DRY )) || printf '\n\n%s\n' "$block" >> "$name"
-  fi
-  docs_appended=$((docs_appended+1))
+  local args=(--sync --agent "$1"); (( DRY )) && args+=(--dry-run)
+  bash "$AI_DIR/scripts/protocol-mirror.sh" "${args[@]}" || docs_drift=$((docs_drift+1))
 }
-export BEGIN_MARK END_MARK
+
+settings_state="跳过"
+sync_settings_json() {   # .claude/settings.json：本目录没有、主检出有 → 复制（钩子跟着来）
+  local name=".claude/settings.json"
+  if [[ -z "$MAIN_ROOT" ]]; then settings_state="主检出"; return; fi
+  if [[ -e "$name" ]]; then settings_state="已有"; return; fi
+  if [[ ! -f "$MAIN_ROOT/$name" ]]; then settings_state="无源"; return; fi
+  echo "✓ 复制 ${name}（来自主检出；协议副本的提醒钩子在里面）"
+  run cp "$MAIN_ROOT/$name" "$name"; settings_state="已复制"
+}
 
 mcp_state="跳过"
 sync_mcp_json() {
@@ -274,13 +250,13 @@ for side in "${SIDES[@]}"; do
 done
 for side in "${SIDES[@]}"; do
   case "$side" in
-    claude) sync_doc "CLAUDE.md" ;;
-    codex)  sync_doc "AGENTS.md" ;;
+    claude) sync_doc claude ;;
+    codex)  sync_doc codex ;;
   esac
 done
 for side in "${SIDES[@]}"; do
   case "$side" in
-    claude) sync_mcp_json ;;
+    claude) sync_mcp_json; sync_settings_json ;;
   esac
 done
 sync_env_files
@@ -288,7 +264,7 @@ run_local_hook
 
 echo ""
 echo "✓ sync-worktree（agent=$AGENT$( ((DRY)) && echo '，dry-run')）：整目录链接 $links_whole · 按件链接 $links_item · 替换同名 $replaced · 原样保留 $kept ·" \
-     "协议 创建 $docs_created / 追加或更新 $docs_appended / 已一致 $docs_same / 无源 $docs_missing · .mcp.json $mcp_state ·" \
+     "协议$( ((docs_drift)) && echo " ⚠ 有 $docs_drift 份副本被改过，见上" || echo ' 已对齐') · .mcp.json $mcp_state · settings.json $settings_state ·" \
      "环境配置 补 $env_copied / 已有 $env_kept / 跳过 $env_skipped"
 for side in "${SIDES[@]}"; do
   case "$side" in
