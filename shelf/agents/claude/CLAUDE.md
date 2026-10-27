@@ -116,6 +116,7 @@ Claude 的 auto-memory（`~/.claude/projects/<项目>/memory/`：`MEMORY.md` 索
 - **不触发**：同一件事的正常推进（写完代码去跑测试、开完 PR 等 CI）
 - **写「在做什么」，不写「做完了什么」**：短名词短语并带上对象。`技能真源统一到 ai/jaSkills` 好过 `更新文档`；`Data Hub 404 排查` 好过 `修 bug`
 - **最前面加模型和 effort**（用户 2026-10-25 定）：`[Opus 5.5·max] Data Hub 404 排查`；会话中途换了模型或 effort，标题跟着改
+- **side chat 要标出来**（用户 2026-10-27 定）：本会话挂在另一个会话下面时，方括号里在 effort 后面加 `·sidechat`：`[Opus 5.5·max·sidechat] Data Hub 404 排查`。判据：`get_session("self")` 带 `parentSessionId`，且 `detached` 不是 true。用户开的 side chat（Cmd+; / `/btw`）、从别的会话分叉出来的、别的会话用 `start_session` 开的都算；用户把它移到顶层（Detach to top level）后去掉。side chat 开出来时标题照抄父会话，第一轮就按本条改成自己的
 - **手法**：用会话改名工具改（改本会话时 `session_id` 传 `"self"`；模型和 effort 用同组的 `get_session` 查，查不到 effort 就只写模型），改完不用特意汇报
 
 ## Log 规范
@@ -170,24 +171,24 @@ Claude 的 auto-memory（`~/.claude/projects/<项目>/memory/`：`MEMORY.md` 索
 
     > 为什么：多个会话会并行改同一个仓库。把别人的工作卷进自己的 commit，commit message 就与内容对不上，要回退时也拆不开；未经许可 push 会把别人**尚未完成**的中间状态推上远端。本项目踩过：一次 `git add -A` 卷入了他人的改动。
 
-8. **在 worktree 里工作时：合并只走 rebase，不切分支**（用户 2026-08-20 设立，2026-09-10 改合并行；集成分支 2026-10-16 起是 `main`）：
+8. **在 worktree 里工作时：合并只走 rebase，不切分支**（用户 2026-08-20 设立，2026-09-10 改合并行；下文「集成分支」以 `ai/PROJECT.md` 的分支规则为准，各项目不同，如 `dev` 或 `main`）：
 
     | 动作 | worktree 中的默认 |
     |---|---|
     | 在本 worktree 自己的分支上 commit | ✅ 自主执行 |
     | `git push` 本 worktree 的分支 | ✅ 自主执行（推的是自己的分支，不碰共享分支） |
-    | `gh pr create --base main` | ✅ 自主执行 |
+    | `gh pr create --base <集成分支>` | ✅ 自主执行 |
     | **`gh pr merge --rebase`** | ✅ 自主执行，**前提是下面三条校验全过**；CI 绿即可合，不必等人审。单分支 PR 一律 rebase，环境分支之间同步（如 dev → staging）才用 `--merge`（用户 2026-10-17 定） |
     | **`gh pr merge --squash` / `--admin` / `--auto`** | ❌ **禁止**：squash 把一条分支上几件事压成一个提交，日后 `blame` 只剩一句概述；`--admin` 绕过检查；`--auto` 让合并发生在没人看着的时刻 |
-    | **`--delete-branch`** | ❌ 别加：它会在本地切 base 分支——主检出占着 `main` 时报假失败（PR 其实合了），没占着时把**本 worktree 骑到 `main` 上**。合完手动 `git push origin --delete <branch>` |
+    | **`--delete-branch`** | ❌ 别加：它会在本地切 base 分支——主检出占着集成分支时报假失败（PR 其实合了），没占着时把**本 worktree 骑到集成分支上**。合完手动 `git push origin --delete <branch>` |
     | **`git checkout` / `git switch` 到别的分支** | ❌ **禁止** |
     | **把工作区分支 `reset` 到别处** | ❌ **禁止** |
 
-    - **合并前三条校验，缺一不合**：① CI 跑在**当前 head** 上——按 sha 直查 `check-runs`，`gh pr checks` 会把旧 head 的绿报成通过；② 不落后 `main`——落后就先 `git rebase origin/main`、`--force-with-lease` 推，再等**新 head** 的 CI（文本不冲突 ≠ 能编译）；③ `main` 自己是绿的——红了先修 `main`
-    - 合完核对 `state=MERGED`，再看一眼 `git worktree list`——自己那行不该变成 `[main]`
+    - **合并前三条校验，缺一不合**：① CI 跑在**当前 head** 上——按 sha 直查 `check-runs`，`gh pr checks` 会把旧 head 的绿报成通过；② 不落后集成分支——落后就先 `git rebase origin/<集成分支>`、`--force-with-lease` 推，再等**新 head** 的 CI（文本不冲突 ≠ 能编译）；③ 集成分支自己是绿的——红了先修它
+    - 合完核对 `state=MERGED`，再看一眼 `git worktree list`——自己那行不该变成集成分支
     - 需要知道上游进展时用 `git fetch` 拿信息，不 reset、不 checkout；主检出（非 worktree）的分支状态一律不碰——那是别的会话的工作台
 
-    > 为什么：worktree 存在的意义就是「我这条线的改动不影响别人」，切分支会改动共享检出的状态、打断并行会话。**合并本身不禁**——`main` 只能经 PR + 校验进入，三条校验就是那道门；禁的是绕门（`--admin`）、不看着门（`--auto`）和把历史压扁（`--squash`）。
+    > 为什么：worktree 存在的意义就是「我这条线的改动不影响别人」，切分支会改动共享检出的状态、打断并行会话。**合并本身不禁**——集成分支只能经 PR + 校验进入，三条校验就是那道门；禁的是绕门（`--admin`）、不看着门（`--auto`）和把历史压扁（`--squash`）。
 
 ## 并行工作区保护
 
