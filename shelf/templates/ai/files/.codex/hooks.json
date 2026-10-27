@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"$(git rev-parse --show-toplevel 2>/dev/null)\" || exit 0; for f in \"$r\"/ai/scripts/protocol-mirror.sh \"$r\"/AI/scripts/protocol-mirror.sh; do [ -f \"$f\" ] && exec bash \"$f\" --hook codex; done; exit 0",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"$(git rev-parse --show-toplevel 2>/dev/null)\" || exit 0; for f in \"$r\"/ai/scripts/protocol-mirror.sh \"$r\"/AI/scripts/protocol-mirror.sh; do [ -f \"$f\" ] && exec bash \"$f\" --hook codex; done; exit 0",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

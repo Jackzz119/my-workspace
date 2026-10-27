@@ -47,7 +47,8 @@ test("init：新项目按 ai 模板一次接入（协议正本 + 根目录副本
   // 链接、gitignore
   assertLinked(p, ".claude/skills");
   assertLinked(p, ".agents/skills");
-  assert.ok(!exists(p, ".codex"));
+  assert.ok(!exists(p, ".codex/skills"), "Codex 技能走 .agents/skills");
+  assert.equal(read(p, ".codex/hooks.json"), TEMPLATE_FILES["templates/ai/files/.codex/hooks.json"], "Codex 的协议提醒钩子");
   const gi = read(p, ".gitignore");
   for (const line of ["/CLAUDE.md", "/AGENTS.md", "/.claude/skills", "/.agents/skills"]) assert.match(gi, new RegExp(`^${esc(line)}$`, "m"), line);
   const status = git(root, p, ["status", "--porcelain", "--untracked-files=all"]);
