@@ -145,14 +145,16 @@ sync_doc() {   # sync_doc <claude|codex>：副本对齐交给 protocol-mirror.sh
   bash "$AI_DIR/scripts/protocol-mirror.sh" "${args[@]}" || docs_drift=$((docs_drift+1))
 }
 
-settings_state="跳过"
-sync_settings_json() {   # .claude/settings.json：本目录没有、主检出有 → 复制（钩子跟着来）
-  local name=".claude/settings.json"
-  if [[ -z "$MAIN_ROOT" ]]; then settings_state="主检出"; return; fi
-  if [[ -e "$name" ]]; then settings_state="已有"; return; fi
-  if [[ ! -f "$MAIN_ROOT/$name" ]]; then settings_state="无源"; return; fi
+settings_state="跳过"; codex_hooks_state="跳过"; HOOK_STATE=""
+# 挂协议提醒钩子的配置：本目录没有、主检出有 → 复制。结果写进 HOOK_STATE
+sync_hook_config() {   # sync_hook_config <.claude/settings.json | .codex/hooks.json>
+  local name="$1"
+  if [[ -z "$MAIN_ROOT" ]]; then HOOK_STATE="主检出"; return; fi
+  if [[ -e "$name" ]]; then HOOK_STATE="已有"; return; fi
+  if [[ ! -f "$MAIN_ROOT/$name" ]]; then HOOK_STATE="无源"; return; fi
   echo "✓ 复制 ${name}（来自主检出；协议副本的提醒钩子在里面）"
-  run cp "$MAIN_ROOT/$name" "$name"; settings_state="已复制"
+  run mkdir -p "$(dirname "$name")"
+  run cp "$MAIN_ROOT/$name" "$name"; HOOK_STATE="已复制"
 }
 
 mcp_state="跳过"
@@ -256,7 +258,8 @@ for side in "${SIDES[@]}"; do
 done
 for side in "${SIDES[@]}"; do
   case "$side" in
-    claude) sync_mcp_json; sync_settings_json ;;
+    claude) sync_mcp_json; sync_hook_config .claude/settings.json; settings_state="$HOOK_STATE" ;;
+    codex)  sync_hook_config .codex/hooks.json; codex_hooks_state="$HOOK_STATE" ;;
   esac
 done
 sync_env_files
@@ -264,7 +267,7 @@ run_local_hook
 
 echo ""
 echo "✓ sync-worktree（agent=$AGENT$( ((DRY)) && echo '，dry-run')）：整目录链接 $links_whole · 按件链接 $links_item · 替换同名 $replaced · 原样保留 $kept ·" \
-     "协议$( ((docs_drift)) && echo " ⚠ 有 $docs_drift 份副本被改过，见上" || echo ' 已对齐') · .mcp.json $mcp_state · settings.json $settings_state ·" \
+     "协议$( ((docs_drift)) && echo " ⚠ 有 $docs_drift 份副本被改过，见上" || echo ' 已对齐') · .mcp.json $mcp_state · settings.json $settings_state · .codex/hooks.json $codex_hooks_state ·" \
      "环境配置 补 $env_copied / 已有 $env_kept / 跳过 $env_skipped"
 for side in "${SIDES[@]}"; do
   case "$side" in
