@@ -134,6 +134,10 @@ Codex 侧若启用了跨会话记忆，同一口径）**只存一类东西：
 - **不触发**：同一件事的正常推进（写完代码去跑测试、开完 PR 等 CI）
 - **写「在做什么」，不写「做完了什么」**：短名词短语并带上对象。`技能真源统一到 ai/jaSkills` 好过 `更新文档`；`Data Hub 404 排查` 好过 `修 bug`
 - **最前面加模型和 effort**（用户 2026-10-25 定）：`[<模型>·<effort>] Data Hub 404 排查`，按本轮实际在用的写（拿不准就看 `~/.codex/config.toml` 的 `model`、`model_reasoning_effort`）；会话中途换了，标题跟着改
+- **side chat 要标出来**（用户 2026-10-27 定）：本会话是从另一个会话分出来的时，方括号里在 effort 后面加 `·sidechat`：`[<模型>·<effort>·sidechat] Data Hub 404 排查`。side chat、fork、别的会话开的子 agent 都算。Codex 侧这样判断（Codex CLI 0.164 上核实）：
+  - **side chat**（`/side`、`/btw`、app 的 Open Side Chat）：上下文里有 Codex 注入的边界说明 `You are in a side conversation, not the main thread.`，看到就标
+  - **fork 与子 agent**：shell 里的 `$CODEX_THREAD_ID` 是本会话的 id，拿它查 Codex 的会话库：`sqlite3 ~/.codex/state_*.sqlite "select source, rollout_path from threads where id='$CODEX_THREAD_ID'"`。`source` 里有 `subagent` 就是子 agent；`rollout_path` 那个文件第一行（`session_meta`）带 `forked_from_id` 就是 fork
+  - 变量为空、库或字段对不上（Codex 版本不同）时，用户说了是分出来的、或开场上下文写明了，才标
 - **手法（Codex 侧）**：改名是客户端动作（`/rename` 等），agent 的工具里没有改名工具，所以动作是**把标题算好、提醒用户按一下**：`【建议改名】[<模型>·<effort>] <短名词短语> —— 打 /rename 回车即可`。不要写成「已更新标题」——没有权限做的事写了就是假交付。非交互场景（`codex exec`）在该轮输出第一行写 `【本轮任务】[<模型>·<effort>] <短名词短语>`。以后接上能改名的工具（MCP / plugin 包一层 app-server 的 `thread/name/set`）就改回「直接改，不提醒」
 
 ## Log 规范
@@ -188,24 +192,24 @@ Codex 侧若启用了跨会话记忆，同一口径）**只存一类东西：
 
     > 为什么：多个会话会并行改同一个仓库。把别人的工作卷进自己的 commit，commit message 就与内容对不上，要回退时也拆不开；未经许可 push 会把别人**尚未完成**的中间状态推上远端。本项目踩过：一次 `git add -A` 卷入了他人的改动。
 
-8. **在 worktree 里工作时：合并只走 rebase，不切分支**（用户 2026-08-20 设立，2026-09-10 改合并行；集成分支 2026-10-16 起是 `main`）：
+8. **在 worktree 里工作时：合并只走 rebase，不切分支**（用户 2026-08-20 设立，2026-09-10 改合并行；下文「集成分支」以 `ai/PROJECT.md` 的分支规则为准，各项目不同，如 `dev` 或 `main`）：
 
     | 动作 | worktree 中的默认 |
     |---|---|
     | 在本 worktree 自己的分支上 commit | ✅ 自主执行 |
     | push 本 worktree 自己的分支 | ✅ 自主执行（推的是自己的分支，不碰共享分支） |
-    | 创建 PR（base: main） | ✅ 自主执行 |
+    | 创建 PR（base: 集成分支） | ✅ 自主执行 |
     | **`gh pr merge --rebase`** | ✅ 自主执行，**前提是下面三条校验全过**；CI 绿即可合，不必等人审。单分支 PR 一律 rebase，环境分支之间同步（如 dev → staging）才用 `--merge`（用户 2026-10-17 定） |
     | **`gh pr merge --squash` / `--admin` / `--auto`** | ❌ **禁止**：squash 把一条分支上几件事压成一个提交，日后 `blame` 只剩一句概述；`--admin` 绕过检查；`--auto` 让合并发生在没人看着的时刻 |
-    | **`--delete-branch`** | ❌ 别加：它会在本地切 base 分支——主检出占着 `main` 时报假失败（PR 其实合了），没占着时把**本 worktree 骑到 `main` 上**。合完手动 `git push origin --delete <branch>` |
+    | **`--delete-branch`** | ❌ 别加：它会在本地切 base 分支——主检出占着集成分支时报假失败（PR 其实合了），没占着时把**本 worktree 骑到集成分支上**。合完手动 `git push origin --delete <branch>` |
     | checkout / switch 到别的分支 | ❌ **禁止** |
     | 把工作区分支 reset 到别处 | ❌ **禁止** |
 
-    - **合并前三条校验，缺一不合**：① CI 跑在**当前 head** 上——按 sha 直查 `check-runs`，`gh pr checks` 会把旧 head 的绿报成通过；② 不落后 `main`——落后就先 `git rebase origin/main`、`--force-with-lease` 推，再等**新 head** 的 CI（文本不冲突 ≠ 能编译）；③ `main` 自己是绿的——红了先修 `main`
-    - 合完核对 `state=MERGED`，再看一眼 `git worktree list`——自己那行不该变成 `[main]`
+    - **合并前三条校验，缺一不合**：① CI 跑在**当前 head** 上——按 sha 直查 `check-runs`，`gh pr checks` 会把旧 head 的绿报成通过；② 不落后集成分支——落后就先 `git rebase origin/<集成分支>`、`--force-with-lease` 推，再等**新 head** 的 CI（文本不冲突 ≠ 能编译）；③ 集成分支自己是绿的——红了先修它
+    - 合完核对 `state=MERGED`，再看一眼 `git worktree list`——自己那行不该变成集成分支
     - 需要知道上游进展时用 `git fetch` 拿信息，不 reset、不 checkout；主检出（非 worktree）的分支状态一律不碰——那可能是别的会话的工作台
 
-    > 为什么：worktree 存在的意义就是「我这条线的改动不影响别人」，切分支会改动共享检出的状态、打断并行会话。**合并本身不禁**——`main` 只能经 PR + 校验进入，三条校验就是那道门；禁的是绕门（`--admin`）、不看着门（`--auto`）和把历史压扁（`--squash`）。
+    > 为什么：worktree 存在的意义就是「我这条线的改动不影响别人」，切分支会改动共享检出的状态、打断并行会话。**合并本身不禁**——集成分支只能经 PR + 校验进入，三条校验就是那道门；禁的是绕门（`--admin`）、不看着门（`--auto`）和把历史压扁（`--squash`）。
 
 ## 并行工作区保护
 
