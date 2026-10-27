@@ -6,10 +6,17 @@
 //
 //   node image-api.mjs --model gpt-image-2.5-sunburst --prompt-file brief.txt --out out.png
 //        [--image in.png ...] [--mask mask.png] [--size 1536x1024] [--quality high]
+//        [--background transparent] [--format png] [--fidelity high]
 //
 // With --image it calls /v1/images/edits (every input image is sent; the first is the one edited),
-// otherwise /v1/images/generations. Prints IMAGE_API_MODEL, IMAGE_API_ARTIFACT and IMAGE_API_USAGE lines
-// and writes <out>.json beside the picture (model, endpoint, size, quality, usage, prompt).
+// otherwise /v1/images/generations. --background transparent asks for a genuine alpha channel (sprites:
+// never cut out afterwards), --format the file type, --fidelity high asks an edit to keep the input's
+// details. Prints IMAGE_API_MODEL, IMAGE_API_ARTIFACT and IMAGE_API_USAGE lines and writes <out>.json beside
+// the picture (model, endpoint, size, quality, usage, prompt).
+//
+// Seen 2026-10-26: gpt-image-2.5-sunburst rejects --fidelity (input_fidelity, HTTP 400). Editing a transparent
+// sprite: the RGB under its alpha-0 pixels can hold a bright halo that the model reads as fur and redraws the
+// whole figure ~17% bigger; flatten the input onto mid-grey, keeping its alpha, before sending it.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -20,7 +27,18 @@ const MIME = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 
 function parseArgs(argv) {
   const options = { images: [], size: "auto", quality: "high" };
-  const single = { "--model": "model", "--prompt": "prompt", "--prompt-file": "promptFile", "--mask": "mask", "--size": "size", "--quality": "quality", "--out": "out" };
+  const single = {
+    "--model": "model",
+    "--prompt": "prompt",
+    "--prompt-file": "promptFile",
+    "--mask": "mask",
+    "--size": "size",
+    "--quality": "quality",
+    "--out": "out",
+    "--background": "background",
+    "--format": "format",
+    "--fidelity": "fidelity"
+  };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     const value = argv[i + 1];
@@ -56,18 +74,31 @@ async function main(argv = process.argv.slice(2)) {
   const endpoint = edit ? "/v1/images/edits" : "/v1/images/generations";
   let body;
   const headers = { Authorization: `Bearer ${key}` };
+  // only what was asked for is sent: a model that does not know a field rejects it
+  const extra = Object.entries({
+    background: options.background,
+    output_format: options.format,
+    input_fidelity: edit ? options.fidelity : undefined
+  }).filter(([, v]) => v);
   if (edit) {
     body = new FormData();
     body.append("model", options.model);
     body.append("prompt", options.prompt);
     body.append("size", options.size);
     body.append("quality", options.quality);
+    for (const [k, v] of extra) body.append(k, v);
     const field = options.images.length > 1 ? "image[]" : "image";
     for (const file of options.images) body.append(field, fileBlob(file), path.basename(file));
     if (options.mask) body.append("mask", fileBlob(options.mask), path.basename(options.mask));
   } else {
     headers["Content-Type"] = "application/json";
-    body = JSON.stringify({ model: options.model, prompt: options.prompt, size: options.size, quality: options.quality });
+    body = JSON.stringify({
+      model: options.model,
+      prompt: options.prompt,
+      size: options.size,
+      quality: options.quality,
+      ...Object.fromEntries(extra)
+    });
   }
   const response = await fetch(`https://api.openai.com${endpoint}`, { method: "POST", headers, body });
   const result = await response.json();
@@ -82,6 +113,9 @@ async function main(argv = process.argv.slice(2)) {
     endpoint,
     size: options.size,
     quality: options.quality,
+    background: options.background ?? null,
+    format: options.format ?? null,
+    fidelity: edit ? (options.fidelity ?? null) : null,
     images: options.images,
     mask: options.mask ?? null,
     usage: result.usage ?? null,
