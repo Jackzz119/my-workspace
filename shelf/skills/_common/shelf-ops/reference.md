@@ -32,6 +32,7 @@
 | `merge-conflict` | 合并后还有冲突标记 | 解决后 `shelf push` |
 | `removed` / `ambiguous` | 货架上下架了 / 同名多义 | 问用户，`shelf forget` |
 | `local-missing` | 本地没了 | `shelf pull --force` 或 `shelf forget` |
+| `mirror-ahead` | 副本改过、正本没动（2.1 起不自动收进正本） | 给用户看差异；要留 → `push <正本> --take-mirror`，不要 → `pull <正本> --force` |
 | `mirror-mismatch` | 正本与副本各改各的 | 用户定以哪份为准 |
 | `untracked-differs` | 本地有同名文件、没记过账、内容不同 | 用户选货架版或本地版 |
 
@@ -66,10 +67,10 @@
 ## 没装 shelf 的机器、worktree、Multica
 
 - 装：`npm i -g @jackss119/shelf`，之后 `shelf init`
-- 装不了或没网：`bash ai/scripts/sync-worktree.sh`（建技能链接、经 `protocol-mirror.sh` 让根目录协议副本和 `ai/jaAgents` 正本一致、复制主检出的 `.mcp.json` 与 `.claude/settings.json`（钩子在里面）、补主检出里被 git 忽略的 `.env` 类文件，再跑项目的 `ai/scripts/worktree.local.sh`（有的话）；不对账）
+- 装不了或没网：`bash ai/scripts/sync-worktree.sh`（建技能链接、经 `protocol-mirror.sh` 让根目录协议副本和 `ai/jaAgents` 正本一致、复制主检出的 `.mcp.json`、`.claude/settings.json` 与 `.codex/hooks.json`（钩子在里面）、补主检出里被 git 忽略的 `.env` 类文件，再跑项目的 `ai/scripts/worktree.local.sh`（有的话）；不对账）
 - Multica 的 worktree：`bash ai/scripts/bootstrap.sh`（技能复制进 agent 目录，`MULTICA.md` 复制成根目录协议（已有 runtime 身份简报就追加在它下面），补主检出里被 git 忽略的 `.env` 类文件，再跑项目的 `ai/scripts/worktree.local.sh`）
 
-- 协议副本的钩子：模板的 `.claude/settings.json` 在 `SessionStart` / `UserPromptSubmit` 上挂了 `bash ai/scripts/protocol-mirror.sh --hook`——每条消息都对齐一次 `CLAUDE.md`，会话开场读到的协议过期就往上下文里插一句「先重读」，副本被人改过就提醒走 review；没事时一个字都不打印、约 50ms
+- 协议副本的钩子：模板的 `.claude/settings.json` 在 `SessionStart` / `UserPromptSubmit` 上挂了 `bash ai/scripts/protocol-mirror.sh --hook`——每条消息都对齐一次 `CLAUDE.md`，会话开场读到的协议过期就往上下文里插一句「先重读」，副本被人改过就提醒走 review；没事时一个字都不打印、约 50ms。Codex 同理：模板的 `.codex/hooks.json` 挂 `--hook codex`，对齐 `AGENTS.md`；Codex 只跑人信任过的项目钩子，第一次（以及钩子内容改了之后）要用户在 Codex 的 `/hooks` 里点信任，agent 替不了
 
 ## 模板写法（`templates/<名>/template.json`）
 

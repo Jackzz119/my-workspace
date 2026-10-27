@@ -15,7 +15,7 @@ shelf 是个人内容货架：一个 git 仓库（货架）放技能、协议和
 - **从不等键盘**：要确认的操作退出 2，`next` 里给出带 `--yes` 的原命令。
 - **模板**：货架上的 `templates/ai` 是 AI 工作流模板（协议、通用技能与 project-audit、技能登记表、worktree 与 Multica 开工脚本、文档骨架）。`shelf template show ai` 列出它会装哪些货、落在哪、会建哪些固定目录。
 - **项目布局**（ai 区的目录名记在账本 `aiDir`：.NET / C# 项目是 `AI`，其余是 `ai`）：
-  - `ai/jaAgents/CLAUDE.md`、`AGENTS.md` 是协议正本（入库）；根目录 `CLAUDE.md` / `AGENTS.md` 是给 agent 读的副本（gitignore）。**副本和正本永远一致**（用户 2026-10-26 定，没有「追加」）：正本更新了、副本没人动过 → `ai/scripts/protocol-mirror.sh` 用正本覆盖副本（Claude Code 的钩子每条消息都查一次，本会话读到的协议过期就提醒重读）；**副本被人改过** → 两份都不动，先用 `git diff --no-index ai/jaAgents/<名> <名>` 给用户看，用户确认后才同步回正本、再 `shelf push`（推前照样给清单）。shelf 的「只改了一份就同步给另一份」也照这条：副本 → 正本方向一律先问。两份各改各的停下（`mirror-mismatch`）
+  - `ai/jaAgents/CLAUDE.md`、`AGENTS.md` 是协议正本（入库）；根目录 `CLAUDE.md` / `AGENTS.md` 是给 agent 读的副本（gitignore）。**副本和正本永远一致**（用户 2026-10-26 定，没有「追加」）：正本更新了、副本没人动过 → `ai/scripts/protocol-mirror.sh` 用正本覆盖副本（Claude Code 与 Codex 的钩子每条消息都查一次，本会话读到的协议过期就提醒重读）；**副本被人改过** → 两份都不动，先用 `git diff --no-index ai/jaAgents/<名> <名>` 给用户看，用户确认后才 `shelf push ai/jaAgents/<名> --take-mirror`（收进正本再推，推前照样给清单）。shelf 2.1 起 CLI 自己也守这条：副本改过、正本没动是 `mirror-ahead`，`sync` 列待决、`pull` 不动、`push` / `merge` 列差异退出 2，**没有用户确认不加 `--take-mirror`**；不要副本的改动就 `shelf pull ai/jaAgents/<名> --force`。两份各改各的停下（`mirror-mismatch`）
   - `ai/jaSkills/<名>/` 是技能唯一正本，`.claude/skills`、`.agents/skills` 是指向它的链接
   - `ai/features/`、`ai/sessions/`、`ai/design_system/` 下的 `concept/ img/ uiux/ codex-visual/`、`ai/project-audit/` 下的 `runs/ scripts/` 是固定目录：各技能在 frontmatter 里声明，init / sync 缺了就建
   - `ai/JASKILL.md`、`ai/PROJECT.md`、`ai/TODO.md`、`ai/check-docs.json`、`.claude/settings.json`、`.worktreeinclude` 是植入物：装一次，之后归项目，shelf 不对账、不推
@@ -44,6 +44,7 @@ shelf 是个人内容货架：一个 git 仓库（货架）放技能、协议和
 |---|---|---|
 | `removed` / `ambiguous` | 货架上下架了 / 找到多个同名 | 问用户；不要了就 `shelf forget <路径>` |
 | `local-missing` | 账本里有、本地没了 | 问用户：拿回来 `shelf pull <路径> --force`，不要了 `shelf forget <路径>` |
+| `mirror-ahead` | 根目录副本改过、正本没动 | 用 `next` 里的 `git diff` 给用户看；用户要留 → `shelf push <正本> --take-mirror`，不要 → `shelf pull <正本> --force` |
 | `mirror-mismatch` | 正本和根目录副本各改各的 | 用 `next` 里的 `git diff` 给用户看，用户定以哪份为准、改成一致后再 sync |
 | `untracked-differs` | 模板要装的货本地已有同名、内容不同、没记过账 | 先看差异：`git diff --no-index <localPath> <shelf home 给的 data.shelfDir>/<key>`，讲给用户；用货架版跑 `next` 第一条（`pull … --force`，按模板落点装），用本地版跑第二条（`push … --yes`——它会成为模板内容，所有项目跟着变，推前讲清楚） |
 
