@@ -20,7 +20,7 @@
     const NUM = /^(?:§\s*)?(\d+(?:\.\d+)*|[一二三四五六七八九十百]+(?=、)|[A-Z]{1,3}-?\d+(?:\.\d+)*)/; // 4.1 三 E1 PA-071
     const HL = !!(window.CSS && CSS.highlights && window.Highlight); // text marks; without it the block gets a pin
     const S = { notes: [], marks: new Map(), maps: new Map(), pinned: [], marked: [] };
-    let root, ring, pins, chip, banner, pill, list, badge, scrim, toastEl, hovered, raf, timer;
+    let root, ring, pins, chip, banner, pill, list, copier, badge, scrim, toastEl, hovered, raf, timer;
 
     const DARK = `--ann-bg:#27242c;--ann-fg:#f3eee6;--ann-mute:#aea6b4;--ann-line:#ffffff2e;--ann-soft:#35313b;--ann-hi:#f2a65e;
 --ann-ink:#24170b;--ann-ring:#f6a55c;--ann-wash:#f6a55c24;--ann-bad:#ff8f86;--ann-sh:0 12px 32px -10px #000d;color-scheme:dark`;
@@ -42,6 +42,8 @@ font:15px/1.55 system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-seri
 .ann-dock{position:fixed;right:max(14px,env(safe-area-inset-right));bottom:var(--ann-b);display:flex;gap:8px}
 .ann-btn{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 16px;border-radius:22px;font-weight:600}
 .ann-dock .ann-btn{min-width:44px;min-height:44px}
+.ann-copy{gap:0}
+@media (max-width:370px){.ann-wide{display:none}}
 .ann-pill[aria-pressed=true],.ann-primary,.ann-pin,.ann-badge{border-color:transparent;background:var(--ann-hi);color:var(--ann-ink)}
 .ann-badge{min-width:20px;padding:0 6px;border-radius:10px;font-size:12px;line-height:20px;text-align:center}
 .ann-banner,.ann-toast,.ann-chip{position:fixed;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 24px);
@@ -124,7 +126,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
 @media (prefers-reduced-motion:reduce){.ann-flash{animation:none}}`;
     // static markup; page and reader text goes in through textContent only
     const X = '<button type="button" class="ann-x" aria-label="关闭">✕</button>';
-    const ROOT = `<div class="ann-root"><style>${STYLE}</style><div class="ann-pins"></div><div class="ann-ring" hidden></div><button type="button" class="ann-chip" hidden>批注这段</button><div class="ann-banner" hidden></div><div class="ann-dock"><button type="button" class="ann-btn ann-free">留言</button><button type="button" class="ann-btn ann-list" hidden>清单<span class="ann-badge"></span></button><button type="button" class="ann-btn ann-pill" aria-pressed="false"></button></div><div class="ann-toast" role="status" hidden></div><div class="ann-scrim" hidden></div></div>`;
+    const ROOT = `<div class="ann-root"><style>${STYLE}</style><div class="ann-pins"></div><div class="ann-ring" hidden></div><button type="button" class="ann-chip" hidden>批注这段</button><div class="ann-banner" hidden></div><div class="ann-dock"><button type="button" class="ann-btn ann-free">留言</button><button type="button" class="ann-btn ann-list" hidden>清单<span class="ann-badge"></span></button><button type="button" class="ann-btn ann-copy" aria-label="复制全部批注" hidden>复制<span class="ann-wide">全部</span></button><button type="button" class="ann-btn ann-pill" aria-pressed="false"></button></div><div class="ann-toast" role="status" hidden></div><div class="ann-scrim" hidden></div></div>`;
     const COMPOSER = `<div class="ann-panel ann-composer" role="dialog" aria-label="写批注"><div class="ann-head"><span class="ann-loc"></span>${X}</div><blockquote class="ann-quote"></blockquote><textarea class="ann-ta" rows="4" enterkeyhint="done" placeholder="写下你的意见…（回车存下，Shift+回车换行）" aria-label="批注内容"></textarea><div class="ann-imgs" hidden></div><p class="ann-hint" aria-live="polite"></p><div class="ann-row"><input type="file" accept="image/*" multiple hidden><button type="button" class="ann-btn ann-pic" hidden>图片</button><button type="button" class="ann-btn ann-primary">存下来</button></div></div>`;
     const DRAWER = `<div class="ann-panel ann-drawer" role="dialog" aria-label="批注清单"><div class="ann-head"><strong></strong>${X}</div><p class="ann-hint" aria-live="polite"></p><ol class="ann-items"></ol><textarea class="ann-ta" readonly hidden aria-label="批注清单全文"></textarea><div class="ann-row ann-acts"></div></div>`;
     const ITEM = `<li class="ann-item"><div class="ann-meta"><span class="ann-loc"></span></div><button type="button" class="ann-jump" title="跳到原处"><span class="ann-quote"></span></button><div class="ann-note"></div><div class="ann-imgs" hidden></div></li>`;
@@ -394,7 +396,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         for (const el of S.marked) el.setAttribute('data-ann-mark', '');
         if (HL) CSS.highlights.set('ann', new Highlight(...ranges));
         badge.textContent = S.notes.length;
-        list.hidden = !S.notes.length;
+        list.hidden = copier.hidden = !S.notes.length;
         renderPins();
     };
     const renderPins = () => {
@@ -701,14 +703,19 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         paint();
         openDrawer();
     };
+    // from the list, or from the dock without opening it (`manual` and `hint` not given)
     const copy = async (manual, hint, text = exportText()) => {
         try {
             await navigator.clipboard.writeText(text);
-            // copied: the list has done its job, so it closes
-            closePanel();
+            // copied: an open list has done its job, so it closes; a note being written stays
+            if (S.panel && S.panel.matches('.ann-drawer')) closePanel();
             return toast('已复制，粘贴到对话里就行');
         } catch {
-            // no async clipboard (some app views, plain http): select the text for a manual copy
+            // no async clipboard (some app views, plain http): select the text for a manual copy, in the list
+        }
+        if (!manual) {
+            openDrawer();
+            [hint, manual] = $(S.panel, '.ann-hint textarea');
         }
         Object.assign(manual, { hidden: false, value: text }).focus();
         manual.setSelectionRange(0, text.length);
@@ -805,14 +812,15 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         S.volatile = !attempt(() => (localStorage.setItem(probe, 1), localStorage.removeItem(probe), 1));
         root = make(ROOT);
         const parts =
-            '.ann-pins .ann-ring .ann-chip .ann-banner .ann-free .ann-list .ann-badge .ann-pill .ann-toast .ann-scrim';
+            '.ann-pins .ann-ring .ann-chip .ann-banner .ann-free .ann-list .ann-copy .ann-badge .ann-pill .ann-toast .ann-scrim';
         let free;
-        [pins, ring, chip, banner, free, list, badge, pill, toastEl, scrim] = $(root, parts);
+        [pins, ring, chip, banner, free, list, copier, badge, pill, toastEl, scrim] = $(root, parts);
         pill.textContent = cfg.label;
         banner.textContent = `点一下要批注的内容 · 再点「${cfg.label}」退出`;
         pill.onclick = () => closePanel() || setPicking(!S.picking);
         free.onclick = () => openComposer({ kind: 'n' });
         list.onclick = () => (S.panel && S.panel.matches('.ann-drawer') ? closePanel() : openDrawer());
+        copier.onclick = () => copy();
         // the tap that opened a sheet must not close it again through the scrim
         scrim.onclick = () => Date.now() - S.shown > 400 && !typed() && closePanel();
         chip.onmousedown = (e) => e.preventDefault(); // keep the selection on desktop
