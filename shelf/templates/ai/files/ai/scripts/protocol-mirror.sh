@@ -5,15 +5,17 @@
 #
 #   bash <ai>/scripts/protocol-mirror.sh --sync [--agent claude|codex|all] [--dry-run]
 #       给 sync-worktree.sh 用：逐份对齐副本，打印给人看的一行结论
-#   bash <ai>/scripts/protocol-mirror.sh --hook
-#       Claude Code 的 SessionStart / UserPromptSubmit 钩子（模板的 .claude/settings.json 已配好）：
-#       对齐 CLAUDE.md，并在本会话读到的协议已经过期时提醒重读。打印的内容会进入模型上下文；没事时什么都不打印
+#   bash <ai>/scripts/protocol-mirror.sh --hook [claude|codex]
+#       SessionStart / UserPromptSubmit 钩子：claude（默认）对齐 CLAUDE.md，由模板的 .claude/settings.json 挂上；
+#       codex 对齐 AGENTS.md，由模板的 .codex/hooks.json 挂上（Codex 要在 /hooks 里信任一次才会跑）。
+#       本会话读到的协议已经过期时提醒重读。两边都把钩子打印的文字放进模型上下文；没事时什么都不打印
 #
 # 规则（用户 2026-10-26 定：根副本和正本永远一致，没有「追加」）：
 #   - 副本不存在 → 从正本创建
 #   - 副本 = 正本 → 不动
 #   - 正本更新了、副本没被人动过（等于上次同步时记下的指纹，或等于正本的某个历史版本）→ 用正本覆盖副本
-#   - 副本被人改过 → 两份都不动，报告：先把 diff 给用户看，用户确认后才同步回正本并 shelf push；
+#   - 副本被人改过 → 两份都不动，报告：先把 diff 给用户看，用户确认后才同步回正本并推货架
+#     （shelf push <ai>/jaAgents/<名> --take-mirror，shelf 2.1 起副本 → 正本同样要这个确认）；
 #     不要副本的改动 → 用户确认后加 --take-source 用正本覆盖
 #   - Multica 由 bootstrap.sh 生成的协议（首行带生成标记）不归这里管
 # 指纹记在本检出自己的 git 目录里（<git-dir>/ai-mirror/），不进提交、不用 gitignore；每个 worktree 各一份。
@@ -26,11 +28,11 @@ AI_DIR="$(sed -n 's/^[[:space:]]*"aiDir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\
 GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
 STATE="$GIT_DIR/ai-mirror"
 
-MODE=""; AGENT="all"; DRY=0; TAKE=0
+MODE=""; AGENT="all"; DRY=0; TAKE=0; HOOK_AGENT="claude"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sync) MODE="sync"; shift ;;
-    --hook) MODE="hook"; shift ;;
+    --hook) MODE="hook"; shift; [[ "${1:-}" == claude || "${1:-}" == codex ]] && { HOOK_AGENT="$1"; shift; } ;;
     --agent) AGENT="${2:-}"; shift 2 ;;
     --agent=*) AGENT="${1#*=}"; shift ;;
     --dry-run) DRY=1; shift ;;
@@ -88,7 +90,7 @@ if [[ "$MODE" == "sync" ]]; then
         drift=1
         echo "⚠ ${name} 和正本 $AI_DIR/jaAgents/$name 不一致，而且副本被人改过：两份都没动。"
         echo "  先把差异给用户看：git diff --no-index $AI_DIR/jaAgents/$name $name"
-        echo "  用户确认要留副本的改动 → 复制回正本，再 shelf push $AI_DIR/jaAgents/$name（推货架前同样先看清单）；"
+        echo "  用户确认要留副本的改动 → shelf push $AI_DIR/jaAgents/$name --take-mirror（收进正本再推；推货架前同样先看清单）；"
         echo "  用户确认不要 → bash $AI_DIR/scripts/protocol-mirror.sh --sync --agent $( [[ $name == CLAUDE.md ]] && echo claude || echo codex) --take-source"
         ;;
     esac
@@ -101,7 +103,8 @@ INPUT="$(cat 2>/dev/null || true)"
 field() { printf '%s' "$INPUT" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1; }
 SESSION="$(field session_id | tr -cd 'A-Za-z0-9_-')"
 EVENT="$(field hook_event_name)"
-NAME="CLAUDE.md"
+SOURCE="$(field source)"   # SessionStart 的来由：startup / resume / clear / compact（Codex 另有 fork）
+NAME="CLAUDE.md"; [[ "$HOOK_AGENT" == codex ]] && NAME="AGENTS.md"
 [[ -f "$AI_DIR/jaAgents/$NAME" ]] || exit 0
 
 before="$(sha_of "$NAME" 2>/dev/null || true)"
@@ -114,6 +117,8 @@ SESSION_FILE="$STATE/session-${SESSION:-unknown}"
 loaded=""
 if [[ "$EVENT" == "SessionStart" ]]; then
   loaded="$before"                       # 会话开场读到的是对齐之前那一版
+  # 续上的老会话，上下文里还是当初那一版协议：按当时记下的算
+  if [[ "$SOURCE" == "resume" && -s "$SESSION_FILE" ]]; then loaded="$(cat "$SESSION_FILE")"; fi
   # 只留最近 50 个会话的记录
   ls -t "$STATE"/session-* 2>/dev/null | tail -n +51 | while IFS= read -r old; do rm -f "$old"; done
 else
@@ -122,11 +127,11 @@ else
 fi
 
 if [[ "$RESULT" == "drift" ]]; then
-  if [[ "$(cat "$STATE/drift-notified" 2>/dev/null)" != "$after" ]]; then
+  if [[ "$(cat "$STATE/drift-notified-$NAME" 2>/dev/null)" != "$after" ]]; then
     echo "【协议副本被改过】根目录 $NAME 和正本 $AI_DIR/jaAgents/$NAME 不一致，而且副本被人改过（不是旧版本）。"
     echo "按 shelf-ops「根副本与正本」：先用 git diff --no-index $AI_DIR/jaAgents/$NAME $NAME 把差异给用户看；"
-    echo "用户确认后才把改动同步回正本并 shelf push（推前同样先给清单）。确认之前两份都不要改。"
-    printf '%s' "$after" > "$STATE/drift-notified"
+    echo "用户确认后才收进正本并推货架：shelf push $AI_DIR/jaAgents/$NAME --take-mirror（推前同样先给清单）。确认之前两份都不要改。"
+    printf '%s' "$after" > "$STATE/drift-notified-$NAME"
   fi
 elif [[ -n "$loaded" && "$loaded" != "$after" ]]; then
   echo "【协议已更新】本会话开场时读的根目录 $NAME 已经过期：正本 $AI_DIR/jaAgents/$NAME 改过了$( [[ "$RESULT" == refreshed ]] && echo '，副本刚已换成最新版' )。"
