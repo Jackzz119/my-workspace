@@ -497,9 +497,13 @@ async function handleRun(argv) {
     return;
   }
 
-  if (!parsed.brief) {
-    console.error("Usage: node scripts/codex-visual.mjs run [--mode auto|audit|design|compare] [--model <slug>] [--image-model <gpt-image-...>] [--ignore-quota] [--out <dir>] [--target <image> ...] [--candidate <image> ...] [--ref <image> ...] <brief>");
-    process.exitCode = 1;
+  // a brief that is only a help flag would start a real Codex run on the words "--help"
+  const asksHelp = /^(--help|-h|help|\/\?)$/i.test((parsed.brief ?? "").trim());
+  if (!parsed.brief || asksHelp) {
+    const usage = "Usage: node scripts/codex-visual.mjs run [--mode auto|audit|design|compare] [--model <slug>] [--image-model <gpt-image-...>] [--ignore-quota] [--out <dir>] [--target <image> ...] [--candidate <image> ...] [--ref <image> ...] <brief>";
+    if (asksHelp) console.log(usage);
+    else console.error(usage);
+    process.exitCode = asksHelp ? 0 : 1;
     return;
   }
 
