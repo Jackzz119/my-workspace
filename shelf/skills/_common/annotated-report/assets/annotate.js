@@ -59,7 +59,6 @@ padding:8px 14px;border:0;border-radius:18px;background:var(--ann-fg);color:var(
 font-weight:700;line-height:20px}
 .ann-scrim{position:fixed;inset:0;background:#0007}
 .ann-panel{display:flex;flex-direction:column;gap:10px;padding:14px 16px 16px;border-radius:14px;overflow:auto;overscroll-behavior:contain}
-.ann-pop{position:absolute;width:min(380px,calc(100vw - 16px));max-height:min(72vh,560px)}
 .ann-side{position:fixed;right:14px;bottom:70px;width:400px;max-height:74vh}
 .ann-side.ann-composer{max-height:min(74vh,640px)}
 .ann-composer>*{flex-shrink:0}
@@ -113,9 +112,7 @@ img:not(.ann-root img){cursor:zoom-in}
 @keyframes ann-sheet{from{translate:0 100%}}
 @keyframes ann-fade{from{opacity:0}}
 @keyframes ann-dot{from{scale:0}}
-.ann-pop,.ann-side{animation:ann-pop .54s var(--ann-spring) both}
-.ann-pop{transform-origin:24px 0}
-.ann-side{transform-origin:100% 100%}
+.ann-side{animation:ann-pop .54s var(--ann-spring) both;transform-origin:100% 100%}
 .ann-sheet{animation:ann-sheet .54s var(--ann-spring) both}
 @keyframes ann-drop{from{translate:0 -110%}}
 .ann-sheet.ann-top{animation-name:ann-drop}
@@ -265,7 +262,6 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         ta.style.height = 'auto';
         ta.style.height = `${ta.scrollHeight + ta.offsetHeight - ta.clientHeight}px`;
         box.scrollTop = y;
-        stay();
     };
     // a note field: Enter saves, Shift+Enter breaks the line, and an Enter that commits an IME candidate does neither;
     // Escape runs `cancel` when given. Listeners, not on* properties: an on* handler that returns false cancels the key
@@ -358,7 +354,6 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         return el.closest('input,textarea,[contenteditable]') ? null : { range: range.cloneRange(), text, el };
     };
     const fromSelection = (s) => target(blockOf(s.el) || s.el, clip(s.text, 1000), s.range);
-    const below = (r) => ({ x: r.left, y: r.bottom });
 
     // Marks. A text note is found again by its words (whitespace ignored; the hit nearest its old offset), in its
     // block first and then anywhere on the page. An element note, or text no longer found, outlines its element.
@@ -498,7 +493,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         return t;
     };
 
-    const openComposer = (t, pt) => {
+    const openComposer = (t) => {
         closePanel();
         hideChip();
         const panel = make(COMPOSER);
@@ -513,7 +508,6 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         const showPics = () => {
             imgs.replaceChildren(...pics.map((p) => thumb(p.url, () => unpick(p))));
             imgs.hidden = !pics.length;
-            stay();
         };
         const take = async (files) => {
             for (const f of [...files].filter((f) => /^image\//.test(f.type))) {
@@ -557,7 +551,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         };
         field(ta, () => store.click());
         Object.assign(S, { t, ta, pics });
-        show(panel, pt);
+        show(panel);
         if (t.el) frame(ring, t.el);
         ring.hidden = !(hovered = t.el || null);
         ta.focus({ preventScroll: true });
@@ -578,30 +572,17 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         toast(S.volatile ? '记下了，但这里存不住，刷新前记得复制' : '记下了');
     };
 
-    const show = (panel, pt) => {
+    // Every panel opens in the same fixed place, never by what is being noted: what it covers scrolls back into view
+    const show = (panel) => {
         const narrow = innerWidth <= 640;
         scrim.hidden = !narrow;
-        panel.classList.add(narrow ? 'ann-sheet' : pt ? 'ann-pop' : 'ann-side');
+        panel.classList.add(narrow ? 'ann-sheet' : 'ann-side');
         // writing on a phone: the keyboard takes the lower half, so the box hangs from the top instead
         if (narrow && panel.matches('.ann-composer')) panel.classList.add('ann-top');
         panel.querySelector('.ann-x').onclick = closePanel;
         root.append((S.panel = panel));
         S.shown = Date.now();
-        if (narrow || !pt) return fit();
-        const [o, w, h] = [root.getBoundingClientRect(), panel.offsetWidth, panel.offsetHeight];
-        let y = pt.y + 14 + h > innerHeight - 8 ? pt.y - 14 - h : pt.y + 14;
-        if (y < 8) y = Math.max(8, innerHeight - h - 8);
-        const x = Math.min(Math.max(8, pt.x - 20), document.documentElement.clientWidth - w - 8);
-        place(panel, x - o.left, y - o.top);
-        S.spot = y < pt.y ? { up: true, y: y + h - o.top } : { up: false, y: y - o.top };
-    };
-    // A box by its spot changes height as it is written in: one opened above the spot keeps its lower edge there, one
-    // below keeps its upper edge, and neither leaves the screen. Offsets, not rects: it may still be springing in.
-    const stay = (p = S.panel) => {
-        if (!p || !p.matches('.ann-pop')) return;
-        const [top, h] = [root.getBoundingClientRect().top, p.offsetHeight];
-        const y = S.spot.y + top - (S.spot.up ? h : 0);
-        p.style.top = `${Math.max(8, Math.min(y, innerHeight - h - 8)) - top}px`;
+        fit();
     };
     // Keep a sheet in what the eye sees. Fixed panels stand in the layout viewport (clientHeight); iPhone's
     // innerHeight shrinks with the keyboard, so it cannot tell how far the keyboard covers. In a frame (an
@@ -794,9 +775,8 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         e.stopImmediatePropagation();
         if (typed()) return S.ta.focus(); // a half-written note is not dropped by a tap elsewhere
         const [s, el] = [selInfo(), blockOf(e.target)];
-        const at = e.detail ? { x: e.clientX, y: e.clientY } : el && below(el.getBoundingClientRect());
-        if (s) openComposer(fromSelection(s), below(s.range.getBoundingClientRect()));
-        else if (el) openComposer(target(el, summary(el)), at);
+        if (s) openComposer(fromSelection(s));
+        else if (el) openComposer(target(el, summary(el)));
     };
     const onDown = (e) => {
         S.pointer = e.pointerType;
@@ -852,7 +832,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         // the tap that opened a sheet must not close it again through the scrim
         scrim.onclick = () => Date.now() - S.shown > 400 && !typed() && closePanel();
         chip.onmousedown = (e) => e.preventDefault(); // keep the selection on desktop
-        chip.onclick = () => S.sel && openComposer(fromSelection(S.sel), below(S.sel.range.getBoundingClientRect()));
+        chip.onclick = () => S.sel && openComposer(fromSelection(S.sel));
         // keys pressed inside the layer stay there: the page's own shortcuts never see them
         for (const type of ['keydown', 'keypress', 'keyup'])
             root.addEventListener(type, (e) => (e.stopPropagation(), type === 'keydown' && onKey(e)));
