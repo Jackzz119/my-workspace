@@ -257,8 +257,6 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         });
         return b;
     };
-    // a note field: Enter saves, Shift+Enter breaks the line, and an Enter that commits an IME candidate does neither;
-    // Escape runs `cancel` when given. Listeners, not on* properties: an on* handler that returns false cancels the key
     // A box as tall as what is written in it, up to what its panel allows (then it scrolls inside). Taking the height
     // away to measure can pull a scrolled panel back, so its position is put back too.
     const grow = (ta) => {
@@ -269,6 +267,8 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         box.scrollTop = y;
         stay();
     };
+    // a note field: Enter saves, Shift+Enter breaks the line, and an Enter that commits an IME candidate does neither;
+    // Escape runs `cancel` when given. Listeners, not on* properties: an on* handler that returns false cancels the key
     const field = (ta, save, cancel) => {
         let composing = false;
         ta.addEventListener('input', () => grow(ta));
