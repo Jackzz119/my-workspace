@@ -61,6 +61,8 @@ font-weight:700;line-height:20px}
 .ann-panel{display:flex;flex-direction:column;gap:10px;padding:14px 16px 16px;border-radius:14px;overflow:auto;overscroll-behavior:contain}
 .ann-pop{position:absolute;width:min(380px,calc(100vw - 16px));max-height:min(72vh,560px)}
 .ann-side{position:fixed;right:14px;bottom:70px;width:400px;max-height:74vh}
+.ann-side.ann-composer{max-height:min(74vh,640px)}
+.ann-composer>*{flex-shrink:0}
 .ann-sheet{position:fixed;left:0;right:0;bottom:0;max-height:80vh;border-radius:16px 16px 0 0;padding-bottom:var(--ann-b)}
 .ann-sheet.ann-top{top:max(8px,env(safe-area-inset-top));bottom:auto;left:8px;right:8px;border-radius:16px;padding-bottom:16px}
 .ann-head,.ann-row,.ann-meta{display:flex;align-items:center;gap:8px}
@@ -73,7 +75,11 @@ font-weight:700;line-height:20px}
 .ann-jump{display:block;width:100%;padding:0;border:0;background:none;color:inherit;text-align:left}
 .ann-quote{margin:0;padding:6px 10px;border-left:3px solid var(--ann-ring);border-radius:4px;background:var(--ann-soft);font-size:14px;
 display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden}
-.ann-ta{display:block;width:100%;min-height:96px;padding:10px 12px;border-radius:10px;font-size:16px;resize:vertical}
+.ann-ta{display:block;width:100%;min-height:96px;padding:10px 12px;border-radius:10px;font-size:16px;resize:none}
+.ann-ta[readonly]{resize:vertical}
+.ann-composer>.ann-ta{flex-shrink:1}
+.ann-item .ann-ta{max-height:min(40vh,360px)}
+.ann-sheet .ann-item .ann-ta{max-height:15vh}
 .ann-btn:disabled{opacity:.45;cursor:default}
 .ann-items{display:grid;gap:10px;margin:0;padding:0;list-style:none}
 .ann-item{display:grid;gap:6px;padding:6px 12px 10px;border-radius:10px}
@@ -253,8 +259,19 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
     };
     // a note field: Enter saves, Shift+Enter breaks the line, and an Enter that commits an IME candidate does neither;
     // Escape runs `cancel` when given. Listeners, not on* properties: an on* handler that returns false cancels the key
+    // A box as tall as what is written in it, up to what its panel allows (then it scrolls inside). Taking the height
+    // away to measure can pull a scrolled panel back, so its position is put back too.
+    const grow = (ta) => {
+        const box = ta.closest('.ann-panel');
+        const y = box.scrollTop;
+        ta.style.height = 'auto';
+        ta.style.height = `${ta.scrollHeight + ta.offsetHeight - ta.clientHeight}px`;
+        box.scrollTop = y;
+        stay();
+    };
     const field = (ta, save, cancel) => {
         let composing = false;
+        ta.addEventListener('input', () => grow(ta));
         ta.addEventListener('compositionstart', () => (composing = true));
         ta.addEventListener('compositionend', () => setTimeout(() => (composing = false)));
         ta.addEventListener('keydown', (e) => {
@@ -496,6 +513,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         const showPics = () => {
             imgs.replaceChildren(...pics.map((p) => thumb(p.url, () => unpick(p))));
             imgs.hidden = !pics.length;
+            stay();
         };
         const take = async (files) => {
             for (const f of [...files].filter((f) => /^image\//.test(f.type))) {
@@ -575,6 +593,15 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         if (y < 8) y = Math.max(8, innerHeight - h - 8);
         const x = Math.min(Math.max(8, pt.x - 20), document.documentElement.clientWidth - w - 8);
         place(panel, x - o.left, y - o.top);
+        S.spot = y < pt.y ? { up: true, y: y + h - o.top } : { up: false, y: y - o.top };
+    };
+    // A box by its spot changes height as it is written in: one opened above the spot keeps its lower edge there, one
+    // below keeps its upper edge, and neither leaves the screen. Offsets, not rects: it may still be springing in.
+    const stay = (p = S.panel) => {
+        if (!p || !p.matches('.ann-pop')) return;
+        const [top, h] = [root.getBoundingClientRect().top, p.offsetHeight];
+        const y = S.spot.y + top - (S.spot.up ? h : 0);
+        p.style.top = `${Math.max(8, Math.min(y, innerHeight - h - 8)) - top}px`;
     };
     // Keep a sheet in what the eye sees. Fixed panels stand in the layout viewport (clientHeight); iPhone's
     // innerHeight shrinks with the keyboard, so it cannot tell how far the keyboard covers. In a frame (an
@@ -690,6 +717,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         // editing in the phone's list: the list moves up out of the keyboard's way, this note in view
         const sheet = li.closest('.ann-sheet');
         if (sheet) (sheet.classList.add('ann-top', 'ann-still'), fit());
+        grow(ta);
         ta.focus();
         ta.scrollIntoView({ block: 'nearest' });
     };
@@ -840,7 +868,13 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         for (const type of ['mousedown', 'mouseup', 'touchstart', 'touchend']) addEventListener(type, swallow, passive);
         addEventListener('pointermove', onMove, passive);
         addEventListener('keydown', onKey);
-        addEventListener('resize', () => (hideChip(), fit(), later()));
+        addEventListener('resize', () => {
+            hideChip();
+            fit();
+            later();
+            // a new width wraps the text differently
+            if (S.panel) S.panel.querySelectorAll('.ann-ta:not([readonly])').forEach((ta) => grow(ta));
+        });
         addEventListener('load', paint); // late images and fonts move things: marks and pins again
         // inner scrollers and late layout move the pins
         addEventListener('scroll', (e) => e.target !== document && later(), passive);
