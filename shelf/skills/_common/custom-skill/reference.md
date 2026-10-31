@@ -94,6 +94,35 @@ metadata:                         # 可选，自定义键值（开放标准字�
 
 ---
 
+## 技能里的脚本
+
+技能目录里的脚本（`scripts/`、`assets/` 下的 `.mjs` 等）由 agent 按技能目录的路径执行，而技能目录在项目里通常是一条链接（如 `.claude/skills` 指向真源），脚本拿到的就是**链接路径**；仓库本身放在链接目录下时也一样（macOS 的 `/tmp` 其实是 `/private/tmp`）。凡是拿「自己的路径」去比较的写法，都要先解析成真实路径。
+
+**判断自己是被直接执行还是被 import**（脚本既当命令行工具、又给别的代码 import 时才需要）：
+
+```js
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+// 经链接执行时，argv[1] 保留链接路径，import.meta.url 却是真实路径：两边都先解析成真实路径再比
+function isMain() {
+    try {
+        return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+    } catch {
+        return false;
+    }
+}
+
+if (isMain()) main();
+```
+
+- 不要写 `import.meta.url === pathToFileURL(process.argv[1]).href`，也不要先 `path.resolve(process.argv[1])` 再比：`path.resolve` 不顺着链接找真实路径，经链接执行时两边永远不等，脚本**静默不跑、也不报错**，退出码还是 0，是最难发现的一种失败。
+- `import.meta.main` 只在确认所有会跑这个脚本的机器上 Node 都支持时才用：不支持的版本上它是 `undefined`，同样静默不跑。
+- 最好让入口文件只当入口（只调用 `main()`），要给别人 import 的函数放进另一个文件，这样根本用不着这道判断。
+- 改完经技能目录的链接路径实际跑一次，确认主体真的执行了，不能只看退出码。
+
+---
+
 ## 质量检查清单
 
 创建完 skill 后，自检以下项目：
@@ -107,6 +136,7 @@ metadata:                         # 可选，自定义键值（开放标准字�
 - [ ] 参数用法有说明（如果接收 `$ARGUMENTS`）
 - [ ] 涉及文件修改的 skill：改动按宿主协议的报告规范交代（逐文件给出改了什么）；不可逆或越出授权的动作前有确认节点
 - [ ] 用到项目 ai 区固定目录的 skill：frontmatter 的 `metadata.shelf-scaffold` 与正文「固定目录」一节写的是同一组目录
+- [ ] 带脚本的 skill：要判断「被直接执行还是被 import」的，两边都用 `fs.realpathSync` 解析成真实路径再比（见上方「技能里的脚本」），并经技能目录的链接路径实际跑过一次
 
 ---
 
