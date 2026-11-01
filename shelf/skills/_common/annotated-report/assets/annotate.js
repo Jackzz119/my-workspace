@@ -788,6 +788,10 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         const [down, x, y] = [S.down, e.clientX, e.clientY];
         S.down = null;
         if (S.picking) return inUI(e.target) || e.stopPropagation();
+        // a tap beside the open list closes it, as the scrim does on a phone; a drag that selects text does not
+        const tap = down && Math.hypot(x - down[0], y - down[1]) <= 8;
+        if (S.panel && S.panel.matches('.ann-drawer') && tap && !inUI(e.target) && Date.now() - S.shown > 300)
+            return closePanel();
         if (!HL || S.panel || !down || inUI(e.target) || Math.hypot(x - down[0], y - down[1]) > 8) return;
         if (e.target.closest && e.target.closest('a,button,input,select,textarea,summary,label')) return;
         const within = (r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
