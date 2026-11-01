@@ -1,0 +1,94 @@
+{
+    "anchor": "reading",
+    "source": "<art source folder>/source",
+    "source_pattern": "hero-{pose}-{eye}.png",
+    "source_single": "hero-{pose}.png",
+    "build": "<art source folder>/build",
+    "runtime": "<public folder>/characters/hero",
+    "url_base": "/characters/hero",
+    "grid": 24,
+    "poses": {
+        "reading": {
+            "blink": true
+        },
+        "glance": {
+            "blink": true
+        },
+        "writing": {
+            "blink": true
+        },
+        "patted": {},
+        "poked": {},
+        "asleep": {
+            "morph": false,
+            "slow": true,
+            "probe": false
+        },
+        "doze-1": {
+            "chain": true,
+            "probe": false
+        },
+        "doze-2": {
+            "chain": true,
+            "probe": false
+        },
+        "sip-1": {
+            "chain": true,
+            "align_to": "reading",
+            "free": ["face", [0, 480, 1536, 1024]]
+        },
+        "sip-2": {
+            "chain": true,
+            "align_to": "reading",
+            "free": ["face", [0, 480, 1536, 1024]],
+            "holds": ["mug"]
+        },
+        "sip-3": {
+            "chain": true,
+            "align_to": "reading",
+            "free": ["face", [0, 480, 1536, 1024]],
+            "hides": ["mug"],
+            "holds": ["mug"]
+        },
+        "sip-4": {
+            "chain": true,
+            "align_to": "reading",
+            "free": ["face", [0, 480, 1536, 1024]],
+            "hides": ["mug"],
+            "blink": true
+        }
+    },
+    "sequences": {
+        "sip": {
+            "frames": ["reading", "sip-1", "sip-2", "sip-3", "sip-4"],
+            "step_ms": 380,
+            "hold_ms": 1600,
+            "back": true
+        },
+        "doze": {
+            "frames": ["reading", "doze-1", "doze-2", "asleep"],
+            "step_ms": 750
+        }
+    },
+    "canvas": {
+        "probes_x": [350, 400, 1150, 1200],
+        "cut_y": 968,
+        "cut_plate_y": 646,
+        "cut_probe_x": []
+    },
+    "hair": {
+        "mode": "dark",
+        "lum_max": 0.3,
+        "by_pose": {
+            "asleep": {
+                "mode": "none"
+            }
+        }
+    },
+    "plate": {
+        "path": "<scene frame the character was designed in>.png"
+    },
+    "parts": {
+        "mug": "<scene part: the mug alone at its place, scene-frame RGBA>.png"
+    }
+}
