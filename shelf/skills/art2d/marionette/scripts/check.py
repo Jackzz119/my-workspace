@@ -6,8 +6,10 @@ over the limit is rejected (the pose ships eyes-open) rather than failing the se
 "accept": "<reason>" in rig.json turns its FAIL into a WARN that names the reason on every run: for a
 known defect that was decided on, never for a new one.
 
-Review: review/check-contact.jpg (every file on a checkerboard, so fake transparency shows) and
-review/check-overlay.jpg (every file at 50% over the anchor, so drift shows as double lines).
+Review: review/check-contact.jpg (every file on a checkerboard, so fake transparency shows),
+review/check-edges.jpg (every file on pure magenta, larger, so a coloured ring along the outline shows: a rim
+light or the background the generator imagined, painted into the soft edge) and review/check-overlay.jpg
+(every file at 50% over the anchor, so drift shows as double lines).
 """
 
 from common import cut_probe, eye_box, first_solid_y, label, load_rgba, on_backdrop, on_checker, outside_change, save_rgb, shrink, solid_change, tile
@@ -24,7 +26,7 @@ def run(ctx, args):
     cut_y = cfg["canvas"]["cut_y"]
     base_probe = {x: first_solid_y(anchor, x) for x in {x for p in cfg["poses"] for x in ctx.probe_columns(p)} | set(probes_x)}
 
-    files, blinks, contact, overlay = [], {}, [], []
+    files, blinks, contact, edges, overlay = [], {}, [], [], []
     worst = "pass"
 
     def grade(level):
@@ -95,6 +97,7 @@ def run(ctx, args):
             entry["status"] = grade(status)
             tag = f"{pose}-{eye} {entry['status'].upper()}"
             contact.append(label(shrink(on_checker(img), 384), tag))
+            edges.append(label(shrink(on_backdrop(img, (255, 0, 255)), 768), tag))
             mix = on_backdrop(anchor) * 0.5 + on_backdrop(img) * 0.5
             overlay.append(label(shrink(mix, 384), f"{pose}-{eye} vs anchor"))
 
@@ -110,6 +113,7 @@ def run(ctx, args):
     ctx.write_record("check", {"size": list(size), "files": files, "blinks": blinks, "status": worst})
     if contact:
         save_rgb(tile(contact, 4), ctx.review / "check-contact.jpg", quality=85)
+        save_rgb(tile(edges, 2), ctx.review / "check-edges.jpg", quality=90)
         save_rgb(tile(overlay, 4), ctx.review / "check-overlay.jpg", quality=85)
 
     for e in files:
