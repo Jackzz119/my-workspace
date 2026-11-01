@@ -183,11 +183,19 @@ def with_parts(f, parts, shape):
     return f * (1 - k) + total / np.maximum(weight, 1)[..., None] * k
 
 
+def seen_colour(img):
+    """The colour a viewer sees, 0..1: the picture over mid grey by its own alpha. Under transparent pixels the
+    stored RGB is anything (an image API leaves halos there), and comparing it would charge a clean morph for
+    colour nobody sees; over grey, transparent-in-both is the same grey and costs nothing."""
+    a = img[..., 3:4] / 255
+    return img[..., :3] / 255 * a + 0.5 * (1 - a)
+
+
 def box_error(src, dst, back, box):
-    """Mean colour error of src warped onto dst, inside box."""
+    """Mean colour error of src warped onto dst, inside box, as seen."""
     x0, y0, x1, y1 = (int(max(0, v)) for v in box)
     warped = remap(src, back)[y0:y1, x0:x1]
-    return float(np.abs(warped[..., :3] / 255 - dst[y0:y1, x0:x1, :3] / 255).mean()) if warped.size else 0.0
+    return float(np.abs(seen_colour(warped) - seen_colour(dst[y0:y1, x0:x1])).mean()) if warped.size else 0.0
 
 
 def covered(ctx, a, b, shape):
@@ -277,7 +285,8 @@ def run(ctx, args):
         for src, dst, back in ((a, b, fba), (b, a, fab)):
             # to show src in dst's geometry, sample src along dst -> src
             warped = remap(imgs[src], back)
-            err = float((np.abs(warped[..., :3] / 255 - imgs[dst][..., :3] / 255).mean(axis=2)[seen]).mean())
+            # only visible colour counts (seen_colour): before 2026-11-01 the RGB under transparent pixels did too
+            err = float((np.abs(seen_colour(warped) - seen_colour(imgs[dst])).mean(axis=2)[seen]).mean())
             solid = (imgs[dst][..., 3] > 128) & seen
             sil = float((((warped[..., 3] > 128) & seen) ^ solid).sum() / max(solid.sum(), 1))
             dirs[f"{src}-{dst}"] = {"err": round(err, 4), "sil": round(sil, 4)}
