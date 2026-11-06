@@ -223,6 +223,10 @@ Multica 任务跑在**独立 worktree** 里，分支形如 `agent/<agent>/<issue
 
 3. **base 分支自己得是绿的。** 红了先修，修好前不要合入新东西。
 
+### 实验记录：agent 分支改用 rebase 合并（2026-11-06，不通过）
+
+用户 2026-11-05 要求把 agent 分支也统一改回 `--rebase`，在 DOUB-177 的 PR #597 上试了一次，GitHub 拒绝：`GraphQL: This branch can't be rebased (mergePullRequest)`。本地复现（临时 worktree 里 `git rebase origin/dev`）在第 2/11 个提交就撞冲突——run 起步的 baseline commit 夹带的 `ai/TODO.md`，后面第一、二轮已 squash 进 dev 的原始提交同样会撞。原因是结构性的：同一个 issue 多轮共用一条 agent 分支，每轮 squash 后分支上仍留着原始提交，再加上只能 `merge origin/dev` 不能 rebase，rebase merge 要逐个重放这些提交，必然冲突。**结论：agent 分支维持 squash**；#597 最终 `gh pr merge --squash` 合入 `d54d28ef`。要 rebase 只有一条路：每轮从 dev 新开干净分支重做提交，但那会丢掉 baseline commit、触发 `agent_error.unknown`，不值。
+
 ## 九、任务派发纪律
 
 ### 新建 issue 默认进 `backlog`
