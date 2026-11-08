@@ -1,0 +1,6 @@
+{
+    "name": "todo-board",
+    "version": "0.4.0",
+    "description": "输入框上方的「待办」按钮：打开这个项目的待办页（claude.ai，没有就建一个），并把待办同步到 ai 区的 board/ 给别的 agent 读。",
+    "types": "./types/index.d.ts"
+}

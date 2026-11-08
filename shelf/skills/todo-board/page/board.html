@@ -1,0 +1,634 @@
+<title>{{name}} 待办</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&display=swap">
+<style>
+/* One narrow column, like an index card on a desk: count and progress on top, the composer, then what is left, then what is done. */
+:root {
+  --paper: #eef1f4;
+  --card: #ffffff;
+  --ink: #1b2330;
+  --muted: #687384;
+  --line: #d9dfe6;
+  --pencil: #3557d4;
+  --leaf: #23935f;
+  --leaf-soft: #dcf2e6;
+  --danger: #c2413a;
+  --shadow: 0 1px 2px rgb(27 35 48 / .06), 0 4px 16px rgb(27 35 48 / .05);
+  --display: "Bricolage Grotesque", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --body: system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --mono: ui-monospace, "SF Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #11151b; --card: #1a2029; --ink: #e5e9ef; --muted: #8d97a6; --line: #2a323e;
+    --pencil: #8aa4ff; --leaf: #4cc48c; --leaf-soft: #17352a; --danger: #ef7a72;
+    --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 6px 20px rgb(0 0 0 / .25);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #11151b; --card: #1a2029; --ink: #e5e9ef; --muted: #8d97a6; --line: #2a323e;
+  --pencil: #8aa4ff; --leaf: #4cc48c; --leaf-soft: #17352a; --danger: #ef7a72;
+  --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 6px 20px rgb(0 0 0 / .25);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { background: var(--paper); }
+body {
+  color: var(--ink); font: 15px/1.55 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 48px;
+}
+.sheet { max-width: 620px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+
+/* header */
+.top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.top h1 { margin: 0; font: 700 26px/1.1 var(--display); letter-spacing: -.01em; text-wrap: balance; }
+.count { font: 500 15px/1 var(--display); color: var(--muted); font-variant-numeric: tabular-nums; }
+.count b { color: var(--ink); font-weight: 700; }
+.tools { display: flex; gap: 6px; align-items: center; }
+.rule { height: 4px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.rule i { display: block; height: 100%; width: 0; background: var(--leaf); border-radius: 4px; transition: width .5s cubic-bezier(.2,.8,.2,1); }
+
+/* buttons */
+button { font: inherit; color: inherit; cursor: pointer; }
+.ghost { border: 0; background: none; padding: 4px 8px; border-radius: 6px; color: var(--muted); font-size: 13px; }
+.ghost:hover { background: var(--line); color: var(--ink); }
+.solid { border: 0; border-radius: 8px; padding: 7px 14px; background: var(--pencil); color: #fff; font-weight: 600; font-size: 14px; }
+.solid:disabled { opacity: .45; cursor: default; }
+:focus-visible { outline: 2px solid var(--pencil); outline-offset: 2px; }
+
+/* composer */
+.composer { background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.composer.is-drop { border-color: var(--pencil); }
+textarea { width: 100%; resize: none; border: 0; background: transparent; color: var(--ink); font: inherit; line-height: 1.5; min-height: 26px; max-height: 40vh; overflow-y: auto; padding: 2px 0; }
+textarea:focus { outline: none; }
+textarea::placeholder { color: var(--muted); }
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.bar .hint { color: var(--muted); font-size: 12px; min-width: 0; }
+.bar .acts { display: flex; gap: 6px; align-items: center; margin-left: auto; }
+
+/* thumbnails */
+.pics { display: flex; flex-wrap: wrap; gap: 8px; }
+.pic { position: relative; border-radius: 8px; overflow: hidden; background: var(--line); border: 1px solid var(--line); max-width: 100%; }
+.pic img { display: block; height: 72px; width: auto; max-width: 220px; object-fit: cover; cursor: zoom-in; }
+.pic.small img { height: 52px; }
+.pic .x { position: absolute; top: 3px; right: 3px; border: 0; width: 22px; height: 22px; border-radius: 50%; background: rgb(0 0 0 / .6); color: #fff; font-size: 13px; line-height: 22px; padding: 0; }
+.pic .missing { display: grid; place-items: center; height: 72px; padding: 0 12px; color: var(--muted); font-size: 12px; }
+
+/* list */
+.section { display: flex; flex-direction: column; gap: 2px; }
+.label { font-size: 12px; letter-spacing: .08em; color: var(--muted); padding: 0 4px 6px; display: flex; justify-content: space-between; align-items: center; }
+.row { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: start; padding: 10px 8px; border-radius: 10px; transition: background .15s; }
+.row:hover { background: var(--card); }
+.row .body { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.row .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.row .meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.row .side { display: flex; gap: 2px; opacity: 0; transition: opacity .15s; }
+.row:hover .side, .row:focus-within .side { opacity: 1; }
+@media (hover: none) { .row .side { opacity: 1; } }
+
+/* the tick */
+.tick { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--muted); background: transparent; padding: 0; position: relative; display: grid; place-items: center; margin-top: 1px; transition: border-color .15s, background .2s; }
+.tick:hover { border-color: var(--leaf); background: var(--leaf-soft); }
+.tick svg { width: 16px; height: 16px; overflow: visible; }
+.tick path { fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 24; stroke-dashoffset: 24; }
+.tick::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid var(--leaf); opacity: 0; }
+.is-ticking .tick, .done .tick { background: var(--leaf); border-color: var(--leaf); }
+.is-ticking .tick path { animation: draw .28s .05s ease-out forwards; }
+.done .tick path { stroke-dashoffset: 0; }
+.is-ticking .tick::after { animation: burst .55s ease-out; }
+.is-ticking .text { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--leaf); transition: color .3s; }
+.is-ticking { animation: leave .3s .62s ease-in forwards; }
+.is-ticking .side { visibility: hidden; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes burst { 0% { opacity: .9; transform: scale(.8); } 100% { opacity: 0; transform: scale(1.7); } }
+@keyframes leave { to { opacity: 0; transform: translateY(-4px); } }
+.done .text { color: var(--muted); text-decoration: line-through; }
+.done .tick { width: 22px; height: 22px; }
+.done .tick svg { width: 13px; height: 13px; }
+
+/* editing */
+.edit { grid-column: 2 / 4; background: var(--card); border: 1px solid var(--pencil); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+
+/* empty, stamp, notes */
+.empty { color: var(--muted); padding: 18px 8px; }
+.stamp { display: flex; align-items: center; gap: 14px; padding: 14px 8px; color: var(--muted); }
+.stamp span { font: 700 18px/1 var(--display); letter-spacing: .3em; color: var(--leaf); border: 2.5px solid var(--leaf); border-radius: 6px; padding: 8px 10px 8px 14px; transform: rotate(-7deg); display: inline-block; }
+.stamp.fresh span { animation: thump .5s cubic-bezier(.3,1.6,.5,1); }
+@keyframes thump { 0% { transform: rotate(-7deg) scale(1.8); opacity: 0; } 100% { transform: rotate(-7deg) scale(1); opacity: 1; } }
+.note { font-size: 13px; padding: 8px 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); }
+.note.warn { border-color: var(--danger); color: var(--danger); }
+.foot { font-size: 12px; color: var(--muted); padding: 0 4px; }
+.foot code { font: 12px var(--mono); }
+
+/* undo bar */
+.undo { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(18px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--paper); border-radius: 10px; padding: 8px 8px 8px 14px; display: flex; gap: 12px; align-items: center; box-shadow: var(--shadow); max-width: calc(100% - 32px); font-size: 14px; z-index: 5; }
+.undo span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.undo button { border: 0; background: none; color: var(--leaf); font-weight: 700; padding: 4px 8px; }
+
+/* viewer */
+.viewer { position: fixed; inset: 0; background: rgb(0 0 0 / .82); display: grid; place-items: center; z-index: 9; padding: calc(16px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); cursor: zoom-out; }
+.viewer img { max-width: 100%; max-height: 100%; border-radius: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-delay: 0s !important; transition-duration: .01ms !important; }
+}
+</style>
+
+<div class="sheet">
+  <header class="top">
+    <h1 id="title">{{name}} 待办</h1>
+    <div class="tools">
+      <span class="count" id="count"></span>
+      <button class="ghost" id="sound" type="button"></button>
+    </div>
+  </header>
+  <div class="rule" aria-hidden="true"><i id="progress"></i></div>
+
+  <div id="status" hidden></div>
+
+  <form class="composer" id="composer">
+    <textarea id="draft" rows="1" aria-label="写一条待办" placeholder="写一条待办，回车记下（Shift+回车换行）"></textarea>
+    <div class="pics" id="draftPics" hidden></div>
+    <div class="bar">
+      <span class="hint" id="hint">可以直接粘贴截图</span>
+      <span class="acts">
+        <input id="picker" type="file" accept="image/*" multiple hidden>
+        <button class="ghost" type="button" id="pick">加图片</button>
+        <button class="solid" type="submit" id="add">记下</button>
+      </span>
+    </div>
+  </form>
+
+  <section class="section" aria-labelledby="openLabel">
+    <div class="label" id="openLabel"><span>待做</span></div>
+    <div id="openList"></div>
+  </section>
+
+  <section class="section" id="doneSection" hidden>
+    <div class="label"><button class="ghost" type="button" id="doneToggle"></button></div>
+    <div id="doneList" hidden></div>
+  </section>
+
+  <p class="foot">只有你能打开这页，换设备登录 claude.ai 或 Claude app 都在。Claude Code 会话开着时，会把这里的待办同步到仓库的 <code>{{board}}</code>，给别的 agent 读。</p>
+</div>
+
+<div class="undo" id="undo" hidden><span id="undoText"></span><button type="button" id="undoBtn">撤销</button></div>
+<div class="viewer" id="viewer" hidden><img id="viewerImg" alt="待办里的图片，原图"></div>
+
+<script>
+(() => {
+  const el = (id) => document.getElementById(id);
+  const ASSET_ID = /^[0-9a-f]{32}$/;
+  const MAX_SIDE = 1600;
+  const TICK_MS = 950;
+  const UNDO_MS = 6000;
+
+  const state = {
+    items: [],
+    phase: 'loading', // loading | ready | slow | nodb | error
+    error: '',
+    ticking: new Set(),
+    editing: null, // {id, text, images, dropped}
+    draftImages: [],
+    uploading: 0,
+    removed: null, // {item, timer}
+    lastClear: 0,
+    showDone: readPref('showDone') === '1',
+    sound: readPref('sound') !== '0'
+  };
+  let db = null;
+  let assets = null;
+  let todos = null;
+
+  function readPref(key) { try { return localStorage.getItem('todo-board:' + key); } catch { return null; } }
+  function writePref(key, value) { try { localStorage.setItem('todo-board:' + key, value); } catch { /* per-viewer only */ } }
+  const iso = () => new Date().toISOString();
+  const newId = () => 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  function normalize(id, d) {
+    const images = Array.isArray(d.images) ? d.images.filter((p) => p && ASSET_ID.test(String(p.id))).map((p) => ({ id: String(p.id), w: Number(p.w) || 0, h: Number(p.h) || 0 })) : [];
+    return {
+      id,
+      text: typeof d.text === 'string' ? d.text : '',
+      done: d.done === true,
+      at: typeof d.at === 'string' ? d.at : null,
+      doneAt: typeof d.doneAt === 'string' ? d.doneAt : null,
+      order: Number(d.order) || 0,
+      images
+    };
+  }
+  const docOf = (item) => ({ text: item.text, done: item.done, at: item.at, doneAt: item.doneAt, order: item.order, images: item.images, updatedAt: iso() });
+
+  // ---------- sound ----------
+  let audio = null;
+  function chime(kind) {
+    if (!state.sound) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const notes = kind === 'clear' ? [523.25, 659.25, 783.99, 1046.5] : [1046.5, 1567.98];
+      const step = kind === 'clear' ? 0.11 : 0.07;
+      notes.forEach((freq, i) => {
+        const t = audio.currentTime + i * step;
+        const osc = audio.createOscillator();
+        const gain = audio.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(kind === 'clear' ? 0.16 : 0.12, t + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + (kind === 'clear' ? 0.5 : 0.28));
+        osc.connect(gain).connect(audio.destination);
+        osc.start(t);
+        osc.stop(t + 0.6);
+      });
+    } catch { /* no sound on this device */ }
+  }
+
+  // ---------- images ----------
+  async function shrink(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error('unreadable'));
+        i.src = url;
+      });
+      const w = img.naturalWidth, h = img.naturalHeight;
+      const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+      if (scale === 1 && file.size <= 700 * 1024 && /^image\/(png|jpeg|webp|gif)$/.test(file.type)) return { blob: file, w, h };
+      const cw = Math.round(w * scale), ch = Math.round(h * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = cw; canvas.height = ch;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.drawImage(img, 0, 0, cw, ch);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+      if (!blob) throw new Error('unreadable');
+      return { blob, w: cw, h: ch };
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function takeImages(files, target) {
+    const list = [...files].filter((f) => f.type.startsWith('image/'));
+    if (!list.length) return;
+    if (!assets) { say('这台设备上不能加图片：只有这页的主人能上传。', true); return; }
+    for (const file of list) {
+      state.uploading++; render();
+      try {
+        const { blob, w, h } = await shrink(file);
+        const up = await assets.upload(blob, blob.type ? undefined : { type: 'image/png' });
+        target.push({ id: up.id, w, h });
+      } catch (e) {
+        say(e && e.code === 'quota_exceeded' ? '图片存满了：删掉一些带图的待办再试。' : '这张图没传上去，换一张或稍后再试。', true);
+      } finally {
+        state.uploading--; render();
+      }
+    }
+  }
+
+  function dropAssets(images) {
+    if (!assets) return;
+    for (const p of images) assets.delete(p.id).catch(() => { /* already gone */ });
+  }
+
+  // ---------- writes ----------
+  async function write(fn, failText) {
+    try { await fn(); return true; } catch (e) {
+      say(e && e.code === 'quota_exceeded' ? '存储满了：删掉一些已完成的待办再试。' : failText, true);
+      return false;
+    }
+  }
+
+  async function addItem() {
+    const box = el('draft');
+    const text = box.value.trim();
+    if ((!text && !state.draftImages.length) || state.uploading || !todos) return;
+    const at = iso();
+    const item = { text, done: false, at, doneAt: null, order: Date.now(), images: state.draftImages.slice() };
+    box.value = ''; fit(box);
+    state.draftImages = [];
+    render();
+    const ok = await write(() => todos.doc(newId()).set({ ...item, updatedAt: at }), '没记上：网络不通，稍后再试。');
+    if (!ok) { box.value = text; state.draftImages = item.images; fit(box); render(); }
+  }
+
+  async function tick(item) {
+    if (state.ticking.has(item.id)) return;
+    const isLast = state.items.filter((i) => !i.done).length === 1;
+    state.ticking.add(item.id);
+    chime(isLast ? 'clear' : 'tick');
+    if (isLast) state.lastClear = Date.now();
+    render();
+    const at = iso();
+    const ok = await write(() => todos.doc(item.id).update({ done: true, doneAt: at, updatedAt: at }), '没勾上：网络不通，稍后再试。');
+    setTimeout(() => { state.ticking.delete(item.id); render(); }, ok ? TICK_MS : 0);
+  }
+
+  async function untick(item) {
+    await write(() => todos.doc(item.id).update({ done: false, doneAt: null, updatedAt: iso() }), '没改成：网络不通，稍后再试。');
+  }
+
+  async function tombstone(id, add) {
+    const ref = db.doc('meta/board');
+    const snap = await ref.get();
+    const now = snap.exists ? snap.data() : {};
+    const list = Array.isArray(now.deleted) ? now.deleted.filter((d) => d && typeof d.id === 'string' && d.id !== id) : [];
+    if (add) list.push({ id, at: iso() });
+    await ref.set({ deleted: list.slice(-300) });
+  }
+
+  async function removeItem(item) {
+    finishUndo();
+    const ok = await write(() => todos.doc(item.id).delete(), '没删掉：网络不通，稍后再试。');
+    if (!ok) return;
+    tombstone(item.id, true).catch(() => { /* the mirror keeps it one more round */ });
+    state.removed = { item, timer: setTimeout(finishUndo, UNDO_MS) };
+    render();
+  }
+
+  function finishUndo() {
+    if (!state.removed) return;
+    clearTimeout(state.removed.timer);
+    dropAssets(state.removed.item.images);
+    state.removed = null;
+    render();
+  }
+
+  async function undoRemove() {
+    const held = state.removed;
+    if (!held) return;
+    clearTimeout(held.timer);
+    state.removed = null;
+    render();
+    const ok = await write(() => todos.doc(held.item.id).set(docOf(held.item)), '没撤销成：网络不通。');
+    if (ok) tombstone(held.item.id, false).catch(() => {});
+  }
+
+  function startEdit(item) {
+    state.editing = { id: item.id, text: item.text, images: item.images.slice(), dropped: [] };
+    render();
+    const box = document.querySelector('.edit textarea');
+    if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); fit(box); }
+  }
+
+  async function saveEdit() {
+    const ed = state.editing;
+    if (!ed || state.uploading) return;
+    const box = document.querySelector('.edit textarea');
+    const text = box ? box.value.trim() : ed.text;
+    state.editing = null;
+    render();
+    const ok = await write(() => todos.doc(ed.id).update({ text, images: ed.images, updatedAt: iso() }), '没存上：网络不通，稍后再试。');
+    if (ok) dropAssets(ed.dropped);
+  }
+
+  function cancelEdit() {
+    const ed = state.editing;
+    if (!ed) return;
+    const kept = new Set(state.items.find((i) => i.id === ed.id)?.images.map((p) => p.id) ?? []);
+    dropAssets(ed.images.filter((p) => !kept.has(p.id)));
+    state.editing = null;
+    render();
+  }
+
+  // ---------- render ----------
+  function say(text, warn) {
+    const box = el('status');
+    box.hidden = !text;
+    box.className = 'note' + (warn ? ' warn' : '');
+    box.textContent = text || '';
+    if (warn) { clearTimeout(say.timer); say.timer = setTimeout(() => { if (state.phase === 'ready') say(''); }, 5000); }
+  }
+
+  function fit(box) { box.style.height = 'auto'; box.style.height = Math.min(box.scrollHeight, window.innerHeight * 0.4) + 'px'; }
+
+  function when(isoText) {
+    if (!isoText) return '';
+    const d = new Date(isoText);
+    if (isNaN(d)) return '';
+    const now = new Date();
+    const hm = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    if (d.toDateString() === now.toDateString()) return '今天 ' + hm;
+    const y = new Date(now); y.setDate(now.getDate() - 1);
+    if (d.toDateString() === y.toDateString()) return '昨天 ' + hm;
+    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hm;
+  }
+
+  function node(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function button(cls, label, onClick, aria) {
+    const b = node('button', cls, label);
+    b.type = 'button';
+    if (aria) b.setAttribute('aria-label', aria);
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function pictures(images, opts) {
+    const box = node('div', 'pics');
+    for (const p of images) {
+      const wrap = node('div', 'pic' + (opts.small ? ' small' : ''));
+      const img = node('img');
+      img.src = '/_blob/' + p.id;
+      img.alt = '待办里的图片';
+      img.loading = 'lazy';
+      if (p.w && p.h) { img.width = Math.round((opts.small ? 52 : 72) * p.w / p.h); img.height = opts.small ? 52 : 72; }
+      img.addEventListener('click', () => view(p.id));
+      img.addEventListener('error', () => wrap.replaceChildren(node('div', 'missing', '图片打不开')));
+      wrap.append(img);
+      if (opts.remove) wrap.append(button('x', '×', () => opts.remove(p), '移除这张图'));
+      box.append(wrap);
+    }
+    return box;
+  }
+
+  const CHECK = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg>';
+
+  function openRow(item) {
+    const isTicking = state.ticking.has(item.id);
+    const row = node('div', 'row' + (isTicking ? ' is-ticking' : ''));
+    const tickBtn = button('tick', null, () => tick(item), '勾掉：' + (item.text || '图片待办'));
+    tickBtn.innerHTML = CHECK;
+    tickBtn.disabled = isTicking;
+    row.append(tickBtn);
+    if (state.editing?.id === item.id) { row.append(editor(state.editing)); return row; }
+    const body = node('div', 'body');
+    if (item.text) body.append(node('div', 'text', item.text));
+    if (item.images.length) body.append(pictures(item.images, {}));
+    body.append(node('div', 'meta', '写于 ' + when(item.at)));
+    row.append(body);
+    const side = node('div', 'side');
+    side.append(button('ghost', '改', () => startEdit(item)), button('ghost', '删', () => removeItem(item)));
+    row.append(side);
+    return row;
+  }
+
+  function doneRow(item) {
+    const row = node('div', 'row done');
+    const tickBtn = button('tick', null, () => untick(item), '重新打开：' + (item.text || '图片待办'));
+    tickBtn.innerHTML = CHECK;
+    row.append(tickBtn);
+    const body = node('div', 'body');
+    body.append(node('div', 'text', item.text || '（图片）'));
+    body.append(node('div', 'meta', when(item.doneAt) + ' 勾掉'));
+    row.append(body);
+    const side = node('div', 'side');
+    side.append(button('ghost', '删', () => removeItem(item)));
+    row.append(side);
+    return row;
+  }
+
+  function editor(ed) {
+    const box = node('div', 'edit');
+    const area = node('textarea');
+    area.id = 'edit-' + ed.id;
+    area.rows = 1;
+    area.value = ed.text;
+    area.addEventListener('input', () => { ed.text = area.value; fit(area); });
+    area.addEventListener('keydown', (e) => {
+      if (isSubmit(e)) { e.preventDefault(); saveEdit(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+    });
+    area.addEventListener('paste', (e) => { const files = e.clipboardData?.files; if (files && files.length) { e.preventDefault(); takeImages(files, ed.images).then(render); } });
+    box.append(area);
+    if (ed.images.length) box.append(pictures(ed.images, { small: true, remove: (p) => { ed.images = ed.images.filter((q) => q.id !== p.id); ed.dropped.push(p); render(); } }));
+    const bar = node('div', 'bar');
+    const acts = node('span', 'acts');
+    if (assets) acts.append(button('ghost', '加图片', () => pickFor(ed.images)));
+    acts.append(button('ghost', '取消', cancelEdit));
+    const save = button('solid', state.uploading ? '传图中…' : '保存', saveEdit);
+    save.disabled = state.uploading > 0;
+    acts.append(save);
+    bar.append(node('span', 'hint', 'Esc 取消'), acts);
+    box.append(bar);
+    return box;
+  }
+
+  let editRow = null;
+  function render() {
+    const items = state.items;
+    const shownDone = items.filter((i) => i.done && !state.ticking.has(i.id)).sort((a, b) => String(b.doneAt).localeCompare(String(a.doneAt)));
+    const open = items.filter((i) => !i.done || state.ticking.has(i.id)).sort((a, b) => b.order - a.order);
+    const doneCount = items.filter((i) => i.done).length;
+
+    el('count').innerHTML = items.length ? '<b>' + doneCount + '</b> / ' + items.length : '';
+    el('progress').style.width = items.length ? (100 * doneCount / items.length) + '%' : '0';
+    el('sound').textContent = state.sound ? '音效 开' : '音效 关';
+    el('sound').setAttribute('aria-pressed', String(state.sound));
+
+    const canWrite = !!todos && state.phase !== 'nodb' && state.phase !== 'error';
+    el('add').disabled = !canWrite || state.uploading > 0;
+    el('add').textContent = state.uploading ? '传图中…' : '记下';
+    el('draft').disabled = !canWrite;
+    el('pick').hidden = !assets;
+    el('hint').textContent = assets ? '可以直接粘贴截图，或把图拖进来' : '';
+    const dp = el('draftPics');
+    dp.hidden = !state.draftImages.length;
+    dp.replaceChildren(...(state.draftImages.length ? [...pictures(state.draftImages, { small: true, remove: (p) => { state.draftImages = state.draftImages.filter((q) => q.id !== p.id); dropAssets([p]); render(); } }).children] : []));
+
+    // Keep the row being edited in place, so typing in it is never interrupted.
+    const list = el('openList');
+    const keep = state.editing && editRow && list.contains(editRow) && editRow.dataset.id === state.editing.id ? editRow : null;
+    const rows = [];
+    for (const item of open) {
+      if (keep && item.id === state.editing.id) { rows.push(keep); continue; }
+      const row = openRow(item);
+      row.dataset.id = item.id;
+      if (state.editing?.id === item.id) editRow = row;
+      rows.push(row);
+    }
+    if (!state.editing) editRow = null;
+    if (!open.length) {
+      if (state.phase === 'loading') rows.push(node('div', 'empty', '正在读取待办…'));
+      else if (items.length) {
+        const stamp = node('div', 'stamp' + (Date.now() - state.lastClear < 2000 ? ' fresh' : ''));
+        stamp.append(node('span', null, '清空了'), node('div', null, '这个项目的待办都做完了。'));
+        rows.push(stamp);
+      } else if (canWrite) rows.push(node('div', 'empty', '还没有待办。写下第一条，做完了点前面的圆圈。'));
+    }
+    list.replaceChildren(...rows);
+
+    el('doneSection').hidden = !shownDone.length;
+    el('doneToggle').textContent = (state.showDone ? '收起' : '展开') + '已完成 · ' + shownDone.length;
+    el('doneToggle').setAttribute('aria-expanded', String(state.showDone));
+    el('doneList').hidden = !state.showDone;
+    el('doneList').replaceChildren(...(state.showDone ? shownDone.map(doneRow) : []));
+
+    el('undo').hidden = !state.removed;
+    if (state.removed) el('undoText').textContent = '删了「' + (state.removed.item.text || '图片待办') + '」';
+  }
+
+  // ---------- viewer ----------
+  function view(id) { el('viewerImg').src = '/_blob/' + id; el('viewer').hidden = false; }
+  el('viewer').addEventListener('click', () => { el('viewer').hidden = true; el('viewerImg').removeAttribute('src'); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !el('viewer').hidden) el('viewer').click(); });
+
+  // ---------- composer ----------
+  const isSubmit = (e) => e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229;
+  let pickTarget = null;
+  function pickFor(target) { pickTarget = target; el('picker').value = ''; el('picker').click(); }
+  el('picker').addEventListener('change', () => { const target = pickTarget || state.draftImages; takeImages(el('picker').files, target).then(render); });
+  el('pick').addEventListener('click', () => pickFor(state.draftImages));
+  el('composer').addEventListener('submit', (e) => { e.preventDefault(); addItem(); });
+  el('draft').addEventListener('keydown', (e) => { if (isSubmit(e)) { e.preventDefault(); addItem(); } });
+  el('draft').addEventListener('input', () => fit(el('draft')));
+  el('draft').addEventListener('paste', (e) => { const files = e.clipboardData?.files; if (files && files.length) { e.preventDefault(); takeImages(files, state.draftImages).then(render); } });
+  const comp = el('composer');
+  comp.addEventListener('dragover', (e) => { if (assets) { e.preventDefault(); comp.classList.add('is-drop'); } });
+  comp.addEventListener('dragleave', () => comp.classList.remove('is-drop'));
+  comp.addEventListener('drop', (e) => { comp.classList.remove('is-drop'); if (!assets) return; e.preventDefault(); takeImages(e.dataTransfer.files, state.draftImages).then(render); });
+  el('sound').addEventListener('click', () => { state.sound = !state.sound; writePref('sound', state.sound ? '1' : '0'); if (state.sound) chime('tick'); render(); });
+  el('doneToggle').addEventListener('click', () => { state.showDone = !state.showDone; writePref('showDone', state.showDone ? '1' : '0'); render(); });
+  el('undoBtn').addEventListener('click', undoRemove);
+
+  // ---------- boot ----------
+  render();
+  (async () => {
+    const claude = window.claude;
+    if (!claude || typeof claude.use !== 'function') {
+      state.phase = 'nodb';
+      say('这页要在 claude.ai 或 Claude app 里打开，才能读写待办。');
+      render();
+      return;
+    }
+    [db, assets] = await Promise.all([claude.use('db'), claude.use('assets')]);
+    if (!db) {
+      state.phase = 'nodb';
+      say('这里读不到待办：请登录 claude.ai，用这页的主人账号打开。');
+      render();
+      return;
+    }
+    todos = db.collection('todos');
+    const slow = setTimeout(() => {
+      if (state.phase === 'loading') { state.phase = 'slow'; say(state.items.length ? '连不上存储，下面可能不是最新的；会自动重试。' : '连不上存储，正在自动重试…', true); render(); }
+    }, 10000);
+    todos.onSnapshot((snap) => {
+      state.items = snap.docs.filter((d) => d.exists).map((d) => normalize(d.id, d.data() || {}));
+      if (!snap.metadata.fromCache) {
+        clearTimeout(slow);
+        if (state.phase !== 'ready') { state.phase = 'ready'; say(''); }
+      }
+      render();
+    }, (err) => {
+      clearTimeout(slow);
+      state.phase = 'error';
+      say(err && err.code === 'revoked' ? '这页现在读不到待办了。' : '读取待办出错了，刷新页面再试。', true);
+      render();
+    });
+    render();
+  })();
+})();
+</script>
