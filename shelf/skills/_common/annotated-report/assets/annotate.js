@@ -93,9 +93,14 @@ display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hi
 .ann-see img{display:block;width:100%;height:100%;object-fit:cover}
 .ann-rm{position:absolute;top:3px;right:3px;width:22px;height:22px;padding:0;border:0;border-radius:11px;background:#000b;color:#fff;font-size:12px;cursor:pointer}
 .ann-drop{outline:2px dashed var(--ann-ring);outline-offset:-6px}
-.ann-view{position:fixed;inset:0;display:grid;place-items:safe center;padding:16px;overflow:auto;background:#000d;cursor:zoom-out}
-.ann-view img{max-width:100%;max-height:100%;border-radius:6px;cursor:zoom-in}
-.ann-view img.ann-full{max-width:none;max-height:none;cursor:zoom-out}
+.ann-view{position:fixed;inset:0;overflow:hidden;background:#000d;cursor:zoom-out;touch-action:none;user-select:none;-webkit-user-select:none}
+.ann-view img{position:absolute;left:0;top:0;max-width:none;max-height:none;transform-origin:0 0;border-radius:6px;cursor:zoom-in;will-change:transform}
+.ann-view img.ann-zoomed{cursor:grab}
+.ann-view.ann-drag img{cursor:grabbing}
+.ann-zoom{position:fixed;left:50%;bottom:max(12px,env(safe-area-inset-bottom));translate:-50% 0;display:flex;align-items:center;gap:2px;padding:4px;border-radius:22px;background:#000b;color:#fff;font:13px/1 system-ui,sans-serif}
+.ann-zoom button{min-width:36px;height:36px;padding:0 10px;border:0;border-radius:18px;background:none;color:#fff;font:inherit;cursor:pointer}
+.ann-zoom .ann-pct{min-width:58px;text-align:center;font-variant-numeric:tabular-nums}
+@media (hover:hover){.ann-zoom button:hover{background:#fff2}}
 .ann-view .ann-shut{position:fixed;top:12px;right:12px;width:36px;height:36px;padding:0;border:0;border-radius:18px;background:#000b;color:#fff;font-size:16px;cursor:pointer}
 img:not(.ann-root img){cursor:zoom-in}
 /* motion: one damped spring (about 2% overshoot, settles in ~540 ms) for things arriving, hover and press; leaving is quick and plain */
@@ -472,14 +477,132 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         g.drawImage(bmp, 0, 0, c.width, c.height);
         return new Promise((ok, no) => c.toBlob((b) => (b ? ok(b) : no(b)), 'image/jpeg', 0.86));
     };
-    // a picture over the page: fitted first; a tap on it shows it at full size (scroll around), a tap
-    // beside it, the ✕ or Escape closes it
+    // A picture over the page, fitted at first. The wheel, a pinch, the − / + buttons and the + − 0 1 keys zoom it
+    // about the pointer, up to ZOOM_MAX times its own pixels (drawn as sharp squares from 2× on, so single pixels
+    // can be read); a drag pans it; a tap on it goes between fitted and 1:1 (2× when it already
+    // fits at its own size); a tap beside it, the ✕ or Escape closes it.
+    const ZOOM_MAX = 32;
     const viewPic = (src) => {
-        const v = make('<div class="ann-view" role="dialog" aria-label="看图"><img alt=""></div>');
+        const v = make(
+            '<div class="ann-view" role="dialog" aria-label="看图"><img alt="" draggable="false">' +
+                '<div class="ann-zoom"><button type="button" aria-label="缩小">−</button><span class="ann-pct"></span>' +
+                '<button type="button" aria-label="放大">+</button><button type="button">适应</button>' +
+                '<button type="button">1:1</button></div></div>'
+        );
         const img = v.firstChild;
+        const [out, pct, inn, fitB, oneB] = v.lastChild.children;
+        // the browser's own image drag would cancel the pan on its first move
+        img.draggable = false;
+        v.ondragstart = (e) => e.preventDefault();
+        // k: screen px per picture px; x, y: where the picture's corner is in the viewer
+        let k = 1;
+        let x = 0;
+        let y = 0;
+        const size = () => [v.clientWidth, v.clientHeight];
+        const fit = () => {
+            const [w, h] = size();
+            return Math.min(1, (w - 32) / img.naturalWidth, (h - 72) / img.naturalHeight);
+        };
+        // a picture smaller than the viewer stays centred; a bigger one cannot leave a gap at its edges
+        const hold = (pos, len, room) => (len <= room ? (room - len) / 2 : Math.min(0, Math.max(room - len, pos)));
+        const show = (glide) => {
+            const [w, h] = size();
+            x = hold(x, img.naturalWidth * k, w);
+            y = hold(y, img.naturalHeight * k, h);
+            img.style.transition = glide ? 'transform .24s cubic-bezier(.2,.8,.2,1)' : 'none';
+            img.style.transform = `translate(${x}px,${y}px) scale(${k})`;
+            img.style.imageRendering = k >= 2 ? 'pixelated' : '';
+            img.classList.toggle('ann-zoomed', k > fit() + 1e-3);
+            pct.textContent = `${Math.round(k * 100)}%`;
+        };
+        // zoom to `to` about the viewer point (px, py), which stays over the same picture pixel
+        const zoomAt = (to, px, py, glide) => {
+            const nk = Math.min(ZOOM_MAX, Math.max(fit() / 2, to));
+            x = px - ((px - x) * nk) / k;
+            y = py - ((py - y) * nk) / k;
+            k = nk;
+            show(glide);
+        };
+        const middle = () => size().map((n) => n / 2);
+        const fitted = (glide) => {
+            k = fit();
+            show(glide);
+        };
+        img.onload = () => fitted(false);
         img.src = src;
+        out.onclick = () => zoomAt(k / 1.5, ...middle(), true);
+        inn.onclick = () => zoomAt(k * 1.5, ...middle(), true);
+        fitB.onclick = () => fitted(true);
+        oneB.onclick = () => zoomAt(1, ...middle(), true);
+        v.zoomKey = (key) =>
+            key === '0' ? fitted(true) : zoomAt(key === '1' ? 1 : key === '-' ? k / 1.5 : k * 1.5, ...middle(), true);
+        v.onwheel = (e) => {
+            e.preventDefault();
+            const r = v.getBoundingClientRect();
+            // a trackpad pinch arrives as a wheel with ctrl held, in small steps
+            const step = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 400 : 1;
+            zoomAt(k * Math.exp(-e.deltaY * step * (e.ctrlKey ? 0.01 : 0.002)), e.clientX - r.left, e.clientY - r.top);
+        };
+        // one pointer pans, two pinch; a press that hardly moves is a tap
+        const down = new Map();
+        let moved = 0;
+        let pinch = null;
+        const at = (e) => {
+            const r = v.getBoundingClientRect();
+            return { x: e.clientX - r.left, y: e.clientY - r.top };
+        };
+        const pair = () => {
+            const [a, b] = [...down.values()];
+            return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        };
+        v.onpointerdown = (e) => {
+            if (e.target.closest('.ann-zoom, .ann-shut')) return;
+            v.setPointerCapture(e.pointerId);
+            down.set(e.pointerId, at(e));
+            if (down.size === 1) moved = 0;
+            if (down.size === 2) pinch = { ...pair(), k };
+        };
+        v.onpointermove = (e) => {
+            const was = down.get(e.pointerId);
+            if (!was) return;
+            const now = at(e);
+            down.set(e.pointerId, now);
+            moved += Math.hypot(now.x - was.x, now.y - was.y);
+            if (down.size === 2 && pinch) {
+                const p = pair();
+                x += p.x - pinch.x;
+                y += p.y - pinch.y;
+                Object.assign(pinch, { x: p.x, y: p.y });
+                zoomAt((pinch.k * p.d) / pinch.d, p.x, p.y);
+            } else if (down.size === 1 && moved > 4) {
+                v.classList.add('ann-drag');
+                x += now.x - was.x;
+                y += now.y - was.y;
+                show(false);
+            }
+        };
         const shut = () => leave(v, { opacity: 0 });
-        v.onclick = (e) => (e.target === img ? img.classList.toggle('ann-full') : e.target === v && shut());
+        v.onpointerup = v.onpointercancel = (e) => {
+            if (!down.delete(e.pointerId)) return;
+            if (down.size < 2) pinch = null;
+            if (down.size) return;
+            v.classList.remove('ann-drag');
+            if (moved > 4 || e.type === 'pointercancel') return;
+            const r = img.getBoundingClientRect();
+            const on = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+            if (!on) return shut();
+            const f = fit();
+            const p = at(e);
+            if (k > f + 1e-3) fitted(true);
+            else zoomAt(f < 1 ? 1 : 2, p.x, p.y, true);
+        };
+        // a new window size refits a fitted picture and keeps a zoomed one in bounds
+        const refit = () => {
+            if (!v.isConnected) return removeEventListener('resize', refit);
+            if (img.classList.contains('ann-zoomed')) show(false);
+            else fitted(false);
+        };
+        addEventListener('resize', refit);
         v.append(button('✕', 'ann-shut', shut));
         v.lastChild.setAttribute('aria-label', '关闭');
         root.append((S.view = v));
@@ -802,9 +925,12 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         if (hit) setTimeout(() => getSelection().isCollapsed && openDrawer(hit.id));
     };
     // Escape closes a picture, then the panel, then leaves annotate mode; not while an IME candidate is open (Escape
-    // cancels it)
+    // cancels it). Over a picture, + − 0 1 zoom it.
     const onKey = (e) =>
-        e.key === 'Escape' &&
+        (S.view && S.view.isConnected && /^[-+=01]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.target.closest?.('input, textarea')
+            ? (e.preventDefault(), S.view.zoomKey(e.key === '=' ? '+' : e.key), true)
+            : false) ||
+        (e.key === 'Escape' &&
         !e.isComposing &&
         e.keyCode !== 229 &&
         (S.view && S.view.isConnected
@@ -813,7 +939,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
               ? closePanel()
               : S.picking
                 ? setPicking(false)
-                : hideChip());
+                : hideChip()));
 
     const start = () => {
         // annotate2: notes the browser-only layer kept for a page that is now republished were handled from the
