@@ -94,7 +94,7 @@ display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hi
 .ann-rm{position:absolute;top:3px;right:3px;width:22px;height:22px;padding:0;border:0;border-radius:11px;background:#000b;color:#fff;font-size:12px;cursor:pointer}
 .ann-drop{outline:2px dashed var(--ann-ring);outline-offset:-6px}
 .ann-view{position:fixed;inset:0;overflow:hidden;background:#000d;cursor:zoom-out;touch-action:none;user-select:none;-webkit-user-select:none}
-.ann-view img{position:absolute;left:0;top:0;max-width:none;max-height:none;transform-origin:0 0;border-radius:6px;cursor:zoom-in;will-change:transform}
+.ann-view img{position:absolute;left:0;top:0;max-width:none;max-height:none;border-radius:6px;cursor:zoom-in}
 .ann-view img.ann-zoomed{cursor:grab}
 .ann-view.ann-drag img{cursor:grabbing}
 .ann-zoom{position:fixed;left:50%;bottom:max(12px,env(safe-area-inset-bottom));translate:-50% 0;display:flex;align-items:center;gap:2px;padding:4px;border-radius:22px;background:#000b;color:#fff;font:13px/1 system-ui,sans-serif}
@@ -509,8 +509,12 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
             const [w, h] = size();
             x = hold(x, img.naturalWidth * k, w);
             y = hold(y, img.naturalHeight * k, h);
-            img.style.transition = glide ? 'transform .24s cubic-bezier(.2,.8,.2,1)' : 'none';
-            img.style.transform = `translate(${x}px,${y}px) scale(${k})`;
+            // drawn at its zoomed size rather than scaled as a layer: a scaled layer is smoothed whatever the
+            // image-rendering says, so the pixels would never show as squares
+            img.style.transition = glide ? 'transform .24s cubic-bezier(.2,.8,.2,1), width .24s, height .24s' : 'none';
+            img.style.width = `${img.naturalWidth * k}px`;
+            img.style.height = `${img.naturalHeight * k}px`;
+            img.style.transform = `translate(${x}px,${y}px)`;
             img.style.imageRendering = k >= 2 ? 'pixelated' : '';
             img.classList.toggle('ann-zoomed', k > fit() + 1e-3);
             pct.textContent = `${Math.round(k * 100)}%`;
