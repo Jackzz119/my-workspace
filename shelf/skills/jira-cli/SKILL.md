@@ -6,7 +6,7 @@ allowed-tools: Bash(jira:*), Bash(curl:*), Read
 
 **触发策略：自动触发**：任何要读或改 Jira 的时候，先读本文再动手。回复开头标 `**JIRA-CLI**`。
 
-本技能是通用的：**不写任何项目数据**。项目键、状态与转移名、QA 是谁、reporter 是谁、哪些写操作已获常设授权，都在项目的 `<ai>/PROJECT.md`「Jira」节（下称「项目 Jira 节」）。项目没有这一节，就只读、不写，并提醒用户补。
+本技能按项目选装（用 Jira 的项目才装，`shelf pull skills/jira-cli`），正文**不写任何项目数据**。项目键、状态与转移名、QA 是谁、reporter 是谁、哪些写操作已获常设授权，都在项目的 `<ai>/PROJECT.md`「Jira」节（下称「项目 Jira 节」）。项目没有这一节，就只读、不写，并提醒用户补。
 
 ---
 
