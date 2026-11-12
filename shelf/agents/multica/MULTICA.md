@@ -67,8 +67,7 @@ bash ai/scripts/bootstrap.sh
 2. **不整份读 `ai/TODO.md`**（它是本机会话的任务唯一来源；Multica 下任务真源是 issue）。只 `grep -n "<单号>\|<功能名>" ai/TODO.md`，读命中条目及其上下几行；没命中就不读。整份 62 KB ≈ 27k token，超过 Read 单次上限（2026-11-02 DOUB-174 实测）。
 3. 读 `ai/JASKILL.md`——本项目专属技能登记表，知道哪些场景该触发哪个技能。
 4. 读 issue 本身与派活人给的**文档 scope**；按任务领域再读对应文档与技能（见 §二）。
-5. 本 issue 对应 Jira ticket 的（标题里有 `[KEY-n]`，或执行细节里写了 ticket 号）：读 `jira-cli` 技能和 `ai/PROJECT.md`「Jira」节，第一次转 `in_progress` 时按它的 J1 转 Jira 状态。
-6. **不要读 `ai/sessions/`**——那是手动会话存档，只在用户点名某个档时才读。开场不扫这个目录、不列有哪些档、不问要不要恢复。
+5. **不要读 `ai/sessions/`**——那是手动会话存档，只在用户点名某个档时才读。开场不扫这个目录、不列有哪些档、不问要不要恢复。
 
 ## 二、Skill 系统
 
@@ -107,7 +106,6 @@ Multica 下的评论与报告一律按 §十一 三段式开头，**不在开头
 | `monet` | 主美——整体美术风格、角色 / 场景 / 物件 / 效果设计、设计方案比选、视觉审核、设计系统维护 | 自动 |
 | `ui-tailor` | UI / UX——界面视觉、概念模型、用户流程、信息架构、术语命名、导航交互、可用性、动效 | 自动 |
 | `shelf-ops` | 货架（shelf）操作手册——拉取/推送/上架技能与模板，落点约定、退出码语义、冲突处理 | 用户点名时 |
-| `jira-cli` | Jira 读写守则与工作流挂点——开工转「开发中」、交付写「与 PRD 的差异」草稿、测试环境验完后由收尾 agent 批量发留言并交 QA；项目数据在 `ai/PROJECT.md`「Jira」节 | 自动（issue 对应 Jira ticket 时） |
 
 ### 触发规范
 
@@ -127,7 +125,6 @@ Multica 下的评论与报告一律按 §十一 三段式开头，**不在开头
 | 整体美术风格、角色 / 场景 / 物件设计、设计方案比选、视觉审核、设计系统 | `monet` |
 | 任何 UI / UX 工作：界面视觉、用户流程、信息架构、命名、导航、可用性、动效 | `ui-tailor` |
 | 从货架拉取/推送/上架技能与模板 | `shelf-ops` |
-| 读或改 Jira：查单、复验 AC、开工转状态、写 Jira 留言草稿、收尾批次发留言与交 QA | `jira-cli` |
 
 **重要**：任何对技能文件（`ai/jaSkills/` 下的一切）的读写，都必须先触发 `custom-skill`，不得直接用文件工具操作。
 
@@ -271,11 +268,10 @@ Multica 任务跑在**独立 worktree** 里，分支形如 `agent/<agent>/<issue
 3. **自检**——本 issue 验收标准逐条验证；项目的 lint / typecheck / test **实际跑过**全绿（命令见 `ai/PROJECT.md` 或 README）。
 4. **提 PR，不等 CI。** 开完 PR 立刻 `multica issue wakeup create --until-pr checks`（平台自己核 CI 快照），本 run 到此交付。wakeup 起的 run 按 §八「合并前的三条校验」逐条过后合并；CI 红就修、push、再挂一次 wakeup。不用 `gh run watch`、不写 sleep 轮询。
 5. **🔴 每个 run 结束时在本 issue 发一条评论**——开 PR 的 run 发交付报告（三段式 + PR 链接 + 本地验证），合并的 run 发合入报告（合入 sha + 关键片段）。格式见 §十一。完整改动以 PR 的 diff 为准，不在评论里逐文件贴。
-5b. **Jira 留言草稿**（本 issue 对应 Jira ticket 时才做）：交付报告里加一节「Jira 留言草稿」，只写和 PRD 不一样的地方及原因，格式见 `jira-cli` §二 J2。**做单的 agent 不发留言、不转 QA**：这两步要等用户确认已部署到测试环境、测过之后，由用户单独派的「Jira 收尾」agent 一批处理。
 6. 🔴 **交付报告发出后置 `in_review`，不要置 `done`。** 合并的 run 不改状态；`done` 由用户验收当期时统一确认——这样才分得清「这一期完成的」和更早就完成的。
     - ⚠️ **连带后果：stage barrier 永远不会自己响，不要等它。** 平台的 barrier 只在某个 stage 里**每一个**子任务都到达 terminal 状态（`status_category` 为 `done` 或 `cancelled`）时才关闭；`in_review` 的 category 就是 `in_review`，**不计入**。所以**放行下一个 stage 是 Epic 负责人的主动动作**，触发条件一律写成「前一批的 PR 已合入 base 分支」，不写「barrier 落下」——写成后者的任务会静默躺在 `backlog` 里，而 board 上看着一切正常。
 
-issue 里可以加**本任务专属**的完成条件（额外验收项、必须附的截图、要跑的脚本），但不要重写上面这几条；与本节冲突时以本节为准。
+issue 里可以加**本任务专属**的完成条件（额外验收项、必须附的截图、要跑的脚本），但不要重写这六条；与本节冲突时以本节为准。
 
 ## 十一、报告规范：三段式 + PR 链接 + 关键片段（用户 2026-09-25 定）
 
