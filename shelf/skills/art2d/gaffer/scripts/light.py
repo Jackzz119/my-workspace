@@ -12,6 +12,8 @@ This script reads that ratio from the plates and uses it to:
             relit like any piece with the light ratio enlarged to its size
   relight   carry each cut piece from the reference state it was painted in to every other state
   tint      measure the light at an actor's spot as one RGB multiplier per state (for things that move)
+  shade     where an actor stands in a light's way: what the patch it shades keeps of its light, per state,
+            measured against a nearby patch of the same stuff that light never reaches (a multiply layer)
   check     relight a piece that already exists in every plate and compare with how it was really painted
   preview   lay the pieces over each plate, side by side, for review
 
@@ -20,6 +22,7 @@ Everything is driven by one JSON config in the project (see references/method.md
     python light.py all --config <scene.json> [--review <dir>]
     python light.py check --config <scene.json> --piece <id>
     python light.py tint --config <scene.json>
+    python light.py shade --config <scene.json>
 
 Dependencies: numpy, Pillow.
 """
@@ -497,6 +500,38 @@ def tint(scene):
     return result
 
 
+def shade(scene):
+    """Where an actor keeps a light off something (a cat on a sofa's back, between it and the window): per state,
+    the patch it shades should look like a nearby patch of the same stuff that light never reaches. The ratio of
+    the two patches' mean linear light per channel, as sRGB multipliers (clipped to 1) for a multiply layer under
+    the actor. Config: an actor's "shade": {"lit": [x, y, w, h], "dark": [x, y, w, h], "over": [...]}; `over`
+    lists what the run time lays over the plate there ({"file": "...-{state}.webp", "box": [x, y, w, h]}, a
+    finer corner, a set piece), so the patches are measured as the viewer sees them."""
+    result = {}
+    for actor in scene.cfg.get('actors', []):
+        spec = actor.get('shade')
+        if not spec:
+            continue
+        (lx, ly, lw, lh), (dx, dy, dw, dh) = spec['lit'], spec['dark']
+        mult = {}
+        for state in scene.states:
+            seen = scene.plate(state).copy()
+            for o in spec.get('over', []):
+                x, y, w, h = o['box']
+                im = Image.open(scene.file(o['file'].format(state=state))).convert('RGBA').resize((w, h), Image.LANCZOS)
+                a = np.asarray(im, dtype=np.float32)
+                k = a[..., 3:4] / 255.0
+                seen[y:y + h, x:x + w] = seen[y:y + h, x:x + w] * (1 - k) + a[..., :3] * k
+            plate = to_linear(seen)
+            lit = plate[ly:ly + lh, lx:lx + lw].reshape(-1, 3).mean(axis=0)
+            dark = plate[dy:dy + dh, dx:dx + dw].reshape(-1, 3).mean(axis=0)
+            m = np.clip(dark / np.maximum(lit, 1e-6), 0, 1) ** (1 / 2.2)
+            mult[state] = [round(float(v), 3) for v in m]
+        result[actor['id']] = mult
+        print(actor['id'], 'shade', json.dumps(mult))
+    return result
+
+
 def check(scene, pid):
     """Relight a piece that every plate already has from the reference, and compare with the real thing."""
     piece = next((p for p in scene.cfg['pieces'] if p['id'] == pid), None)
@@ -517,7 +552,7 @@ def check(scene, pid):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    p.add_argument('command', choices=['all', 'relight', 'tint', 'check'])
+    p.add_argument('command', choices=['all', 'relight', 'tint', 'shade', 'check'])
     p.add_argument('--config', required=True)
     p.add_argument('--piece', action='append', help='only these pieces (relight) / the piece to check')
     p.add_argument('--review', help='folder for the here / away review sheets')
@@ -527,6 +562,8 @@ def main():
         build(scene, a.piece, a.review)
     if a.command in ('all', 'tint'):
         tint(scene)
+    if a.command in ('all', 'shade'):
+        shade(scene)
     if a.command == 'check':
         for pid in a.piece or []:
             check(scene, pid)

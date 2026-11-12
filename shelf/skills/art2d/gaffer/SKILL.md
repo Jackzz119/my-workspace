@@ -54,7 +54,8 @@ allowed-tools: Read, Glob, Grep
 | **光源** | 灯笼、烛火、串灯 | 画里画亮的样子（属于布景）+ 运行时一层加亮光晕，强度随时辰变，轻微闪烁 | 位置、半径、颜色、各时辰强度、闪烁幅度 |
 | **活物**（会动的） | 角色、猫 | 运行时乘一个 tint：在它待的位置上量出的光比（每种光一个值）；挨着光源时再往光源色混一点 | 每种光一个 tint 值 |
 
-活物的方向光、轮廓光与影子的做法（挨着灯的角色）写在 marionette 的 `references/runtime.md`「受光」，本技能管它用的场景光从哪来。
+活物的方向光、轮廓光与影子的做法（挨着灯的角色）写在 marionette 的 `references/runtime.md`「受光」与 `references/shading.md`，本技能管它用的场景光从哪来，
+以及它挡掉的那份光（坐在被窗照亮的毯子上：`light.py shade`，见 `references/runtime.md`「活物的场景光」）。
 
 ## 流水线
 
@@ -68,7 +69,7 @@ allowed-tools: Read, Glob, Grep
 6 接入    运行时按状态挂图层、随底图一起淡入淡出；光源一层加亮光晕 + 闪烁；活物乘 tint
 ```
 
-脚本：`python ${CLAUDE_SKILL_DIR}/scripts/light.py all --config <场景配置.json> --review <目录>`（`check` / `tint` 单独跑）。
+脚本：`python ${CLAUDE_SKILL_DIR}/scripts/light.py all --config <场景配置.json> --review <目录>`（`check` / `tint` / `shade` 单独跑）。
 依赖：Python 3.10+、`numpy`、`Pillow`。配置写在项目里（底图路径、参考状态、排除区、物件的区域与阈值），
 格式与每个参数见 `references/method.md`「配置」。
 
