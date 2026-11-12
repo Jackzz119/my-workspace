@@ -37,6 +37,7 @@ DEFAULTS = {
     "hair": {"mode": "dark", "lum_max": 0.3, "lum_min": 0.7, "rgb": None, "tol": 0.12, "masks": {}, "by_pose": {}},
     "hold": {"skin_below_chin": True, "bright_low_sat": True, "masks": {}},
     "breath": {"anchor_y": None, "masks": {}},  # anchor_y: weight 0 at/below this line (default cut_y + 60)
+    "shade": None,  # {"strength", "floor", "fine", "coarse", "skip"}: export deepens the fur's clefts (shade.py)
     "plate": None,  # optional {"path": scene frame PNG} to register the anchor pose onto
     "placement": None,  # {"offset": [x, y], "scale": s}: a known seat (source canvas px -> scene px) instead of registering
     "parts": {},  # name -> RGBA image in the scene frame: a scene part a pose can pick up (poses.<id>.holds)

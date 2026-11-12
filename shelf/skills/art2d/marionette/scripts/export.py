@@ -1,19 +1,26 @@
 """Stage 6 — export: encode the final frames for the runtime and write its manifest.
 
 Pose frames go out as WebP (lossy colour, lossless alpha), the data maps as PNG (they are numbers,
-never re-encode them lossy). rig.json in the runtime folder lists exactly what shipped, so the
+never re-encode them lossy). With "shade" in rig.json every pose frame is shaded on the way out (shade.py:
+the clefts between fur clumps; the flows and weights were measured on the unshaded frames, which is fine:
+shading moves nothing). Every URL in the manifest carries its file's content hash (`?v=`): a CDN or a browser
+that keeps files for hours (Cloudflare's default is 4 h) then fetches exactly the pictures that changed, as long
+as the runtime fetches the manifest itself without a cache (`fetch(url, { cache: "no-cache" })`). rig.json in the runtime folder lists exactly what shipped, so the
 runtime never keeps its own list of which poses blink or which pairs morph.
 
 Only files this stage produces are touched in the runtime folder: stale ones of the same kinds
 (<pose>-open/closed.webp, idle-*.png, morph-*.png) are removed and reported.
 """
 
+import hashlib
 import json
 import re
 import shutil
 from pathlib import Path
 
 from PIL import Image
+
+import shade
 
 MANIFEST_VERSION = 2
 OWNED = re.compile(r"^(.+-(open|closed)\.webp|idle-.+\.png|morph-.+\.png|rig\.json)$")
@@ -29,7 +36,10 @@ def run(ctx, args):
     out = Path(cfg["runtime"])
     out.mkdir(parents=True, exist_ok=True)
     base = cfg["url_base"].rstrip("/")
-    url = lambda name: f"{base}/{name}" if base else name  # noqa: E731
+    # the shipped file's URL, versioned by its content
+    def url(name):
+        v = hashlib.sha1((out / name).read_bytes()).hexdigest()[:10]
+        return f"{base}/{name}?v={v}" if base else f"{name}?v={v}"
 
     written = set()
     poses = {}
@@ -47,7 +57,10 @@ def run(ctx, args):
             f = ctx.final / f"{pose}-{eye}.png"
             if f.exists():
                 name = f"{pose}-{eye}.webp"
-                Image.open(f).save(out / name, "WEBP", quality=90, alpha_quality=100, method=6)
+                frame = Image.open(f)
+                if cfg.get("shade"):
+                    frame = shade.bake(frame, cfg["shade"])
+                frame.save(out / name, "WEBP", quality=90, alpha_quality=100, method=6)
                 written.add(name)
                 entry[eye] = url(name)
         idle = ctx.final / f"idle-{pose}.png"

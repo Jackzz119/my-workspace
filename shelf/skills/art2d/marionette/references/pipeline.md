@@ -163,6 +163,8 @@ RANSAC 求相似变换，再按「只有缩放 + 平移」重解平移（2D 运�
 
 帧：WebP，quality 90、alpha 无损。数据图：原样复制 PNG（它们是数字，不能有损压缩）。
 清单 `rig.json` 只列真正出货的东西，运行时据此决定谁眨眼、哪些对能形变。
+有 `shade` 时每一帧先加深毛缝再编码（`scripts/shade.py`，`references/shading.md`）。清单里每个文件名带内容哈希（`?v=`）：
+同名文件换了内容，CDN 和浏览器也会重新拿；运行时取清单本身要绕过缓存（`fetch(url, { cache: "no-cache" })`）。
 
 ## 文件格式
 
