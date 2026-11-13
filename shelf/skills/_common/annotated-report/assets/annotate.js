@@ -6,7 +6,8 @@
 // expired session, follows the reader to other devices, and an agent reads and clears it there. localStorage
 // (keyed by data-source and title) is the cache and, anywhere else, the only store. Published with {assets: {}} as
 // well, a note can carry pictures (pasted, dropped or picked): they go into the artifact's assets and the note keeps
-// their ids; without that capability the picture button stays hidden.
+// their ids; without that capability the picture button stays hidden. Ctrl+F / ⌘F, or the magnifier in the dock,
+// opens a find bar for the page: the host app's own find may not reach into an artifact's frame, and a phone has none.
 (() => {
     'use strict';
     if (window.__annotate) return;
@@ -21,9 +22,13 @@
     const HL = !!(window.CSS && CSS.highlights && window.Highlight); // text marks; without it the block gets a pin
     const S = { notes: [], marks: new Map(), maps: new Map(), pinned: [], marked: [] };
     let root, ring, pins, chip, banner, pill, list, copier, badge, scrim, toastEl, hovered, raf, timer;
+    let finder, q, count, prevB, nextB, seek;
 
     const DARK = `--ann-bg:#27242c;--ann-fg:#f3eee6;--ann-mute:#aea6b4;--ann-line:#ffffff2e;--ann-soft:#35313b;--ann-hi:#f2a65e;
 --ann-ink:#24170b;--ann-ring:#f6a55c;--ann-wash:#f6a55c24;--ann-bad:#ff8f86;--ann-sh:0 12px 32px -10px #000d;color-scheme:dark`;
+    // find hits are blue, apart from the amber of noted text; the one being looked at is solid
+    const HITS_DARK = (on) =>
+        `${on} ::highlight(ann-find){background-color:#6f9bff4d}${on} ::highlight(ann-find-now){background-color:#a5c2ff;color:#0d1526}`;
     const STYLE = `[data-annotate-ui]{all:revert;box-sizing:border-box;font:inherit;-webkit-tap-highlight-color:transparent}
 [data-annotate-ui][hidden]{display:none!important}
 [data-annotate-ui]:focus-visible{outline:2px solid var(--ann-ring);outline-offset:2px}
@@ -35,15 +40,42 @@ font:15px/1.55 system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-seri
 :root[data-theme=dark] .ann-root{${DARK}}
 ::highlight(ann){background-color:#ffbf0047}
 ::highlight(ann-now){background-color:#ff8c00a6}
+::highlight(ann-find){background-color:#2f6bff47}
+::highlight(ann-find-now){background-color:#1d4ed8;color:#fff}
+@media (prefers-color-scheme:dark){${HITS_DARK(':root:not([data-theme=light])')}}
+${HITS_DARK(':root[data-theme=dark]')}
 [data-ann-mark]{outline:2px dashed #e8742ab3;outline-offset:3px}
 .ann-btn,.ann-panel,.ann-ta,.ann-item{border:1px solid var(--ann-line);background:var(--ann-bg);color:var(--ann-fg)}
-.ann-btn,.ann-chip,.ann-pin,.ann-x,.ann-link,.ann-jump{cursor:pointer;touch-action:manipulation}
-.ann-dock .ann-btn,.ann-panel,.ann-banner,.ann-toast,.ann-chip{box-shadow:var(--ann-sh)}
+.ann-btn,.ann-chip,.ann-pin,.ann-x,.ann-link,.ann-jump,.ann-fb{cursor:pointer;touch-action:manipulation}
+.ann-dock .ann-btn,.ann-panel,.ann-banner,.ann-toast,.ann-chip,.ann-find{box-shadow:var(--ann-sh)}
 .ann-dock{position:fixed;right:max(14px,env(safe-area-inset-right));bottom:var(--ann-b);display:flex;gap:8px}
 .ann-btn{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 16px;border-radius:22px;font-weight:600}
 .ann-dock .ann-btn{min-width:44px;min-height:44px}
 .ann-copy{gap:0}
-@media (max-width:370px){.ann-wide{display:none}}
+.ann-seek{justify-content:center;padding:0}
+.ann-ico{display:block;position:relative;width:13px;height:13px;margin:-3px 0 0 -3px;border:2px solid currentColor;border-radius:50%}
+.ann-ico::after{content:"";position:absolute;left:8px;top:7px;width:6px;height:2px;border-radius:1px;background:currentColor;
+transform:rotate(45deg);transform-origin:0 50%}
+@media (max-width:420px){.ann-wide{display:none}.ann-dock{gap:6px}.ann-dock .ann-btn:not(.ann-seek){padding:0 12px}}
+@media (max-width:340px){.ann-dock{gap:4px}.ann-dock .ann-btn:not(.ann-seek){padding:0 9px}}
+.ann-find{position:fixed;top:max(10px,env(safe-area-inset-top));right:max(14px,env(safe-area-inset-right));display:flex;
+align-items:center;gap:2px;width:min(400px,calc(100vw - 28px));padding:4px 4px 4px 14px;border:1px solid var(--ann-line);
+border-radius:24px;background:var(--ann-bg);color:var(--ann-fg)}
+.ann-find:focus-within{border-color:var(--ann-ring);box-shadow:0 0 0 3px var(--ann-wash),var(--ann-sh)}
+.ann-q{flex:1;min-width:0;height:36px;margin:0;padding:0;border:0;background:none;color:inherit;font-size:16px;
+-webkit-appearance:none;appearance:none}
+.ann-q:focus-visible{outline:none}
+.ann-q::placeholder{color:var(--ann-mute);opacity:1}
+.ann-q::-webkit-search-cancel-button{display:none}
+.ann-count{flex-shrink:0;padding:0 6px;font-size:13px;color:var(--ann-mute);white-space:nowrap;font-variant-numeric:tabular-nums}
+.ann-count:empty{display:none}
+.ann-find[data-miss] .ann-count{color:var(--ann-bad)}
+.ann-fb{flex-shrink:0;width:36px;height:36px;padding:0;border:0;border-radius:18px;background:none;color:inherit;font-size:16px;line-height:1}
+.ann-fb:disabled{opacity:.4;cursor:default}
+.ann-find:not([hidden])~.ann-banner{top:calc(max(10px,env(safe-area-inset-top)) + 54px)}
+@media (max-width:640px){.ann-find{top:max(8px,env(safe-area-inset-top));left:max(8px,env(safe-area-inset-left));
+right:max(8px,env(safe-area-inset-right));width:auto}}
+@media (max-width:360px){.ann-find{padding-left:10px}.ann-count{padding:0 2px}.ann-root .ann-fb{width:38px}}
 .ann-pill[aria-pressed=true],.ann-primary,.ann-pin,.ann-badge{border-color:transparent;background:var(--ann-hi);color:var(--ann-ink)}
 .ann-badge{min-width:20px;padding:0 6px;border-radius:10px;font-size:12px;line-height:20px;text-align:center}
 .ann-banner,.ann-toast,.ann-chip{position:fixed;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 24px);
@@ -105,13 +137,13 @@ display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hi
 img:not(.ann-root img){cursor:zoom-in}
 /* motion: one damped spring (about 2% overshoot, settles in ~540 ms) for things arriving, hover and press; leaving is quick and plain */
 .ann-root{--ann-spring:linear(0, 0.004 1.1%, 0.023 2.8%, 0.063 4.9%, 0.125 7.2%, 0.204 9.8%, 0.297 12.5%, 0.397 15.4%, 0.499 18.4%, 0.597 21.6%, 0.688 24.9%, 0.769 28.3%, 0.837 31.9%, 0.893 35.5%, 0.937 39.2%, 0.969 43.1%, 0.992 47%, 1.007 51%, 1.015 55.1%, 1.019 59.2%, 1.02 63.5%, 1.018 67.8%, 1.016 72.2%, 1.013 76.7%, 1.01 81.2%, 1.007 85.8%, 1.005 90.5%, 1.003 95.2%, 1);--ann-out:cubic-bezier(.4,0,1,1)}
-.ann-btn,.ann-chip,.ann-link,.ann-x,.ann-pin,.ann-see,.ann-shut,.ann-jump{transition:scale .54s var(--ann-spring),background-color .2s,color .2s,box-shadow .2s,filter .2s}
+.ann-btn,.ann-chip,.ann-link,.ann-x,.ann-pin,.ann-see,.ann-shut,.ann-jump,.ann-fb{transition:scale .54s var(--ann-spring),background-color .2s,color .2s,box-shadow .2s,filter .2s}
 @media (hover:hover){.ann-btn:not(:disabled):hover,.ann-chip:hover,.ann-shut:hover{scale:1.04}
-.ann-btn:not(.ann-primary):not(.ann-pill[aria-pressed=true]):not(:disabled):hover{background:var(--ann-soft)}
+.ann-btn:not(.ann-primary):not(.ann-pill[aria-pressed=true]):not(:disabled):hover,.ann-fb:not(:disabled):hover{background:var(--ann-soft)}
 .ann-primary:not(:disabled):hover,.ann-pill[aria-pressed=true]:hover{filter:brightness(1.08)}
 .ann-pin:hover,.ann-see:hover{scale:1.12}
-.ann-link:hover,.ann-x:hover{scale:1.06}}
-.ann-btn:not(:disabled):active,.ann-chip:active,.ann-link:active,.ann-x:active,.ann-pin:active,.ann-see:active,.ann-shut:active,.ann-jump:active{scale:.94;transition-duration:.1s}
+.ann-link:hover,.ann-x:hover,.ann-fb:not(:disabled):hover{scale:1.06}}
+.ann-btn:not(:disabled):active,.ann-chip:active,.ann-link:active,.ann-x:active,.ann-pin:active,.ann-see:active,.ann-shut:active,.ann-jump:active,.ann-fb:not(:disabled):active{scale:.94;transition-duration:.1s}
 @keyframes ann-pop{from{opacity:0;scale:.92;translate:0 8px}}
 @keyframes ann-rise{from{opacity:0;translate:0 12px;scale:.96}}
 @keyframes ann-sheet{from{translate:0 100%}}
@@ -122,6 +154,8 @@ img:not(.ann-root img){cursor:zoom-in}
 @keyframes ann-drop{from{translate:0 -110%}}
 .ann-sheet.ann-top{animation-name:ann-drop}
 .ann-chip,.ann-toast,.ann-banner{animation:ann-rise .54s var(--ann-spring) both}
+@keyframes ann-fall{from{opacity:0;translate:0 -8px;scale:.96}}
+.ann-find{animation:ann-fall .54s var(--ann-spring) both;transform-origin:100% 0}
 .ann-scrim,.ann-view{animation:ann-fade .22s ease-out both}
 .ann-view img{animation:ann-pop .54s var(--ann-spring) both}
 .ann-pin{animation:ann-dot .54s var(--ann-spring) both}
@@ -130,11 +164,13 @@ img:not(.ann-root img){cursor:zoom-in}
 @media (prefers-reduced-motion:reduce){.ann-root *{animation:none!important;transition:none!important}}
 html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
 @media (pointer:coarse){html[data-annotating] body :not([data-annotate-ui]){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-.ann-btn,.ann-chip,.ann-link{min-height:44px}}
+.ann-btn,.ann-chip,.ann-link{min-height:44px}
+.ann-fb{width:44px;height:44px;border-radius:22px}}
 @media (prefers-reduced-motion:reduce){.ann-flash{animation:none}}`;
     // static markup; page and reader text goes in through textContent only
     const X = '<button type="button" class="ann-x" aria-label="关闭">✕</button>';
-    const ROOT = `<div class="ann-root"><style>${STYLE}</style><div class="ann-pins"></div><div class="ann-ring" hidden></div><button type="button" class="ann-chip" hidden>批注这段</button><div class="ann-banner" hidden></div><div class="ann-dock"><button type="button" class="ann-btn ann-free">留言</button><button type="button" class="ann-btn ann-list" hidden>清单<span class="ann-badge"></span></button><button type="button" class="ann-btn ann-copy" aria-label="复制全部批注" hidden>复制<span class="ann-wide">全部</span></button><button type="button" class="ann-btn ann-pill" aria-pressed="false"></button></div><div class="ann-toast" role="status" hidden></div><div class="ann-scrim" hidden></div></div>`;
+    const FIND = `<div class="ann-find" role="search" aria-label="页内搜索" hidden><input type="search" class="ann-q" placeholder="搜索这份报告" aria-label="搜索这份报告" enterkeyhint="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"><span class="ann-count" role="status" aria-live="polite"></span><button type="button" class="ann-fb" aria-label="上一处（Shift+回车）" title="上一处（Shift+回车）" disabled>↑</button><button type="button" class="ann-fb" aria-label="下一处（回车）" title="下一处（回车）" disabled>↓</button><button type="button" class="ann-fb" aria-label="关闭搜索（Esc）" title="关闭搜索（Esc）">✕</button></div>`;
+    const ROOT = `<div class="ann-root"><style>${STYLE}</style><div class="ann-pins"></div><div class="ann-ring" hidden></div><button type="button" class="ann-chip" hidden>批注这段</button>${FIND}<div class="ann-banner" hidden></div><div class="ann-dock"><button type="button" class="ann-btn ann-seek" aria-expanded="false"><span class="ann-ico"></span></button><button type="button" class="ann-btn ann-free">留言</button><button type="button" class="ann-btn ann-list" hidden>清单<span class="ann-badge"></span></button><button type="button" class="ann-btn ann-copy" aria-label="复制全部批注" hidden>复制<span class="ann-wide">全部</span></button><button type="button" class="ann-btn ann-pill" aria-pressed="false"></button></div><div class="ann-toast" role="status" hidden></div><div class="ann-scrim" hidden></div></div>`;
     const COMPOSER = `<div class="ann-panel ann-composer" role="dialog" aria-label="写批注"><div class="ann-head"><span class="ann-loc"></span>${X}</div><blockquote class="ann-quote"></blockquote><textarea class="ann-ta" rows="4" enterkeyhint="done" placeholder="写下你的意见…（回车存下，Shift+回车换行）" aria-label="批注内容"></textarea><div class="ann-imgs" hidden></div><p class="ann-hint" aria-live="polite"></p><div class="ann-row"><input type="file" accept="image/*" multiple hidden><button type="button" class="ann-btn ann-pic" hidden>图片</button><button type="button" class="ann-btn ann-primary">存下来</button></div></div>`;
     const DRAWER = `<div class="ann-panel ann-drawer" role="dialog" aria-label="批注清单"><div class="ann-head"><strong></strong>${X}</div><p class="ann-hint" aria-live="polite"></p><ol class="ann-items"></ol><textarea class="ann-ta" readonly hidden aria-label="批注清单全文"></textarea><div class="ann-row ann-acts"></div></div>`;
     const ITEM = `<li class="ann-item"><div class="ann-meta"><span class="ann-loc"></span></div><button type="button" class="ann-jump" title="跳到原处"><span class="ann-quote"></span></button><div class="ann-note"></div><div class="ann-imgs" hidden></div></li>`;
@@ -222,8 +258,11 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
             () => {} // a lost connection keeps what is here; the cache still holds it
         );
     };
-    // the copied list: a two-line header, then per note its number, [place]「quote」, the note verbatim below and the
-    // asset ids of its pictures (an agent fetches them from the report)
+    // the copied list: a two-line header (the page, then how to answer: grouped by feature or module, not note by note,
+    // so each round's reply gathers a subject in the same place), then per note its number, [place]「quote」, the note
+    // verbatim below and the asset ids of its pictures (an agent fetches them from the report)
+    const REPLY =
+        '按功能 / 模块归类回复（不按批注先后）：每个模块一节，写涉及的批注编号 → 结论与处理 → 改动与证据；沿用并合并上一轮报告已有的模块分区；每条批注都归进一个模块，一条不漏。';
     const exportText = () => {
         const items = S.notes.map((n, i) => {
             const at =
@@ -232,7 +271,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
             return `${i + 1}. ${at || '[页面]'}${n.note ? '\n' + n.note : ''}${imgs}`;
         });
         const title = squash(document.title) || '无标题';
-        const head = `批注｜${title}${cfg.source ? `（${cfg.source}）` : ''}\n逐条处理，回复按编号说改了什么。`;
+        const head = `批注｜${title}${cfg.source ? `（${cfg.source}）` : ''}\n${REPLY}`;
         return `${head}\n\n${items.join('\n\n')}\n`;
     };
     window.__annotate = {
@@ -928,8 +967,217 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         });
         if (hit) setTimeout(() => getSelection().isCollapsed && openDrawer(hit.id));
     };
-    // Escape closes a picture, then the panel, then leaves annotate mode; not while an IME candidate is open (Escape
-    // cancels it). Over a picture, + − 0 1 zoom it.
+    // Find in the page. Hits are CSS highlights, so the page's DOM, the notes' anchors and a selection being made stay
+    // as they are; without the Highlight API the block of the hit flashes instead. The bar keeps its words for the
+    // next time it opens, and Ctrl+F / ⌘F pressed inside it again is the browser's own find.
+    const MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+    const FIND_MAX = 1000;
+    const SKIP = 'script,style,noscript,template,textarea,select,nav'; // nav: the contents repeat the headings
+    const LINES = /^(pre|pre-wrap|pre-line|break-spaces)$/;
+    const F = { on: false, hits: [], at: -1, more: false, opened: new Set(), wait: 0, seq: 0, from: null, anim: null };
+    // lower case that keeps every character where it was (the rare letter that grows when lowered stays as it is)
+    const lower = (s, l = s.toLowerCase()) =>
+        l.length === s.length ? l : s.replace(/[^]/g, (c) => (c.toLowerCase().length === 1 ? c.toLowerCase() : c));
+    const fold = (s) => lower(s.replace(/\s+/g, ' ').trim());
+    // The page's text as one folded string, each character tied to its place. Text that reads on (inline elements in
+    // one block) joins up, a run of white space is one space, and a new block, a <br> or a line break in preformatted
+    // text starts a new line, so a hit never runs across them. Left out: the layer, form fields, the contents and
+    // anything display:none or visibility:hidden; the text of a closed <details> is in, and a hit there opens it.
+    const scan = () => {
+        const [chars, nodes, offs, seen] = [[], [], [], new Map()];
+        const cut = () =>
+            chars.length && chars[chars.length - 1] !== '\n' && (chars.push('\n'), nodes.push(null), offs.push(0));
+        const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+            acceptNode: (n) => {
+                if (n.nodeType === 3 || n.localName === 'br') return NodeFilter.FILTER_ACCEPT;
+                if (n === root || n.matches(SKIP)) return NodeFilter.FILTER_REJECT;
+                const cs = getComputedStyle(n);
+                if (cs.display === 'none') return NodeFilter.FILTER_REJECT;
+                const up = seen.get(n.parentElement);
+                const inline = up && (cs.display === 'inline' || cs.display === 'contents');
+                seen.set(n, {
+                    block: inline ? up.block : n,
+                    shown: cs.visibility === 'visible',
+                    lines: LINES.test(cs.whiteSpace)
+                });
+                return NodeFilter.FILTER_SKIP;
+            }
+        });
+        let block = null;
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+            if (n.nodeType === 1) {
+                cut();
+                continue;
+            }
+            const at = seen.get(n.parentElement) || { block: document.body, shown: true };
+            if (!at.shown) continue;
+            if (at.block !== block) ((block = at.block), cut());
+            const text = n.data;
+            const folded = lower(text);
+            for (let i = 0; i < text.length; i++) {
+                let c = folded[i];
+                if (c === '\n' && at.lines) {
+                    cut();
+                    continue;
+                }
+                if (/\s/.test(c)) {
+                    if (!chars.length || /[ \n]/.test(chars[chars.length - 1])) continue;
+                    c = ' ';
+                }
+                chars.push(c);
+                nodes.push(n);
+                offs.push(i);
+            }
+        }
+        return { text: chars.join(''), nodes, offs };
+    };
+    // where a hit is down the window; one in a closed <details> is where that shows its summary
+    const yOf = (r) => {
+        const box = r.getClientRects()[0];
+        if (box) return box.bottom;
+        let shut = null;
+        for (let e = r.startContainer.parentElement; e; e = e.parentElement)
+            if (e.localName === 'details' && !e.open) shut = e;
+        return shut ? shut.getBoundingClientRect().bottom : -1;
+    };
+    // a hit inside closed <details> opens them; ones opened for an earlier hit close again
+    const unfold = (r) => {
+        const holds = new Set();
+        for (let e = r && r.startContainer.parentElement; e; e = e.parentElement) {
+            if (e.localName !== 'details') continue;
+            holds.add(e);
+            const sum = e.querySelector(':scope > summary');
+            if (!e.open && !(sum && sum.contains(r.startContainer))) ((e.open = true), F.opened.add(e));
+        }
+        for (const d of F.opened) if (!holds.has(d)) ((d.open = false), F.opened.delete(d));
+    };
+    // Into the boxes that scroll on their own first (a wide table), then into the window: between the bar and the
+    // dock, or on a phone being typed on above the keyboard (a frame is not told about it; it takes the lower half).
+    // A hit in sight already stays where it is. It jumps, as a browser's find does: stepping through hits quickly,
+    // a glide would still be on its way (and one glide started over another lands short).
+    const reveal = (r) => {
+        const el = r.startContainer.parentElement;
+        for (let e = el; e && e !== document.body; e = e.parentElement) {
+            const [cs, box, hit] = [getComputedStyle(e), e.getBoundingClientRect(), r.getBoundingClientRect()];
+            if (
+                e.scrollWidth > e.clientWidth &&
+                /auto|scroll/.test(cs.overflowX) &&
+                (hit.left < box.left || hit.right > box.right)
+            )
+                e.scrollLeft += hit.left - box.left - (box.width - hit.width) / 2;
+            if (
+                e.scrollHeight > e.clientHeight &&
+                /auto|scroll/.test(cs.overflowY) &&
+                (hit.top < box.top || hit.bottom > box.bottom)
+            )
+                e.scrollTop += hit.top - box.top - (box.height - hit.height) / 2;
+        }
+        if (!HL) flash({ el: blockOf(el) || el });
+        const hit = r.getBoundingClientRect();
+        const typing = document.activeElement === q && matchMedia('(pointer: coarse)').matches;
+        const [top, bottom] = [
+            finder.getBoundingClientRect().bottom + 12,
+            typing ? innerHeight * 0.44 : innerHeight - 72
+        ];
+        if (hit.height && hit.top >= top && hit.bottom <= bottom) return;
+        scrollTo({ top: scrollY + hit.top - (top + bottom - hit.height) / 2, behavior: 'instant' });
+    };
+    const go = (at) => {
+        F.at = at;
+        const r = F.hits[at];
+        if (HL && r) CSS.highlights.set('ann-find-now', Object.assign(new Highlight(r), { priority: 2 }));
+        else if (HL) CSS.highlights.delete('ann-find-now');
+        unfold(r);
+        const [n, asked] = [F.hits.length, !!q.value.trim()];
+        count.textContent = !asked ? '' : n ? `第 ${at + 1} / 共 ${n}${F.more ? '+' : ''} 处` : '无结果';
+        finder.toggleAttribute('data-miss', asked && !n);
+        prevB.disabled = nextB.disabled = !n;
+        if (r) reveal(r);
+    };
+    // case does not count, nor how much white space; refining the words keeps to the hit it was on, a new search
+    // starts from what is in view
+    const search = () => {
+        clearTimeout(F.wait);
+        F.wait = 0;
+        const needle = fold(q.value);
+        const was = F.hits[F.at];
+        Object.assign(F, { hits: [], more: false });
+        const map = needle ? scan() : { text: '' };
+        for (let i = needle ? map.text.indexOf(needle) : -1; i >= 0; i = map.text.indexOf(needle, i + needle.length)) {
+            if (F.hits.length === FIND_MAX) {
+                F.more = true;
+                break;
+            }
+            const [end, r] = [i + needle.length - 1, document.createRange()];
+            r.setStart(map.nodes[i], map.offs[i]);
+            r.setEnd(map.nodes[end], map.offs[end] + 1);
+            F.hits.push(r);
+        }
+        if (HL && F.hits.length)
+            CSS.highlights.set('ann-find', Object.assign(new Highlight(...F.hits), { priority: 1 }));
+        else if (HL) CSS.highlights.delete('ann-find');
+        const top = finder.getBoundingClientRect().bottom;
+        const at = F.hits.findIndex((r) =>
+            was ? r.compareBoundaryPoints(Range.START_TO_START, was) >= 0 : yOf(r) > top
+        );
+        go(at < 0 && F.hits.length ? 0 : at);
+    };
+    // words still being typed are searched first, and that search stands on its first hit
+    const stepFind = (by) => (F.wait ? search() : F.hits.length && go((F.at + by + F.hits.length) % F.hits.length));
+    const openFind = () => {
+        if (S.view && S.view.isConnected) leave(S.view, { opacity: 0 });
+        if (F.anim) F.anim.cancel();
+        F.seq++;
+        if (!F.on) {
+            const now = document.activeElement;
+            F.from = now && now !== document.body && !finder.contains(now) ? now : null;
+            F.on = true;
+            finder.hidden = false;
+            seek.setAttribute('aria-expanded', 'true');
+            if (q.value.trim()) search();
+        }
+        q.focus();
+        q.setSelectionRange(0, q.value.length);
+    };
+    // the marks go and the page is as it was, but for a <details> the hit being read is in: that stays open
+    const closeFind = () => {
+        if (!F.on) return;
+        clearTimeout(F.wait);
+        if (HL) (CSS.highlights.delete('ann-find'), CSS.highlights.delete('ann-find-now'));
+        F.opened.clear();
+        Object.assign(F, { on: false, hits: [], at: -1, wait: 0 });
+        seek.setAttribute('aria-expanded', 'false');
+        // the focus goes back to where it was on the page, or just out of the bar
+        if (finder.contains(document.activeElement)) {
+            if (F.from && F.from.isConnected) F.from.focus({ preventScroll: true });
+            else document.activeElement.blur();
+        }
+        F.from = null;
+        const seq = ++F.seq;
+        const done = () => seq === F.seq && (finder.hidden = true);
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches || !finder.animate) return done();
+        const to = { opacity: 0, translate: '0 -8px' };
+        F.anim = finder.animate([{}, to], { duration: 160, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' });
+        F.anim.finished.then(done, done);
+        setTimeout(done, 280);
+    };
+    // Ctrl+F (⌘F on a Mac) opens the bar wherever the focus is on the page; Ctrl/⌘+G or F3 step while it is open. A
+    // sheet open on a phone keeps the keys, and the bar's own field hands the shortcut to the browser.
+    const onFindKey = (e) => {
+        if (e.isComposing || e.keyCode === 229 || e.altKey) return;
+        const mod = MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+        const key = /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() : (e.code || '').replace(/^Key/, '').toLowerCase();
+        const open = mod && key === 'f' && !e.shiftKey && e.target !== q && !(S.panel && S.panel.matches('.ann-sheet'));
+        const step = F.on && F.hits.length && ((mod && key === 'g') || e.key === 'F3');
+        if (!open && !step) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (open) openFind();
+        else stepFind(e.shiftKey ? -1 : 1);
+    };
+
+    // Escape closes a picture, then the panel, then leaves annotate mode, then the find bar; not while an IME
+    // candidate is open (Escape cancels it). Over a picture, + − 0 1 zoom it.
     const onKey = (e) =>
         (S.view && S.view.isConnected && /^[-+=01]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.target.closest?.('input, textarea')
             ? (e.preventDefault(), S.view.zoomKey(e.key === '=' ? '+' : e.key), true)
@@ -943,7 +1191,9 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
               ? closePanel()
               : S.picking
                 ? setPicking(false)
-                : hideChip()));
+                : F.on
+                  ? closeFind()
+                  : hideChip()));
 
     const start = () => {
         // annotate2: notes the browser-only layer kept for a page that is now republished were handled from the
@@ -963,6 +1213,33 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         free.onclick = () => openComposer({ kind: 'n' });
         list.onclick = () => (S.panel && S.panel.matches('.ann-drawer') ? closePanel() : openDrawer());
         copier.onclick = () => copy();
+        let closer;
+        [finder, q, count, seek] = $(root, '.ann-find .ann-q .ann-count .ann-seek');
+        [prevB, nextB, closer] = finder.querySelectorAll('.ann-fb');
+        const keys = MAC ? '⌘F' : 'Ctrl+F';
+        Object.assign(seek, { title: `搜索（${keys}）`, onclick: () => (F.on ? closeFind() : openFind()) });
+        seek.setAttribute('aria-label', `搜索这份报告（${keys}）`);
+        seek.setAttribute('aria-keyshortcuts', MAC ? 'Meta+F' : 'Control+F');
+        prevB.onclick = () => stepFind(-1);
+        nextB.onclick = () => stepFind(1);
+        closer.onclick = closeFind;
+        // typing searches after a pause, and an IME's letters once a candidate is chosen; Enter steps, Escape closes
+        let composing = false;
+        const soon = () => (clearTimeout(F.wait), (F.wait = setTimeout(search, 160)));
+        q.addEventListener('input', (e) => composing || e.isComposing || soon());
+        q.addEventListener('compositionstart', () => (composing = true));
+        q.addEventListener('compositionend', () => (setTimeout(() => (composing = false)), soon()));
+        q.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' || composing || e.isComposing || e.keyCode === 229) return;
+            e.preventDefault();
+            stepFind(e.shiftKey ? -1 : 1);
+        });
+        finder.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape' || composing || e.isComposing || e.keyCode === 229) return;
+            e.preventDefault();
+            e.stopPropagation();
+            closeFind();
+        });
         // the tap that opened a sheet must not close it again through the scrim
         scrim.onclick = () => Date.now() - S.shown > 400 && !typed() && closePanel();
         chip.onmousedown = (e) => e.preventDefault(); // keep the selection on desktop
@@ -982,6 +1259,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         for (const type of ['mousedown', 'mouseup', 'touchstart', 'touchend']) addEventListener(type, swallow, passive);
         addEventListener('pointermove', onMove, passive);
         addEventListener('keydown', onKey);
+        addEventListener('keydown', onFindKey, true); // before the page's own shortcuts
         addEventListener('resize', () => {
             hideChip();
             fit();
