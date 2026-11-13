@@ -34,6 +34,7 @@ load_class,load_reason,frequency_evidence,duplicate_group,canonical_source,propo
 
 优先用目标模型官方计数器或可验证匹配的 tokenizer，对实际 UTF-8 文本计数；
 记录模型/encoding、工具版本、计量日期和输入范围。文件正文 token 不包含消息包装等隐含输入。
+宿主自带的上下文用量统计（按类列出系统提示、工具、记忆、技能等）是启动注入的实测值，可直接作启动成本的计量，注明来源与时间；逐文件的 token 仍要分词器。
 不存在可靠匹配时不得把相近 tokenizer 当成精确结果；可同时提供代理计数并标“参考编码”。
 
 无法真实分词时报告 bytes/行数与估算：抽取本项目中文、英文、代码、表格的分层样本，
