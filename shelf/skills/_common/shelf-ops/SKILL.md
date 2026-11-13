@@ -15,7 +15,11 @@ shelf 是个人内容货架：一个 git 仓库（货架）放技能、协议和
 - **从不等键盘**：要确认的操作退出 2，`next` 里给出带 `--yes` 的原命令。
 - **模板**：货架上的 `templates/ai` 是 AI 工作流模板（协议、通用技能与 project-audit、技能登记表、worktree 与 Multica 开工脚本、文档骨架）。`shelf template show ai` 列出它会装哪些货、落在哪、会建哪些固定目录。
 - **项目布局**（ai 区的目录名记在账本 `aiDir`：.NET / C# 项目是 `AI`，其余是 `ai`）：
-  - `ai/jaAgents/CLAUDE.md`、`AGENTS.md` 是协议正本（入库）；根目录 `CLAUDE.md` / `AGENTS.md` 是给 agent 读的副本（gitignore）。**副本和正本永远一致**（用户 2026-10-26 定，没有「追加」）：正本更新了、副本没人动过 → `ai/scripts/protocol-mirror.sh` 用正本覆盖副本（Claude Code 与 Codex 的钩子每条消息都查一次，本会话读到的协议过期就提醒重读）；**副本被人改过** → 两份都不动，先用 `git diff --no-index ai/jaAgents/<名> <名>` 给用户看，用户确认后才 `shelf push ai/jaAgents/<名> --take-mirror`（收进正本再推，推前照样给清单）。shelf 2.1 起 CLI 自己也守这条：副本改过、正本没动是 `mirror-ahead`，`sync` 列待决、`pull` 不动、`push` / `merge` 列差异退出 2，**没有用户确认不加 `--take-mirror`**；不要副本的改动就 `shelf pull ai/jaAgents/<名> --force`。两份各改各的停下（`mirror-mismatch`）
+  - `ai/jaAgents/CLAUDE.md`、`AGENTS.md` 是协议正本（入库）；根目录 `CLAUDE.md` / `AGENTS.md` 是给 agent 读的副本（gitignore）。**副本和正本永远一致**（用户 2026-10-26 定，没有「追加」），分三种状态：
+    - 正本更新了、副本没人动过：`ai/scripts/protocol-mirror.sh` 用正本覆盖副本。Claude Code 与 Codex 的钩子每条消息都查一次，本会话读到的协议过期就提醒重读。
+    - 副本被人改过（`mirror-ahead`）：两份都不动，先用 `git diff --no-index ai/jaAgents/<名> <名>` 给用户看，用户确认后才 `shelf push ai/jaAgents/<名> --take-mirror`（收进正本再推，推前照样给清单）。不要副本的改动就 `shelf pull ai/jaAgents/<名> --force`。
+    - 两份各改各的（`mirror-mismatch`）：停下，交用户定。
+    - shelf 2.1 起 CLI 自己也守这条：`mirror-ahead` 时 `sync` 列待决、`pull` 不动、`push` / `merge` 列差异退出 2，没有用户确认不加 `--take-mirror`。
   - `ai/jaSkills/<名>/` 是技能唯一正本，`.claude/skills`、`.agents/skills` 是指向它的链接
   - `ai/features/`、`ai/sessions/`、`ai/design_system/` 下的 `concept/ img/ uiux/ codex-visual/`、`ai/project-audit/` 下的 `runs/ scripts/` 是固定目录：各技能在 frontmatter 里声明，init / sync 缺了就建
   - `ai/JASKILL.md`、`ai/PROJECT.md`、`ai/TODO.md`、`ai/check-docs.json`、`.claude/settings.json`、`.worktreeinclude` 是植入物：装一次，之后归项目，shelf 不对账、不推
