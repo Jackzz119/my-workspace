@@ -17,9 +17,7 @@ description: 版本控制助手 — 执行 git 操作时调用，包含 commit �
 <type>: <description>
 ```
 
-**Commit message 必须用英语**（全项目统一，便于跨语言协作和工具链识别）。
-
-全小写，简洁描述改动内容，聚焦"做了什么"而非"怎么做的"。专有名词（类名、文件名、缩写、audio key 等）保持原始大小写，其余全部小写。
+语言、大小写、是否带 `(scope)` 与单号，跟随项目文档与近期 `git log`；项目没有约定时用英语小写。聚焦"做了什么"而非"怎么做的"。专有名词（类名、文件名、缩写等）保持原始大小写。
 
 ### Type 列表
 
@@ -42,10 +40,10 @@ description: 版本控制助手 — 执行 git 操作时调用，包含 commit �
 ### 示例
 
 ```
-feat: add freespin result digit animation
-fix: displaytime not overriding totalstarttime
+feat: add export button to order list
+fix: expired token not triggering re-login
+feat(detail): add status badge (PROJ-123)
 refactor: extract socket init into separate module
-minor: clean up unused fields
 chore: update dependencies
 ```
 
@@ -136,7 +134,7 @@ PR/MR 方向：功能分支 → 集成分支（项目协议写明是哪条）
 
 - 优先使用 `rebase`，保持线性提交历史，便于 review 和 bisect
 - 不要 rebase 已推送到共享分支的 commit
-- PR 合并：单分支的 PR 用 rebase（`gh pr merge --rebase`）；只有环境分支之间同步（如 dev → staging → main）才用 merge commit（`--merge`）保留两条线；任何时候都不 squash（压扁后 `blame` 只剩一句概述）
+- PR 合并：单分支的 PR 用 rebase（`gh pr merge --rebase`）；只有环境分支之间同步（如 dev → staging → main）才用 merge commit（`--merge`）保留两条线；人工分支不 squash（压扁后 `blame` 只剩一句概述）；平台生成的 agent 分支以项目协议为准
 
 ### 提交粒度原则
 
@@ -145,7 +143,5 @@ PR/MR 方向：功能分支 → 集成分支（项目协议写明是哪条）
 
 ### "推所有"的范围定义
 
-**⚠️ 重要：用户说"推所有"、"把所有改动都推"或类似表述时，必须提交 `git status` 中全部已修改和未追踪的文件，包括看起来"与本次功能无关"的改动（如 Unity 自动更新的 .asset、.prefab 等）。**
-
-禁止以"与功能无关"为由自行过滤文件——那是用户的判断权，不是助手的。
-唯一例外：敏感文件（`.env`、token、credentials），仍须排除并告知用户。
+用户明确说"推所有"、"把所有改动都推"或类似表述时，提交 `git status` 中全部已修改和未追踪的文件，包括看起来与本次功能无关的改动。先列出其中不是本会话改的文件，让用户确认这是他要的范围；确认后不再以"与功能无关"为由自行过滤——那是用户的判断权。
+敏感文件（`.env`、token、credentials）仍排除并告知用户。
