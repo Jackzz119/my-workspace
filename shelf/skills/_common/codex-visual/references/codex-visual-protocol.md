@@ -23,7 +23,7 @@ Do not generate a replacement image unless the brief asks for a redesign or refe
 
 Translate the brief into explicit visual requirements before generating. When the user requests options or a pitch comparison, produce meaningfully different directions rather than superficial color variants. Explain the hypothesis and tradeoff of each direction.
 
-When raster output is requested, use the bundled `imagegen` skill and its built-in `image_gen` tool only. Do not use an API-key fallback. Pass relevant absolute reference paths to `referenced_image_paths` when supported. Preserve the requested size, aspect ratio, count, transparency, and output intent. Inspect the generated result before recommending it.
+When raster output is requested, use the bundled `imagegen` skill and its built-in `image_gen` tool only. Do not use an API-key fallback, unless the caller passed `--image-model`. Pass relevant absolute reference paths to `referenced_image_paths` when supported. Preserve the requested size, aspect ratio, count, transparency, and output intent. Inspect the generated result before recommending it.
 
 ### Compare
 

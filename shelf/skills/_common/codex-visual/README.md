@@ -4,7 +4,7 @@
 **项目内置版**——直接放进项目就能用，不需要安装 plugin。
 
 移植自 `codex-visual-in-cc` 插件（Apache-2.0，见 LICENSE / NOTICE），
-已适配 **codex-cli ≥ 0.147**（上游 `--full-auto` 被移除，本版改用 `--sandbox workspace-write`，
+已适配 codex-cli 0.147 起的变化（上游 `--full-auto` 被移除，本版改用 `--sandbox workspace-write`，
 插件原版在 0.147 上会直接报 `unexpected argument '--full-auto'` 跑不通）。
 
 ## 安装
@@ -21,7 +21,7 @@
 ## 前置要求
 
 1. **Node ≥ 18.18**
-2. **Codex CLI ≥ 0.142**：`npm i -g @openai/codex`
+2. **Codex CLI ≥ 0.142**（以脚本 `MIN_CODEX_VERSION` 为准）：`npm i -g @openai/codex`
 3. **登录**：`codex login`
    用 ChatGPT 账号登录会走订阅额度；不登录则可能走 API key 计费。
 
@@ -41,7 +41,7 @@ node .claude/skills/codex-visual/scripts/codex-visual.mjs status
 ```bash
 node .claude/skills/codex-visual/scripts/codex-visual.mjs run \
   --mode design \
-  --ref "C:\path\to\reference.png" \
+  --ref "/path/to/reference.png" \   # Windows 写 "C:\path\to\reference.png"
   "你的 brief：产品是什么、受众、视口、约束、判断标准、要交付什么"
 ```
 
@@ -52,6 +52,7 @@ node .claude/skills/codex-visual/scripts/codex-visual.mjs run \
 网页要截图当输入时，用 headless Chrome 落盘：
 
 ```bash
+# macOS 用 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"，Windows 用 chrome.exe
 chrome.exe --headless=new --disable-gpu --window-size=1400,1500 \
   --screenshot="out.png" "http://localhost:5173/your-page"
 ```
