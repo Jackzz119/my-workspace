@@ -40,7 +40,7 @@ worktree 是新建的，`.claude/` / `.agents/` 都不存在；根目录的 `CLA
 bash ai/scripts/bootstrap.sh
 ```
 
-（老项目还没装 AI 工作流模板、脚本仍在 `ai/jaAgents/bootstrap.sh` 的，跑那一份，效果相同。）
+（**已弃用的旧路径**：老项目还没装 AI 工作流模板、脚本仍在 `ai/jaAgents/bootstrap.sh` 的，跑那一份，效果相同；装了模板的项目一律用 `ai/scripts/bootstrap.sh`。）
 
 它会：
 
@@ -55,25 +55,25 @@ bash ai/scripts/bootstrap.sh
 
 跑完后**从头读一遍生成的协议文档**（就是本文件），按 §一 准备上下文，然后才开始真正干活。脚本重复执行安全；下一轮 turn 回到同一 worktree 时再跑一次也无妨。
 
-🔴 **怎么读才不重复、不踩坑**（2026-11-03，DOUB-174 实测）：
+🔴 **怎么读才不重复、不踩坑**（2026-11-03 实测）：
 - `cd` 进 repo 之后 harness 会把根目录的 `CLAUDE.md` 自动注入成指令（system-reminder 里出现 `Contents of …/<repo>/CLAUDE.md`）。**出现了就算读过，不要再手动 Read 一遍**；没出现才 Read 根目录那份副本。
-- **只读根目录那份副本，不要 Read `ai/jaAgents/` 下的任何文件。** 那个目录里有一个叫 `CLAUDE.md` 的本机协议正本，Claude Code 会在你读同目录文件时把它当嵌套指令注入，多吃约 6.7k token，还会把本机规矩（每轮出报告页、会话标题等）带进来。要看本文件的真源，看根目录副本就够了——两份一字不差。
+- **只读根目录那份副本，不要 Read `ai/jaAgents/` 下的任何文件。** 那个目录里有一个叫 `CLAUDE.md` 的本机协议正本，Claude Code 会在你读同目录文件时把它当嵌套指令注入，白白多吃一整份本机协议的上下文，还会把本机规矩（每轮出报告页、会话标题等）带进来。要看本文件的真源，看根目录副本就够了——两份一字不差。
 
 ## 一、上下文准备
 
 每个任务开始时，按顺序做：
 
 1. 读 `ai/PROJECT.md`——项目现状与索引。其中「**开工红线**」是项目的强制前置动作，「**项目专属交付纪律**」补充本文件 §八–§十 里留给项目决定的部分，两节都必须读到。
-2. **不整份读 `ai/TODO.md`**（它是本机会话的任务唯一来源；Multica 下任务真源是 issue）。只 `grep -n "<单号>\|<功能名>" ai/TODO.md`，读命中条目及其上下几行；没命中就不读。整份 62 KB ≈ 27k token，超过 Read 单次上限（2026-11-02 DOUB-174 实测）。
+2. **不整份读 `ai/TODO.md`**（它是本机会话的任务唯一来源；Multica 下任务真源是 issue）。只 `grep -n "<单号>\|<功能名>" ai/TODO.md`，读命中条目及其上下几行；没命中就不读。整份通常超过 Read 单次上限（2026-11-02 实测）。
 3. 读 `ai/JASKILL.md`——本项目专属技能登记表，知道哪些场景该触发哪个技能。
 4. 读 issue 本身与派活人给的**文档 scope**；按任务领域再读对应文档与技能（见 §二）。
-5. **不要读 `ai/sessions/`**——那是手动会话存档，只在用户点名某个档时才读。开场不扫这个目录、不列有哪些档、不问要不要恢复。
+5. **不要读 `ai/sessions/`**——那是手动会话存档，只在用户点名某个档时才读。开场不扫这个目录、不列有哪些档、不问要不要恢复。issue 描述（含它的「文档 scope」）点名到文件的交接档（`交接-<主题>.md`）也算点名：只读点名的那一份和它的 `img/<文档名>/`，按档里的执行规则开工（规则见 intj 技能的交接档一节）。
 
 ## 二、Skill 系统
 
 ### 真源与落点
 
-技能本体只有一份，在 **`ai/jaSkills/`**，随仓库入库。workspace agent 身上不挂 skill；§零 的 bootstrap 把全部技能复制进 `.claude/skills/`（Claude 系）或 `.agents/skills/`（Codex 系），内容与真源逐字节相同。**Multica run 里这些副本开场是看不见的**（会话根是 `workdir/`，副本在 repo 下一层；2026-11-02 DOUB-174 只读不改的 run 全程 0 个可见），**harness 在你第一次 Edit 仓库里的文件之后才会发现它们、列进 Skill 工具**（2026-11-03 实测）。所以：开工到首次改文件之间要用技能，直接 `Read ai/jaSkills/<name>/SKILL.md`，按它的指引只取需要的 references；Skill 工具列出来之后两条路都行，内容一样。
+技能本体只有一份，在 **`ai/jaSkills/`**，随仓库入库。workspace agent 身上不挂 skill；§零 的 bootstrap 把全部技能复制进 `.claude/skills/`（Claude 系）或 `.agents/skills/`（Codex 系），内容与真源逐字节相同。**Multica run 里这些副本开场是看不见的**（会话根是 `workdir/`，副本在 repo 下一层；2026-11-02 实测只读不改的 run 全程一个都看不见），**harness 在你第一次 Edit 仓库里的文件之后才会发现它们、列进 Skill 工具**（2026-11-03 实测）。所以：开工到首次改文件之间要用技能，直接 `Read ai/jaSkills/<name>/SKILL.md`，按它的指引只取需要的 references；Skill 工具列出来之后两条路都行，内容一样。
 
 ```
 ai/jaSkills/<skill>/          ← 唯一真源，改这里
@@ -159,7 +159,7 @@ Multica 下的评论与报告一律按 §十一 三段式开头，**不在开头
 
 ### Agent 记忆只装「用户要求隐藏」的规则（用户 2026-09-29 设立）
 
-Claude 系 runtime 自带的 auto-memory（`~/.claude/projects/<项目>/memory/`）按会话工作目录分目录。**Multica 下每张单的 workdir 都是新路径：记忆目录每次都是空的，写进去的东西下一张单永远读不到**（2026-11-02 DOUB-174 实测，本机已攒下 105 个这样的目录）；只有本机交互式会话才在同一目录里累积。所以 **Multica run 里不要写记忆**。要记的东西用 `intj` 技能写进文档：踩坑、排查手法、平台与 CLI 的行为、流程规则一律按上面的职责分工写进项目：Multica 通用的补进本文件 §十五（改真源），项目专属的写进 `ai/PROJECT.md` 或对应 feature / skill。只有用户明确说过要隐藏、不能写进项目的规则才进记忆（用户 2026-09-29 设立），且只在本机会话里写。判不准就在 issue 里问。
+Claude 系 runtime 自带的 auto-memory（`~/.claude/projects/<项目>/memory/`）按会话工作目录分目录。**Multica 下每张单的 workdir 都是新路径：记忆目录每次都是空的，写进去的东西下一张单永远读不到**（2026-11-02 实测）；只有本机交互式会话才在同一目录里累积。所以 **Multica run 里不要写记忆**。要记的东西用 `intj` 技能写进文档：踩坑、排查手法、平台与 CLI 的行为、流程规则一律按上面的职责分工写进项目：Multica 通用的补进本文件 §十五（改真源），项目专属的写进 `ai/PROJECT.md` 或对应 feature / skill。只有用户明确说过要隐藏、不能写进项目的规则才进记忆（用户 2026-09-29 设立），且只在本机会话里写。判不准就在 issue 里问。
 
 ## 四、命名规则
 
@@ -183,7 +183,7 @@ Claude 系 runtime 自带的 auto-memory（`~/.claude/projects/<项目>/memory/`
 
 ### 口径与实现分工：lead 的口径是真源，实现由做单的 agent 自己调研（用户 2026-11-06 定）
 
-- Money 作为 lead 写进 issue「什么问题 / 怎么解决 / 委派」三段的口径，是**和用户敲定过的真源**：不再向用户复核，也不按上游 PRD / Jira 反推——上游与口径冲突时以口径为准，差异在报告里说一句即可。
+- lead（项目负责人，见 `ai/PROJECT.md`）写进 issue「什么问题 / 怎么解决 / 委派」三段的口径，是**和用户敲定过的真源**：不再向用户复核，也不按上游 PRD / Jira 反推——上游与口径冲突时以口径为准，差异在报告里说一句即可。
 - **实现方式与设计取舍**（库、模式、组件结构、校验落点、迁移写法等）由做单的 agent **自己上网调研核实、按最佳实践实现**，不中途请示；只在完成报告里汇报调研结论与取舍（选了什么、否了什么、依据是什么）。
 - 只有发现口径本身走不通才停下来问，按上一段的方式：带假设的草案 + 最多 2 个问题。
 
@@ -196,13 +196,15 @@ Multica 任务跑在**独立 worktree** 里，分支形如 `agent/<agent>/<issue
 | 在本 worktree 自己的分支上 commit | ✅ 自主执行 |
 | push 本 worktree 自己的分支 | ✅ 自主执行 |
 | `gh pr create`（base 分支见 `ai/PROJECT.md`） | ✅ 自主执行 |
-| **合并**：平台生成的 agent 分支 `gh pr merge --squash`，其余分支 `gh pr merge --rebase` | ✅ 自主执行，**前提是 CI 在当前 head 上绿**（见下「合并前的三条校验」）。人工分支一律 rebase、不 squash（用户 2026-10-17 定）；**Multica 平台生成的 agent 分支例外，用 squash**（用户 2026-10-26 定）：平台收工记账要求交付里仍有 run 起步的 baseline commit，rebase 会把它换掉、已合入的交付被判 `agent_error.unknown`；squash 只把这一条分支压成 base 上的一个新提交，不改写 base 已有的任何提交。环境分支之间同步（如 `dev` → `staging`）用 `--merge` 建 merge commit。base 分支与 CI job 清单见 `ai/PROJECT.md`「项目专属交付纪律」 |
+| **合并**：平台生成的 agent 分支 `gh pr merge --squash`，其余分支 `gh pr merge --rebase` | ✅ 自主执行，**前提是 CI 在当前 head 上绿**（见下「合并前的三条校验」）；为什么 agent 分支例外，见表后说明 |
 | **`--delete-branch`** | ❌ 别加。它会在本地切 base 分支：主检出占着时报假失败（PR 其实合了），没占着时把**本 worktree 骑到 base 上**。合完手动 `git push origin --delete <branch>` |
 | **`gh pr merge --admin`**（绕过检查）/ **`--auto`**（预约自动合） | ❌ 禁止。前者跳过校验，后者让合并发生在没人看着的时刻 |
 | **`git checkout` / `git switch` 到别的分支** | ❌ 禁止 |
 | **把工作区分支 `reset` 到别处** | ❌ 禁止 |
 | commit 别人改的文件 | ❌ 禁止 |
-| **改 `ai/jaAgents/` 下除本文件以外的协议**（`CLAUDE.md` / `AGENTS.md`，含它们在根目录的副本） | ❌ 禁止（用户 2026-11-03 定）。那是本机协议，归用户本人和本机会话管；Multica agent 发现它们写错也只在 issue 里说，不动手。本文件 `MULTICA.md` 归 Money 维护，改了要在报告里贴 diff，并 `shelf push` 回货架 |
+| **改 `ai/jaAgents/` 下除本文件以外的协议**（`CLAUDE.md` / `AGENTS.md`，含它们在根目录的副本） | ❌ 禁止（用户 2026-11-03 定）。那是本机协议，归用户本人和本机会话管；Multica agent 发现它们写错也只在 issue 里说，不动手。本文件 `MULTICA.md` 归项目负责人维护（见 `ai/PROJECT.md`），改了要在报告里贴 diff，并 `shelf push` 回货架 |
+
+**合并方式的说明**：人工分支一律 rebase、不 squash（用户 2026-10-17 定）；**Multica 平台生成的 agent 分支例外，用 squash**（用户 2026-10-26 定）。平台收工记账要求交付里仍有 run 起步的 baseline commit，rebase 会把它换掉，已合入的交付被判 `agent_error.unknown`；squash 只把这一条分支压成 base 上的一个新提交，不改写 base 已有的任何提交。同一个 issue 多轮共用一条 agent 分支时，每轮 squash 后分支上仍留着原始提交，GitHub 的 rebase merge 要逐个重放它们，必然冲突，所以 agent 分支也不能改回 rebase 合并。环境分支之间同步（如 `dev` → `staging`）用 `--merge` 建 merge commit。base 分支与 CI job 清单见 `ai/PROJECT.md`「项目专属交付纪律」。
 
 - 只提交**本任务自己改的**文件。同文件混杂时可整文件提交，但 commit message 必须说明哪些是搭车进来的、为什么拆不开。
 - 需要知道上游进展用 `git fetch` 取信息即可，不要 reset、不要 checkout。
@@ -228,10 +230,6 @@ Multica 任务跑在**独立 worktree** 里，分支形如 `agent/<agent>/<issue
     - 收到「Delegated task ended in a final failure」一类通知时，先 `gh pr view <n> --json state,mergedAt` 核 PR：已合入、CI 绿在 PR head 上、保留的 worktree `git status --porcelain` 为空，就是记账失败、不是交付失败——在协调评论里结掉，**不重派**。
 
 3. **base 分支自己得是绿的。** 红了先修，修好前不要合入新东西。
-
-### 实验记录：agent 分支改用 rebase 合并（2026-11-06，不通过）
-
-用户 2026-11-05 要求把 agent 分支也统一改回 `--rebase`，在 DOUB-177 的 PR #597 上试了一次，GitHub 拒绝：`GraphQL: This branch can't be rebased (mergePullRequest)`。本地复现（临时 worktree 里 `git rebase origin/dev`）在第 2/11 个提交就撞冲突——run 起步的 baseline commit 夹带的 `ai/TODO.md`，后面第一、二轮已 squash 进 dev 的原始提交同样会撞。原因是结构性的：同一个 issue 多轮共用一条 agent 分支，每轮 squash 后分支上仍留着原始提交，再加上只能 `merge origin/dev` 不能 rebase，rebase merge 要逐个重放这些提交，必然冲突。**结论：agent 分支维持 squash**；#597 最终 `gh pr merge --squash` 合入 `d54d28ef`。要 rebase 只有一条路：每轮从 dev 新开干净分支重做提交，但那会丢掉 baseline commit、触发 `agent_error.unknown`，不值。
 
 ## 九、任务派发纪律
 
@@ -279,7 +277,7 @@ Multica run 全程无人盯着，等价于 auto 模式。**每个 run 只发一�
 
 ### 一个 run 一条评论；检查点写在这条评论里
 
-- run 可能因额度用完中途失败，下一次 run 是**全新会话**（2026-11-02 实测：读完 §一 文档后开局约 10 万 token，所以 §一 第 2 步不再整份读 TODO）。每完成一个阶段——调研 / 定形态、实现能编译、测试通过、PR 开出——就 push 当前分支（可以是 WIP commit），代码留在远端；**不要**为此单独留评论。
+- run 可能因额度用完中途失败，下一次 run 是**全新会话**（2026-11-02 实测：读完 §一 的文档，开局就已占掉大量上下文，所以 §一 第 2 步不再整份读 TODO）。每完成一个阶段——调研 / 定形态、实现能编译、测试通过、PR 开出——就 push 当前分支（可以是 WIP commit），代码留在远端；**不要**为此单独留评论。
 - run 结束时的那一条评论就是检查点：做到哪、下一步做什么、关键结论（选了什么、否了什么、为什么），≤ 10 行；交付 / 合入的 run 则发完整报告（见下）。讨论、对齐、方案一律精简，不贴代码。
 - **新 run 开工先读本 issue 最新一条评论和分支 diff**，从断点接着做，不从头重做。
 
@@ -291,7 +289,7 @@ Multica run 全程无人盯着，等价于 auto 模式。**每个 run 只发一�
 2. `## 怎么解决的`：做了什么、用了什么方法、结果（PR 号、验证结论）
 3. `## 还有什么问题`：遗留、风险、需要用户决定的事；没有就写「无」
 
-三段之后用 `---` 隔开，给其他 agent 和接手人看：
+三段之后用 `---` 隔开，给其他 agent 和后续接着做的人看：
 
 - `## 交接与委派`：下一步谁做、真 mention 谁（见 §十二）、依赖什么
 - `## 详细说明`：
@@ -329,7 +327,7 @@ Multica run 全程无人盯着，等价于 auto 模式。**每个 run 只发一�
 
 ### 三个会让 mention 静默失效的坑
 
-1. **写名字不写 UUID**——`mention://agent/Emil` 是死链，正则匹配失败，**彻底的静默无操作**，没有任何报错。
+1. **写名字不写 UUID**——`mention://agent/<显示名>` 是死链，正则匹配失败，**彻底的静默无操作**，没有任何报错。
 2. **UUID 形状对但不存在**——解析成功然后查库落空，报 `blocked` + `invocation_not_allowed`。这个码**和权限拒绝一模一样**，看到它先怀疑自己抄错了 UUID。
 3. **`@all` 会压掉隐式路由**——`[@all](mention://all/all)` 是广播，会**抑制 issue assignee 的自动触发**。要请人干活就别只发 `@all`；同一条评论里的显式 `@agent` 仍然生效。
 
@@ -365,11 +363,16 @@ Multica run 全程无人盯着，等价于 auto 模式。**每个 run 只发一�
 | 盘点整块 board | `multica issue list` 默认只回 50 条，不提示截断 | `--limit 100` 起步、`--offset 100` 接着翻，条数等于 limit 就还有下一页；按 Epic 盘点用 `issue children` |
 | 读 JSON | 形状和直觉不一样：`issue children` 顶层是 `{stages, total, unstaged}` 对象，`stages[].done` 只数 `status=done`；`metadata list` 是扁平的 `{key: value}`；`comment list` 的正文键是 `content` 不是 `body`；`autopilot get` 外面多包一层 `{"autopilot": …}` | 写 jq 路径前先看一眼原始 JSON；取不到值按错误处理，别当成「空」 |
 | stage 放行 | `issue children` 只列一层，孙子单看不见；`stage` 为空的子单在顶层 `unstaged` 里，barrier 不认它，永远不会被放行；`assignee` 为空的子单放行后没人接 | 放行前逐层下钻，核每个子单的 `stage` 与 `assignee_id`；建子单时 `--parent` 与 `--stage` 一起给 |
-| 写 metadata | `metadata set` 会把 `93893e56` 这类短 SHA 存成浮点数 | 一律加 `--type string`，写完回读 |
+| 核父子关系 | `issue get` / `issue create` 返回的 `parent_id` 对已挂父单的子单也可能是 `null` | 用 `multica issue children <epic-id> --output json` 核（它列得出、stage 也对），别因为 `null` 重复 update parent |
+| 写 metadata | `metadata set` 会把 `93893e56` 这类短 SHA 存成浮点数 | 一律 `multica issue metadata set <issue> --key k --value v --type string`，写完回读 |
+| 取消 / 停用唤醒 | `multica issue wakeup delete` / `disable` 只给 wakeup id 会报 `accepts 2 arg(s), received 1` | 两个参数都给：`multica issue wakeup delete <issue-id> <wakeup-id>`（`disable` 同） |
+| 条件唤醒 | `--until-status` 这类条件唤醒触发一次后自动变成 `enabled: false`，看着像被关掉了 | 不用再手动 disable，还要等就重新建一个；例：等对方交付后复核用 `multica issue wakeup create <issue> --until-status in_review --instruction-file ./wk.md --expires-in 336h` |
+| 等用户留言 | 要等的是评论、不是状态变化时，`--until-status` 永远不触发 | `multica issue wakeup create <issue> --event comment.created --filter-actor-type member --filter-actor-id <uuid> --mode once --expires-in 168h`，uuid 取用户评论 JSON 的 `author_id` |
+| 定时唤醒 | 只写 `--after 25m` 会报 `select at least one supported event` | 加 `--kind at`：`--kind at --after 25m --instruction-file ./wk.md` |
 | 改 issue 描述 | `issue update --description-file` 整段覆盖、没有冲突检测，后写者赢 | 先 get，在最新内容上改，再 update，最后回读做 diff |
 | 写操作超时 | 退出码 2 分不清「没写进去」和「写进去了」 | 先 list 核对再重试，重试带 `MULTICA_HTTP_TIMEOUT=180`；`comment add` 的成功信息在 stderr，解析 JSON 别把 stderr 混进来 |
-| 发附件评论 | `--attachment` / `--content-file` 的路径必须在 cwd 内；把 `comment add` 管进 `head` 会 SIGPIPE，附件传上去了、评论却没建 | 文件放进 worktree 里；不接管道；发完用 `comment list` 确认 |
+| 发附件评论 | `--attachment` / `--content-file` 的路径必须在 cwd 内；把 `comment add` 管进 `head` 会 SIGPIPE，附件传上去了、评论却没建 | 文件放进 worktree 里；不要把输出接进管道；发完用 `comment list` 确认 |
 | 额度用尽 | run 几秒就死，issue 仍停在 `in_progress`，看着像在跑；`failure_reason` 可能只是 `agent_error.unknown` | 按 `multica agent tasks <agent-id> --output json` 里的错误原文判断（spend / session / usage / weekly limit）；额度重置后自己 `rerun` 或 mention 重派 |
 | 接力 run 开头 | 工作区报「Unresolved merge」、一堆 `UU`，但没有 `MERGE_HEAD`：平台拿旧快照当三方 base 合出来的假冲突 | `git ls-files -u` 核实 stage 3 就是 `origin/<base>` 后，`git reset --hard` **回到起步快照本身**（退到它之前会让记账失败），再 `git merge origin/<base>` |
-| 接手上一个 run 的活 | 远端没分支不等于没干活；`chore(agent): uncommitted changes from task` 快照提交里可能夹着死掉 run 的产物、主检出里用户没提交的改动、没跟踪的大文件 | 先 `git rev-list --left-right --count origin/<base>...HEAD` 和 `git diff --stat origin/<base>..HEAD` 逐个文件核，只带走本任务的文件 |
+| 接着做上一个 run 的活 | 远端没分支不等于没干活；`chore(agent): uncommitted changes from task` 快照提交里可能夹着死掉 run 的产物、主检出里用户没提交的改动、没跟踪的大文件 | 先 `git rev-list --left-right --count origin/<base>...HEAD` 和 `git diff --stat origin/<base>..HEAD` 逐个文件核，只带走本任务的文件 |
 | 合别人已经绿了的 PR | 它的实现 run 可能还活着，合完它后续的 push 就落空了；`issue get` 的 `assignee` 常是空的 | 合之前用 `assignee_id` 跑 `multica agent tasks <assignee_id>`，有 `running` 就别合 |
