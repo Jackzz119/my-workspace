@@ -56,7 +56,7 @@
 | SKILL.md 的「经验摘录」 | 开放标准：坑放 SKILL.md | 一致 |
 | `metadata.shelf-scaffold`（用户 2026-10-19 定） | `metadata` 是字符串映射，键名要独特 | 一致 |
 | 目录结构曾「固定为」SKILL.md + reference.md + examples.md | 开放标准约定 `scripts/`、`references/`、`assets/`；本项目已有技能两种都在用 | 改为推荐结构，两种都允许，一个技能里选一种 |
-| `jira-cli` 保留 `Bash(jira:*)`、`Bash(curl:*)` | 最小授权 | 用户 2026-11-10 批准的例外（ADR-34） |
+| 用户批准过的宽授权（例：某项目的 Jira 技能保留 `jira` / `curl` 预批准） | 最小授权 | 按项目里的批准记录保留，记录不写进本技能 |
 
 ## 未核实
 
