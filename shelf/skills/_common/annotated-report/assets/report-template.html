@@ -80,13 +80,20 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 400 1rem/1.8 v
     .layout { grid-template-columns: 14rem minmax(0, 1fr); gap: 3.5rem; }
     .rail { display: block; }
     details.toc-mobile { display: none; }
+    /* folded, the rail keeps only its button and the text column stands in the middle of the page */
+    .layout[data-toc="folded"] { grid-template-columns: 2.25rem minmax(0, 1fr) 2.25rem; }
+    .layout[data-toc="folded"] main { width: 100%; margin-inline: auto; }
+    .layout[data-toc="folded"] .rail .toc > ol,
+    .layout[data-toc="folded"] .toc-title > span { display: none; }
 }
 .rail nav {
     position: sticky;
     top: calc(env(safe-area-inset-top, 0px) + 20px);
     max-height: calc(100vh - 40px);
     overflow: auto;
-    padding-block: 8px;
+    /* room at the sides for focus rings, which a scrolling box clips; the margin keeps the contents in place */
+    margin-inline: -4px;
+    padding: 0 4px 8px;
 }
 main { min-width: 0; max-width: 46rem; overflow-wrap: break-word; }
 
@@ -265,11 +272,50 @@ ul.bugs.p3 { --sev: var(--p3); }
 
 /* Contents */
 .toc-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     margin: 0 0 10px;
     font: 600 0.75rem/1 var(--font-mono);
     letter-spacing: 0.08em;
     color: var(--muted);
 }
+/* the rail's title stays in view while a long contents list scrolls under it (it holds the rail's top padding) */
+.rail .toc-title {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    margin-bottom: 4px;
+    padding-block: 8px 6px;
+    background: var(--bg);
+}
+.toc-fold {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+}
+.toc-fold:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink); }
+.toc-fold svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.toc-fold .chev { transform-box: fill-box; transform-origin: center; }
+.layout[data-toc="folded"] .toc-fold { border-color: var(--rule); background: var(--surface); }
+.layout[data-toc="folded"] .toc-fold .chev { transform: scaleX(-1); }
+@media (pointer: coarse) { .toc-fold { width: 40px; height: 40px; } }
 .toc ol { margin: 0; padding: 0; list-style: none; }
 .toc li { margin: 0; }
 .toc ol ol { margin: 2px 0 6px 10px; padding-left: 6px; border-left: 1px solid var(--rule); }
@@ -309,7 +355,27 @@ details.toc-mobile nav { max-height: 60vh; overflow: auto; padding: 0 8px 10px; 
 <div class="page">
     <div class="layout">
         <aside class="rail">
-            <nav class="toc" aria-label="目录"><p class="toc-title">目录</p>{toc}</nav>
+            <nav class="toc" aria-label="目录">
+                <p class="toc-title">
+                    <button type="button" class="toc-fold" aria-expanded="true" aria-label="收起目录" title="收起目录">
+                        <svg viewBox="0 0 20 20" aria-hidden="true">
+                            <rect x="2.75" y="3.75" width="14.5" height="12.5" rx="2.25" />
+                            <path d="M8 3.75v12.5" />
+                            <path class="chev" d="m13.5 7.75-2.25 2.25 2.25 2.25" />
+                        </svg>
+                    </button>
+                    <span>目录</span>
+                    <script>
+                        // a kept fold, before the list below is drawn; inside the title, no element of the page
+                        // changes its place among its siblings (notes find their elements by that place)
+                        try {
+                            const layout = document.currentScript.closest('.layout');
+                            if (localStorage.getItem('report-toc') === 'folded') layout.dataset.toc = 'folded';
+                        } catch {}
+                    </script>
+                </p>
+                {toc}
+            </nav>
         </aside>
         <main>
             <header class="masthead">
@@ -321,7 +387,7 @@ details.toc-mobile nav { max-height: 60vh; overflow: auto; padding: 0 8px 10px; 
             <details class="toc-mobile"><summary>目录</summary><nav class="toc" aria-label="目录">{toc}</nav></details>
             {body}
             <footer class="foot">
-                <p>批注：选中文字点「批注这段」，或点右下角「批注」再点内容，也可以直接「留言」。写完点右下角「复制全部」，粘贴到对话里。搜索：按 Ctrl+F（Mac 上 ⌘F），或点右下角的放大镜。</p>
+                <p>批注：选中文字点「批注这段」，或点右下角「批注」再点内容，也可以直接「留言」。「清单」里可以用 ↑ ↓ 或拖动调顺序。写完点右下角「复制全部」，粘贴到对话里。搜索：按 Ctrl+F（Mac 上 ⌘F），或点右下角的放大镜。</p>
             </footer>
         </main>
     </div>
@@ -382,5 +448,54 @@ details.toc-mobile nav { max-height: 60vh; overflow: auto; padding: 0 8px 10px; 
     // Close the phone contents after a jump.
     const phoneToc = document.querySelector('details.toc-mobile');
     if (phoneToc) phoneToc.addEventListener('click', (event) => event.target.closest('a') && (phoneToc.open = false));
+
+    // Fold the contents rail down to its button and open it again. Each reader's choice is kept in this browser
+    // (where storage is blocked the rail just starts open); the script in the rail's title applies a kept fold.
+    const fold = document.querySelector('.toc-fold');
+    if (fold) {
+        const layout = fold.closest('.layout');
+        const main = layout.querySelector('main');
+        const set = (folded) => {
+            const label = folded ? '展开目录' : '收起目录';
+            if (folded) layout.dataset.toc = 'folded';
+            else delete layout.dataset.toc;
+            fold.setAttribute('aria-expanded', String(!folded));
+            fold.setAttribute('aria-label', label);
+            fold.title = label;
+        };
+        set(layout.dataset.toc === 'folded');
+        fold.addEventListener('click', () => {
+            const folded = layout.dataset.toc !== 'folded';
+            // The text column may change width and wrap again. What is being read stays where it is on screen, also
+            // while pictures above it that load late push the text, until the reader scrolls or a second passes; the
+            // browser's own scroll anchoring waits meanwhile, so every browser keeps the place the same way.
+            const box = main.getBoundingClientRect();
+            const at = document.elementsFromPoint(box.left + box.width / 2, innerHeight / 3);
+            const el = at.find((e) => main.contains(e));
+            const want = el && el.getBoundingClientRect().top;
+            const html = document.documentElement;
+            html.style.overflowAnchor = 'none';
+            set(folded);
+            let [mine, off] = [scrollY, !el];
+            const hold = () => {
+                if (off || !el.isConnected || Math.abs(scrollY - mine) > 1) return (off = true);
+                scrollBy({ top: el.getBoundingClientRect().top - want, behavior: 'instant' });
+                mine = scrollY;
+            };
+            hold();
+            const watch = window.ResizeObserver && new ResizeObserver(hold);
+            if (watch) watch.observe(main);
+            setTimeout(() => {
+                if (watch) watch.disconnect();
+                html.style.overflowAnchor = '';
+            }, 1200);
+            try {
+                if (folded) localStorage.setItem('report-toc', 'folded');
+                else localStorage.removeItem('report-toc');
+            } catch {}
+            // what is laid over the page by position (the annotation layer's numbers) follows
+            dispatchEvent(new Event('resize'));
+        });
+    }
 })();
 </script>

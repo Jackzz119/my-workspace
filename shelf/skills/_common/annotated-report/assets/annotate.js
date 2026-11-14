@@ -8,6 +8,7 @@
 // well, a note can carry pictures (pasted, dropped or picked): they go into the artifact's assets and the note keeps
 // their ids; without that capability the picture button stays hidden. Ctrl+F / ⌘F, or the magnifier in the dock,
 // opens a find bar for the page: the host app's own find may not reach into an artifact's frame, and a phone has none.
+// The reader can reorder the list (buttons, or the grip on a desktop); the order is each note's `pos`.
 (() => {
     'use strict';
     if (window.__annotate) return;
@@ -21,6 +22,10 @@
     const NUM = /^(?:§\s*)?(\d+(?:\.\d+)*|[一二三四五六七八九十百]+(?=、)|[A-Z]{1,3}-?\d+(?:\.\d+)*)/; // 4.1 三 E1 PA-071
     const HL = !!(window.CSS && CSS.highlights && window.Highlight); // text marks; without it the block gets a pin
     const S = { notes: [], marks: new Map(), maps: new Map(), pinned: [], marked: [] };
+    // writes queued per note; notes moved here whose order is not written yet (how many moves), and where they were
+    Object.assign(S, { writes: new Map(), held: new Map(), from: new Map() });
+    // the database's collection once known (null: none here); a move made before then waits for it
+    S.ready = new Promise((ok) => (S.linked = ok));
     let root, ring, pins, chip, banner, pill, list, copier, badge, scrim, toastEl, hovered, raf, timer;
     let finder, q, count, prevB, nextB, seek;
 
@@ -98,7 +103,7 @@ font-weight:700;line-height:20px}
 .ann-sheet.ann-top{top:max(8px,env(safe-area-inset-top));bottom:auto;left:8px;right:8px;border-radius:16px;padding-bottom:16px}
 .ann-head,.ann-row,.ann-meta{display:flex;align-items:center;gap:8px}
 .ann-row{flex-wrap:wrap;justify-content:flex-end}
-.ann-head>:first-child,.ann-meta>:first-child{flex:1}
+.ann-head>:first-child,.ann-meta>.ann-loc{flex:1}
 .ann-loc,.ann-hint{margin:0;font-size:13px;color:var(--ann-mute)}
 .ann-loc,.ann-quote,.ann-note{overflow-wrap:anywhere}
 .ann-hint:empty{display:none}
@@ -114,7 +119,12 @@ display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hi
 .ann-btn:disabled{opacity:.45;cursor:default}
 .ann-items{display:grid;gap:10px;margin:0;padding:0;list-style:none}
 .ann-item{display:grid;gap:6px;padding:6px 12px 10px;border-radius:10px}
-.ann-on{border-color:var(--ann-ring);box-shadow:0 0 0 3px var(--ann-wash)}
+.ann-mv{color:var(--ann-mute)}
+.ann-grip{flex-shrink:0;width:20px;height:29px;margin:0 -2px 0 -6px;padding:4px 3px;color:var(--ann-mute);cursor:grab;
+touch-action:none;background:radial-gradient(circle,currentColor 1.5px,transparent 2px) 0 0/7px 7px content-box}
+.ann-editing .ann-mv,.ann-editing .ann-grip{visibility:hidden}
+.ann-dragging,.ann-dragging *{cursor:grabbing!important;-webkit-user-select:none;user-select:none}
+.ann-on{position:relative;z-index:1;border-color:var(--ann-ring);box-shadow:0 0 0 3px var(--ann-wash)}
 .ann-note{white-space:pre-wrap}
 .ann-drawer>.ann-acts{position:sticky;bottom:0;padding-top:8px;background:var(--ann-bg);box-shadow:0 40px var(--ann-bg)}
 .ann-link{min-height:36px;padding:0 8px;border:0;background:none;color:var(--ann-hi);font-size:14px}
@@ -142,7 +152,8 @@ img:not(.ann-root img){cursor:zoom-in}
 .ann-btn:not(.ann-primary):not(.ann-pill[aria-pressed=true]):not(:disabled):hover,.ann-fb:not(:disabled):hover{background:var(--ann-soft)}
 .ann-primary:not(:disabled):hover,.ann-pill[aria-pressed=true]:hover{filter:brightness(1.08)}
 .ann-pin:hover,.ann-see:hover{scale:1.12}
-.ann-link:hover,.ann-x:hover,.ann-fb:not(:disabled):hover{scale:1.06}}
+.ann-link:hover,.ann-x:hover,.ann-fb:not(:disabled):hover{scale:1.06}
+.ann-mv:not(:disabled):hover,.ann-grip:hover{color:var(--ann-fg)}}
 .ann-btn:not(:disabled):active,.ann-chip:active,.ann-link:active,.ann-x:active,.ann-pin:active,.ann-see:active,.ann-shut:active,.ann-jump:active,.ann-fb:not(:disabled):active{scale:.94;transition-duration:.1s}
 @keyframes ann-pop{from{opacity:0;scale:.92;translate:0 8px}}
 @keyframes ann-rise{from{opacity:0;translate:0 12px;scale:.96}}
@@ -161,11 +172,14 @@ img:not(.ann-root img){cursor:zoom-in}
 .ann-pin{animation:ann-dot .54s var(--ann-spring) both}
 .ann-item{animation:ann-rise .54s var(--ann-spring) both}
 .ann-still,.ann-still .ann-item{animation:none}
+.ann-glide{transition:translate .54s var(--ann-spring)}
+.ann-lift{position:relative;z-index:1;scale:1.02;box-shadow:var(--ann-sh);transition:scale .54s var(--ann-spring),box-shadow .2s}
 @media (prefers-reduced-motion:reduce){.ann-root *{animation:none!important;transition:none!important}}
 html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
 @media (pointer:coarse){html[data-annotating] body :not([data-annotate-ui]){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .ann-btn,.ann-chip,.ann-link{min-height:44px}
-.ann-fb{width:44px;height:44px;border-radius:22px}}
+.ann-fb{width:44px;height:44px;border-radius:22px}
+.ann-grip{display:none}}
 @media (prefers-reduced-motion:reduce){.ann-flash{animation:none}}`;
     // static markup; page and reader text goes in through textContent only
     const X = '<button type="button" class="ann-x" aria-label="关闭">✕</button>';
@@ -189,11 +203,18 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
     // a note says something, in words or in pictures
     const kept = (n) => !!(n && n.id && (n.note || (Array.isArray(n.imgs) && n.imgs.length)));
     const tidy = (n) => ({ ...n, kind: /^[ten]$/.test(n.kind) ? n.kind : 'e', loc: n.loc || '', note: n.note || '' });
+    // The list's order is each note's `pos`, a number on the scale of the time it was written (ms since 1970): a note
+    // from before there was an order has none and stands at its `at`, a new one goes after all the others, and a
+    // moved one takes the midpoint of its new neighbours, so a move writes that note alone.
+    const rank = (n) => (Number.isFinite(n.pos) ? n.pos : Date.parse(n.at) || 0);
+    const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+    const order = (a, b) => rank(a) - rank(b) || cmp(String(a.at), String(b.at)) || cmp(String(a.id), String(b.id));
     // storage can be missing or throw (private mode, blocked site data): the notes then live for this visit only
     const load = () =>
         []
             .concat(attempt(() => JSON.parse(localStorage.getItem(S.key)), []) || [])
-            .flatMap((n) => (kept(n) ? [tidy(n)] : []));
+            .flatMap((n) => (kept(n) ? [tidy(n)] : []))
+            .sort(order);
     const save = () =>
         (S.volatile =
             !attempt(() => (localStorage.setItem(S.key, JSON.stringify(S.notes)), true), false) && !S.cloud);
@@ -206,20 +227,70 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         Object.assign(doc, { quote: n.quote, note: n.note });
         if (n.kind !== 'n' && n.path) Object.assign(doc, { path: n.path, off: n.off || 0 });
         if (n.imgs && n.imgs.length) doc.imgs = n.imgs;
+        if (Number.isFinite(n.pos)) doc.pos = n.pos;
         return doc;
+    };
+    // one write at a time per note, as the database asks: each waits for the one before it, however that ended
+    const write = (id, op) => {
+        const run = (S.writes.get(id) || Promise.resolve()).then(op);
+        const tail = run.catch(() => {});
+        S.writes.set(id, tail);
+        tail.then(() => S.writes.get(id) === tail && S.writes.delete(id));
+        return run;
     };
     const send = (n) => {
         if (!S.cloud) return;
-        S.cloud
-            .doc(n.id)
-            .set(fields(n))
-            .then(() => ((n.cloud = 1), save()))
-            .catch(() => toast('没存进报告，先留在这台设备上'));
+        const put = () => {
+            if (!S.notes.some((x) => x.id === n.id)) return; // deleted before its turn: not written back
+            return S.cloud
+                .doc(n.id)
+                .set(fields(n))
+                .then(() => ((n.cloud = 1), save()));
+        };
+        write(n.id, put).catch(() => toast('没存进报告，先留在这台设备上'));
     };
     // a deleted note takes its pictures with it: nothing else points at them
     const unsend = (n) => {
-        if (S.cloud) S.cloud.doc(n.id).delete().catch(() => {});
+        if (S.cloud) write(n.id, () => S.cloud.doc(n.id).delete()).catch(() => {});
         if (S.assets) for (const id of n.imgs || []) S.assets.delete(id).catch(() => {});
+    };
+    // A move goes up as the new `pos` of each note it moved, by update: the rest of the note stays as another device
+    // may just have written it. One whose later move is queued already leaves the writing to that one; a passing
+    // fault is tried once more. Until it is through, the note keeps the place it was given here.
+    const LASTING =
+        /^(invalid_argument|resource_exhausted|quota_exceeded|revoked|not_granted|transform_error|capability_)/;
+    const sendPos = (id) =>
+        write(id, async () => {
+            const db = await S.ready;
+            const n = S.notes.find((x) => x.id === id);
+            if (!db || !n || S.held.get(id) > 1) return;
+            const ref = db.doc(id);
+            const put = () => (n.cloud ? ref.update({ pos: n.pos }) : ref.set(fields(n)));
+            const pause = () => new Promise((ok) => setTimeout(ok, 300 + Math.random() * 500));
+            await put().catch((err) => (LASTING.test(err && err.code) ? Promise.reject(err) : pause().then(put)));
+            if (!n.cloud) ((n.cloud = 1), save());
+        }).then(
+            () => settle(id),
+            () => settle(id, true)
+        );
+    // A move that did not get into the database is undone: the note goes back where it was before this run of moves
+    // (unless a later move of it is still on its way). A note that is only on this device keeps its place here.
+    const settle = (id, failed) => {
+        const left = (S.held.get(id) || 1) - 1;
+        if (left) return void S.held.set(id, left);
+        const was = S.from.get(id);
+        S.held.delete(id);
+        S.from.delete(id);
+        const n = failed && S.notes.find((x) => x.id === id);
+        if (!n) return;
+        if (!n.cloud) return toast('没存进报告，先留在这台设备上');
+        if (Number.isFinite(was)) n.pos = was;
+        else delete n.pos;
+        S.notes.sort(order);
+        save();
+        paint();
+        redraw();
+        toast('顺序没存进报告，换回了原来的位置');
     };
     const use = (name) => Promise.resolve(attempt(() => window.claude.use(name), null)).catch(() => null);
     const connect = async () => {
@@ -230,8 +301,8 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         });
         const db = await use('db');
         const col = db && attempt(() => db.collection(CLOUD), null);
+        S.linked((S.cloud = col || null));
         if (!col) return;
-        S.cloud = col;
         let settled = false;
         col.onSnapshot(
             (snap) => {
@@ -246,14 +317,16 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
                     settled = true;
                     for (const n of mine) send(n);
                 }
+                // a note moved here keeps the place it was given until that is written
+                const held = new Map(S.notes.filter((n) => S.held.has(n.id)).map((n) => [n.id, n.pos]));
                 S.notes = remote
-                    .map(tidy)
+                    .map((n) => tidy(held.has(n.id) ? { ...n, pos: held.get(n.id) } : n))
                     .concat(mine)
-                    .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+                    .sort(order);
                 for (const id of [...S.marks.keys()]) if (!S.notes.some((n) => n.id === id)) S.marks.delete(id);
                 save();
                 paint();
-                if (S.panel && S.panel.matches('.ann-drawer')) openDrawer();
+                redraw();
             },
             () => {} // a lost connection keeps what is here; the cache still holds it
         );
@@ -723,8 +796,11 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         ta.focus({ preventScroll: true });
     };
     const add = (t, note, imgs) => {
-        const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-        const n = { id, at: new Date().toISOString(), kind: t.kind, loc: t.loc || '', quote: t.quote || '', note };
+        const now = Date.now();
+        const [id, at] = [now.toString(36) + Math.random().toString(36).slice(2, 6), new Date(now).toISOString()];
+        // last in the list, whatever order the others were put in
+        const pos = Math.max(now, ...S.notes.map((x) => rank(x) + 1));
+        const n = { id, at, pos, kind: t.kind, loc: t.loc || '', quote: t.quote || '', note };
         if (imgs && imgs.length) n.imgs = imgs;
         if (t.kind !== 'n') Object.assign(n, { path: t.path, off: t.off });
         if (t.el) S.marks.set(id, { el: t.el, range: t.range || null });
@@ -780,6 +856,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         setTimeout(done, ms + 120);
     };
     const closePanel = (instant) => {
+        if (S.drag) (cancelAnimationFrame(S.drag.raf), (S.drag = null));
         if (S.panel && instant === true) S.panel.remove();
         else if (S.panel)
             leave(
@@ -795,14 +872,23 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         scrim.hidden = ring.hidden = !(hovered = null);
     };
 
-    // the list, in writing order: a quote jumps to its place; each note can be edited or deleted
+    // The list, in the reader's order (as written, until a note is moved): a quote jumps to its place; each note can
+    // be moved up or down (or dragged by its grip), edited or deleted. Redrawn while open, after a change here or news
+    // from another device, it does not arrive again: it keeps its scroll and the focus, and each note that changed
+    // place slides there from where it was.
     const openDrawer = (focus) => {
-        // redrawn in place (after an edit or a delete) it does not arrive again
-        const again = !!(S.panel && S.panel.matches('.ann-drawer'));
-        closePanel(again);
+        const old = S.panel && S.panel.matches('.ann-drawer') ? S.panel : null;
+        const tops = new Map();
+        for (const li of old ? old.querySelectorAll('.ann-item') : [])
+            tops.set(li.dataset.id, li.getBoundingClientRect().top);
+        // a focused control is found again by its note and its text
+        const was = old && old.contains(document.activeElement) && document.activeElement;
+        const refocus = was && was.localName === 'button' && [owner(was), was.textContent];
+        const y = old ? old.scrollTop : 0;
+        closePanel(!!old);
         hideChip();
         const panel = make(DRAWER);
-        if (again) panel.classList.add('ann-still');
+        if (old) panel.classList.add('ann-still');
         const [title, hint, ol, manual, acts] = $(panel, 'strong .ann-hint ol textarea .ann-acts');
         title.textContent = `批注清单（${S.notes.length}）`;
         hint.textContent = S.volatile
@@ -815,6 +901,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         let on = null;
         S.notes.forEach((n, i) => {
             const li = make(ITEM);
+            li.dataset.id = n.id;
             const parts = '.ann-meta .ann-loc .ann-jump .ann-quote .ann-note .ann-imgs';
             const [meta, where, jumper, quote, text, imgs] = $(li, parts);
             where.textContent = `${i + 1} · ${n.kind === 'n' ? '留言' : n.loc || '页面'}`;
@@ -832,6 +919,12 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
                 button('改', 'ann-link', () => edit(li, n)),
                 del
             );
+            if (S.notes.length > 1) {
+                const grip = make('<span class="ann-grip" title="拖动排序" aria-hidden="true"></span>');
+                grip.onpointerdown = (e) => grab(e, li, n);
+                meta.prepend(grip);
+                where.after(mover(n, i, -1), mover(n, i, 1));
+            }
             ol.append(li);
             if (n.id === focus) on = li;
         });
@@ -840,10 +933,140 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         const copyAll = button('复制全部', 'ann-btn ann-primary', () => copy(manual, hint));
         acts.append(Object.assign(copyAll, { disabled: !S.notes.length }));
         show(panel);
-        if (!on) return;
-        on.classList.add('ann-on');
-        on.scrollIntoView({ block: 'nearest' });
-        setTimeout(() => on.classList.remove('ann-on'), 1600);
+        panel.scrollTop = y;
+        if (refocus) {
+            // ↑ that has reached the top (or ↓ the bottom) hands the focus to the other one
+            const [id, text] = refocus;
+            const pool = [...panel.querySelectorAll('button:not(:disabled)')].filter((b) => owner(b) === id);
+            const same = pool.find((b) => b.textContent === text);
+            const b = same || (/^[↑↓]$/.test(text) && pool.find((x) => x.matches('.ann-mv')));
+            if (b) b.focus({ preventScroll: true });
+        }
+        if (on) {
+            on.classList.add('ann-on');
+            on.scrollIntoView({ block: 'nearest' });
+            setTimeout(() => on.classList.remove('ann-on'), 1600);
+        }
+        if (old) glide(panel, tops);
+    };
+    // which note a control in the list belongs to ('' for the list's own controls)
+    const owner = (el) => (el.closest('.ann-item') || { dataset: {} }).dataset.id || '';
+    // the list again, unless a note is being dragged or edited in it (that ends in a redraw of its own)
+    const editing = () => !!(S.panel && S.panel.querySelector('.ann-item .ann-ta'));
+    const redraw = () => S.panel && S.panel.matches('.ann-drawer') && !S.drag && !editing() && openDrawer();
+    // each note that changed place starts where it was on screen and slides to where it is now
+    const glide = (panel, tops) => {
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        const moved = [];
+        for (const li of panel.querySelectorAll('.ann-item')) {
+            const dy = tops.has(li.dataset.id) ? tops.get(li.dataset.id) - li.getBoundingClientRect().top : 0;
+            if (Math.abs(dy) >= 1) moved.push([li, dy]);
+        }
+        for (const [li, dy] of moved) li.style.translate = `0 ${dy}px`;
+        void panel.offsetWidth; // the slide starts from there
+        for (const [li] of moved) (li.classList.add('ann-glide'), (li.style.translate = ''));
+    };
+    // Put note `id` at place `to` among the others. Only that note changes, unless its new neighbours leave no room
+    // between them (a tie, or a gap halved too often): then the list is spaced out again and each note that changes
+    // is written. Where a note was before is kept until its write is through, to go back to if it fails.
+    const ROOM = 1000;
+    const move = (id, to) => {
+        const n = S.notes.find((x) => x.id === id);
+        const rest = S.notes.filter((x) => x !== n);
+        if (!n || to < 0 || to > rest.length || S.notes.indexOf(n) === to) return false;
+        const [lo, hi] = [rest[to - 1], rest[to]];
+        const mid = !lo ? rank(hi) - ROOM : !hi ? rank(lo) + ROOM : (rank(lo) + rank(hi)) / 2;
+        const base = Math.min(...S.notes.map(rank));
+        rest.splice(to, 0, n);
+        const fits = !lo || !hi || (mid > rank(lo) && mid < rank(hi));
+        const moves = fits ? [[n, mid]] : rest.map((x, i) => [x, base + i * ROOM]).filter(([x, p]) => x.pos !== p);
+        for (const [x, p] of moves) {
+            if (!S.held.has(x.id)) S.from.set(x.id, x.pos);
+            S.held.set(x.id, (S.held.get(x.id) || 0) + 1);
+            x.pos = p;
+            sendPos(x.id);
+        }
+        S.notes = rest;
+        save();
+        paint();
+        return true;
+    };
+    // ↑ / ↓ beside a note's number; to a screen reader the label says which note it moves
+    const mover = (n, i, by) => {
+        const label = by < 0 ? '上移' : '下移';
+        const b = button(by < 0 ? '↑' : '↓', 'ann-fb ann-mv', (e) => nudge(n, i + by, e));
+        Object.assign(b, { title: label, disabled: i + by < 0 || i + by >= S.notes.length });
+        b.setAttribute('aria-label', `${label}第 ${i + 1} 条`);
+        return b;
+    };
+    // Just after a note moved, a click at the same spot that lands on another note's button (it slid there with the
+    // move) is not taken: the second click of a quick double click was meant for the note that moved. Keys are always
+    // taken; the focus stays on the moved note's button.
+    const nudge = (n, to, e) => {
+        const [last, now, at] = [S.nudged, Date.now(), e && e.detail ? [e.clientX, e.clientY] : null];
+        const again = last && at && last.at && Math.hypot(at[0] - last.at[0], at[1] - last.at[1]) < 12;
+        if (editing() || (again && last.id !== n.id && now - last.t < 450)) return;
+        if (!move(n.id, to)) return;
+        S.nudged = { id: n.id, t: now, at };
+        openDrawer(n.id);
+    };
+    // Dragged by its grip (a mouse or a pen; a phone has the buttons), a note is lifted and follows the pointer, the
+    // others make room on the spring, and near the top or bottom of the list it scrolls along. On release it takes
+    // the place between the two notes it was dropped between; Escape or a lost pointer puts it back.
+    const grab = (e, li, n) => {
+        if (e.button || S.drag || editing()) return;
+        e.preventDefault();
+        const [grip, box, ol] = [e.currentTarget, li.closest('.ann-panel'), li.parentElement];
+        const items = [...ol.children];
+        const from = items.indexOf(li);
+        // in the list's own coordinates, as laid out (a note still sliding counts where it is going)
+        const mids = items.map((x) => x.offsetTop + x.offsetHeight / 2);
+        const room = li.offsetHeight + (parseFloat(getComputedStyle(ol).rowGap) || 0);
+        const bar = box.querySelector('.ann-acts');
+        const d = (S.drag = { to: from, y: e.clientY, at: e.clientY, top: box.scrollTop, raf: 0 });
+        const track = () => {
+            const dy = d.at - d.y + box.scrollTop - d.top;
+            li.style.translate = `0 ${dy}px`;
+            const to = items.reduce((k, _, j) => (j !== from && mids[j] < mids[from] + dy ? k + 1 : k), 0);
+            if (to === d.to) return;
+            d.to = to;
+            items.forEach((x, j) => {
+                const by = from < j && j <= to ? -room : to <= j && j < from ? room : 0;
+                if (j !== from) x.style.translate = by ? `0 ${by}px` : '';
+            });
+        };
+        // within 40px of the list's top or bottom edge it scrolls, faster nearer the edge
+        const tick = () => {
+            const r = box.getBoundingClientRect();
+            const bottom = bar ? Math.min(r.bottom, bar.getBoundingClientRect().top) : r.bottom;
+            const v = d.at < r.top + 40 ? d.at - r.top - 40 : d.at > bottom - 40 ? d.at - bottom + 40 : 0;
+            const top = box.scrollTop;
+            if (v) box.scrollTop += Math.max(-16, Math.min(16, v / 3));
+            if (box.scrollTop !== top) track();
+            d.raf = requestAnimationFrame(tick);
+        };
+        d.end = (put) => {
+            if (S.drag !== d) return;
+            S.drag = null;
+            cancelAnimationFrame(d.raf);
+            if (put && d.to !== from) {
+                // between the same neighbours in the list as it is now (another device may have changed it)
+                const rest = items.filter((x) => x !== li);
+                const [prev, next] = [rest[d.to - 1], rest[d.to]].map((x) => x && x.dataset.id);
+                const others = S.notes.filter((x) => x.id !== n.id);
+                const at = next ? others.findIndex((x) => x.id === next) : -1;
+                move(n.id, at >= 0 ? at : others.findIndex((x) => x.id === prev) + 1);
+            }
+            openDrawer();
+        };
+        attempt(() => grip.setPointerCapture(e.pointerId));
+        grip.onpointermove = (ev) => ((d.at = ev.clientY), track());
+        grip.onpointerup = () => d.end(true);
+        grip.onpointercancel = grip.onlostpointercapture = () => d.end(false);
+        box.classList.add('ann-still', 'ann-dragging');
+        li.classList.add('ann-lift');
+        for (const x of items) if (x !== li) x.classList.add('ann-glide');
+        d.raf = requestAnimationFrame(tick);
     };
     const edit = (li, n) => {
         const ta = make('<textarea class="ann-ta" rows="3" enterkeyhint="done" aria-label="改批注"></textarea>');
@@ -851,9 +1074,11 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         const back = () => openDrawer(n.id);
         const keep = () => {
             if (!clean(ta.value) && !(n.imgs && n.imgs.length)) return ta.focus();
-            n.note = clean(ta.value);
+            // the list may have been read again from the database meanwhile: the note as it is now
+            const cur = S.notes.find((x) => x.id === n.id) || n;
+            cur.note = clean(ta.value);
             save();
-            send(n);
+            send(cur);
             back();
             toast('改好了');
         };
@@ -861,6 +1086,8 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         row.append(button('取消', 'ann-btn', back), button('保存', 'ann-btn ann-primary', keep));
         for (const b of li.querySelectorAll('.ann-meta button')) b.remove();
         li.querySelector('.ann-note').replaceWith(ta, row);
+        // no moving while a note is open for editing (a move redraws the list)
+        li.closest('.ann-panel').classList.add('ann-editing');
         // editing in the phone's list: the list moves up out of the keyboard's way, this note in view
         const sheet = li.closest('.ann-sheet');
         if (sheet) (sheet.classList.add('ann-top', 'ann-still'), fit());
@@ -871,7 +1098,7 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
     // one note, or all of them
     const drop = (n) => {
         for (const gone of n ? [n] : S.notes) unsend(gone);
-        S.notes = n ? S.notes.filter((x) => x !== n) : [];
+        S.notes = n ? S.notes.filter((x) => x.id !== n.id) : [];
         if (n) S.marks.delete(n.id);
         else S.marks.clear();
         save();
@@ -1176,8 +1403,8 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         else stepFind(e.shiftKey ? -1 : 1);
     };
 
-    // Escape closes a picture, then the panel, then leaves annotate mode, then the find bar; not while an IME
-    // candidate is open (Escape cancels it). Over a picture, + − 0 1 zoom it.
+    // Escape puts back a note being dragged, else closes a picture, then the panel, then leaves annotate mode, then
+    // the find bar; not while an IME candidate is open (Escape cancels it). Over a picture, + − 0 1 zoom it.
     const onKey = (e) =>
         (S.view && S.view.isConnected && /^[-+=01]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.target.closest?.('input, textarea')
             ? (e.preventDefault(), S.view.zoomKey(e.key === '=' ? '+' : e.key), true)
@@ -1185,15 +1412,17 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         (e.key === 'Escape' &&
         !e.isComposing &&
         e.keyCode !== 229 &&
-        (S.view && S.view.isConnected
-            ? leave(S.view, { opacity: 0 })
-            : S.panel
-              ? closePanel()
-              : S.picking
-                ? setPicking(false)
-                : F.on
-                  ? closeFind()
-                  : hideChip()));
+        (S.drag
+            ? S.drag.end(false)
+            : S.view && S.view.isConnected
+              ? leave(S.view, { opacity: 0 })
+              : S.panel
+                ? closePanel()
+                : S.picking
+                  ? setPicking(false)
+                  : F.on
+                    ? closeFind()
+                    : hideChip()));
 
     const start = () => {
         // annotate2: notes the browser-only layer kept for a page that is now republished were handled from the
