@@ -126,6 +126,7 @@ touch-action:none;background:radial-gradient(circle,currentColor 1.5px,transpare
 .ann-dragging,.ann-dragging *{cursor:grabbing!important;-webkit-user-select:none;user-select:none}
 .ann-on{position:relative;z-index:1;border-color:var(--ann-ring);box-shadow:0 0 0 3px var(--ann-wash)}
 .ann-note{white-space:pre-wrap}
+.ann-drawer>.ann-head{position:sticky;top:-14px;z-index:1;margin:-14px -16px -6px;padding:14px 16px 6px;background:var(--ann-bg)}
 .ann-drawer>.ann-acts{position:sticky;bottom:0;padding-top:8px;background:var(--ann-bg);box-shadow:0 40px var(--ann-bg)}
 .ann-link{min-height:36px;padding:0 8px;border:0;background:none;color:var(--ann-hi);font-size:14px}
 .ann-bad{color:var(--ann-bad)}
