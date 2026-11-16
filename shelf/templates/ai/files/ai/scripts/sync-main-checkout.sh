@@ -12,6 +12,8 @@
 #   - 没有进行中的 merge / rebase / cherry-pick，已跟踪文件没有未提交改动（那可能是别的会话的工作台）
 #   - 远端是主检出的直系后代（只快进，主检出有本地提交或已分叉就不动）
 # 动手 = git fetch 集成分支 + git merge --ff-only；不 reset、不 checkout、不碰未跟踪文件。
+# 主检出在最新时，再用它自己的 protocol-mirror.sh --sync 对齐根目录协议副本（被 git 忽略，新 worktree 按 .worktreeinclude 从这里复制）；
+# 副本被人改过就两份都不动、只报告。
 #
 # 集成分支：--branch 指定；否则取 origin/HEAD 指向的分支；都没有就用 main。
 #
@@ -64,7 +66,15 @@ if ! "${fetch[@]}" 2>/dev/null; then echo "⚠ 取远端 $BRANCH 失败（没网
 remote_ref="refs/remotes/origin/$BRANCH"
 if ! g rev-parse --verify --quiet "$remote_ref" >/dev/null; then echo "= 主检出：远端没有 $BRANCH，跳过"; exit 0; fi
 local_sha="$(g rev-parse HEAD)"; remote_sha="$(g rev-parse "$remote_ref")"
-if [[ "$local_sha" == "$remote_sha" ]]; then echo "= 主检出 $BRANCH 已是最新（${local_sha:0:7}）"; exit 0; fi
+mirror_copies() {   # 主检出最新后对齐它的根目录协议副本
+  local ai mirror
+  ai="$(sed -n 's/^[[:space:]]*"aiDir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MAIN_ROOT/.shelf.json" 2>/dev/null | head -n 1 || true)"
+  mirror="$MAIN_ROOT/${ai:-ai}/scripts/protocol-mirror.sh"
+  [[ -f "$mirror" ]] || return 0
+  local args=(--sync); (( DRY )) && args+=(--dry-run)
+  (cd "$MAIN_ROOT" && bash "$mirror" "${args[@]}" 2>&1 | grep -E '↻|⚠|✗' | sed 's/^/  主检出：/') || true
+}
+if [[ "$local_sha" == "$remote_sha" ]]; then echo "= 主检出 $BRANCH 已是最新（${local_sha:0:7}）"; mirror_copies; exit 0; fi
 if ! g merge-base --is-ancestor "$local_sha" "$remote_sha"; then
   echo "⚠ 主检出 $BRANCH 有远端没有的本地提交（或已分叉），只快进不合并，不动"; exit 0
 fi
@@ -73,6 +83,7 @@ n="$(g rev-list --count "$local_sha..$remote_sha")"
 if (( DRY )); then echo "  [dry-run] 主检出 $BRANCH 会快进 $n 个提交（${local_sha:0:7} → ${remote_sha:0:7}）"; exit 0; fi
 if g merge --ff-only --quiet "$remote_ref"; then
   echo "✓ 主检出 $BRANCH 快进 $n 个提交（${local_sha:0:7} → ${remote_sha:0:7}）"
+  mirror_copies
 else
   echo "⚠ 主检出快进失败（多半是有未跟踪文件会被覆盖），见上方 git 输出；主检出原样未动"
 fi
