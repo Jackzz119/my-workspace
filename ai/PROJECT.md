@@ -21,7 +21,7 @@
   - `shelf/skills/` — 技能，按**包**组织：`_common/`（通用包，`shelf init` 整包装进项目）、`<pack>/`（领域包，如 `blender/`）、顶层单件（如 `project-audit/`）
   - `shelf/agents/` — AI 平台工作协议：`claude/CLAUDE.md`、`codex/AGENTS.md`、`multica/MULTICA.md`
   - `shelf/docs/` — 植入用模板（`JASKILL.md`：项目专属技能登记表）
-  - `shelf/templates/` — 项目模板（配方）：`shelf/templates/ai/template.json` 列出 `shelf init` / `sync` 要装的货与落点，模板自带的文件（`ai/scripts/` 下两个 AI 工作流脚本、`PROJECT.md` / `TODO.md` 骨架、`.worktreeinclude`、`.claude/settings.json` 等）放在 `shelf/templates/ai/files/`
+  - `shelf/templates/` — 项目模板（配方）：`shelf/templates/ai/template.json` 列出 `shelf init` / `sync` 要装的货与落点，模板自带的文件（`ai/scripts/` 下的 AI 工作流脚本与项目 worktree 补充脚本空壳、`PROJECT.md` / `TODO.md` / `DECISIONS.md` / `PENDING-DECISIONS.md` / `TODO-ARCHIVE.md` 骨架、`.worktreeinclude`、`.claude/settings.json` 等）放在 `shelf/templates/ai/files/`
 - `apps/` — 应用（预留，当前为空；可视化工作流引擎将落在这里）
 - `ai/` — 工作区级 PROJECT.md / TODO.md / JASKILL.md / features/ 文档；`ai/jaAgents/`（协议正本）、`ai/jaSkills/`（技能正本）、`ai/scripts/`（AI 工作流脚本）由 `shelf init` 装、入库；`ai/sessions/`、`ai/design_system/`、`ai/project-audit/` 是技能声明的固定目录；账本是根目录 `.shelf.json`
 
