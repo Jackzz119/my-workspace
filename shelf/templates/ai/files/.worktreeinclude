@@ -5,5 +5,6 @@
 # 入库样板 .env.example 不被忽略，本来就不会复制。项目要额外步骤放 ai/scripts/worktree.local.sh（两个脚本会调用它）。
 /CLAUDE.md
 /AGENTS.md
+.claude/settings.json
 .env
 .env.*

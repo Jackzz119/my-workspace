@@ -5,6 +5,15 @@
         "hooks": [
           {
             "type": "command",
+            "command": "r=\"$(git rev-parse --show-toplevel 2>/dev/null)\" || exit 0; for f in \"$r\"/ai/scripts/session-start.sh \"$r\"/AI/scripts/session-start.sh; do [ -f \"$f\" ] && exec bash \"$f\" --agent codex; done; exit 0",
+            "timeout": 300
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "r=\"$(git rev-parse --show-toplevel 2>/dev/null)\" || exit 0; for f in \"$r\"/ai/scripts/protocol-mirror.sh \"$r\"/AI/scripts/protocol-mirror.sh; do [ -f \"$f\" ] && exec bash \"$f\" --hook codex; done; exit 0",
             "timeout": 10
           }

@@ -3,6 +3,16 @@
     "hooks": {
         "SessionStart": [
             {
+                "matcher": "startup",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "for f in \"$CLAUDE_PROJECT_DIR\"/ai/scripts/session-start.sh \"$CLAUDE_PROJECT_DIR\"/AI/scripts/session-start.sh; do [ -f \"$f\" ] && exec bash \"$f\"; done; exit 0",
+                        "timeout": 300
+                    }
+                ]
+            },
+            {
                 "hooks": [
                     {
                         "type": "command",
