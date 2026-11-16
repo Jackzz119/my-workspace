@@ -182,13 +182,13 @@ Claude 的 auto-memory（`~/.claude/projects/<项目>/memory/`：`MEMORY.md` 索
     | 在本 worktree 自己的分支上 commit | ✅ 自主执行 |
     | `git push` 本 worktree 的分支 | ✅ 自主执行（推的是自己的分支，不碰共享分支） |
     | `gh pr create --base <集成分支>` | ✅ 自主执行 |
-    | **`gh pr merge --rebase`** | ✅ 自主执行，**前提是下面三条校验全过**；CI 绿即可合，不必等人审。单分支 PR 一律 rebase，环境分支之间同步（如 dev → staging）才用 `--merge`（用户 2026-10-17 定） |
+    | **`gh pr merge --rebase`** | ✅ 自主执行，**前提是下面三条校验全过**；CI 绿即可合，不必等人审；仓库没有 CI 的不查 CI（见下）。单分支 PR 一律 rebase，环境分支之间同步（如 dev → staging）才用 `--merge`（用户 2026-10-17 定） |
     | **`gh pr merge --squash` / `--admin` / `--auto`** | ❌ **禁止**：squash 把一条分支上几件事压成一个提交，日后 `blame` 只剩一句概述；`--admin` 绕过检查；`--auto` 让合并发生在没人看着的时刻。例外：平台生成的 `agent/*` 分支按 `ai/PROJECT.md`「分支与合并硬规则」用 squash |
     | **`--delete-branch`** | ❌ 别加：它会在本地切 base 分支——主检出占着集成分支时报假失败（PR 其实合了），没占着时把**本 worktree 骑到集成分支上**。合完手动 `git push origin --delete <branch>` |
     | **`git checkout` / `git switch` 到别的分支** | ❌ **禁止** |
     | **把工作区分支 `reset` 到别处** | ❌ **禁止** |
 
-    - **合并前三条校验，缺一不合**：① CI 跑在**当前 head** 上——按 sha 直查 `check-runs`，`gh pr checks` 会把旧 head 的绿报成通过；② 不落后集成分支——落后就先 `git rebase origin/<集成分支>`、`--force-with-lease` 推，再等**新 head** 的 CI（文本不冲突 ≠ 能编译）；③ 集成分支自己是绿的——红了先修它
+    - **合并前三条校验，缺一不合**：① CI 跑在**当前 head** 上——按 sha 直查 `check-runs`，`gh pr checks` 会把旧 head 的绿报成通过；② 不落后集成分支——落后就先 `git rebase origin/<集成分支>`、`--force-with-lease` 推，再等**新 head** 的 CI（文本不冲突 ≠ 能编译）；③ 集成分支自己是绿的——红了先修它。**仓库没有 CI 时不管 ①、③，只查 ②，过了就合**（用户 2026-11-15 定：没有 CI 就不管，有 CI 才管）
     - 合完核对 `state=MERGED`，再看一眼 `git worktree list`——自己那行不该变成集成分支
     - 需要知道上游进展时用 `git fetch` 拿信息，不 reset、不 checkout；主检出（非 worktree）的分支状态一律不碰——那是别的会话的工作台
 
