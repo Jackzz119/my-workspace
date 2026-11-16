@@ -17,7 +17,7 @@
 #   3. 环境配置：主检出里被 git 忽略的 `.env` / `.env.local` / `.env.<环境>` …（不含 .example 等入库样板），
 #      本 worktree 缺的照同一相对路径补过来——主检出那份是指向仓库里的相对链接就建同样的链接（目标读不到就不建），
 #      其余复制成独立文件（权限 600）；已有的不覆盖、悬空链接只报告，内容不读不打印，目标没被 git 忽略就不补。
-#      之后若有 <ai>/scripts/worktree.local.sh（项目自己的补充步骤）就跑它。和 sync-worktree.sh 的第 4 步同一口径
+#      之后若有 <ai>/scripts/worktree.local.sh（项目自己的补充步骤：模板植入空壳，之后归项目）就跑它。和 sync-worktree.sh 的第 4 步同一口径
 #
 # 落点全部 gitignored，不会混进提交（环境配置复制前逐个用 git check-ignore 验过）。真源仍只有 <ai>/jaSkills/ 与 <ai>/jaAgents/MULTICA.md 两处，要改就改真源。
 #
@@ -173,7 +173,7 @@ fill_env() {
   (( found )) || echo "= 环境配置：主检出里没有被 git 忽略的 .env 类文件"
 }
 
-# 项目自己的补充步骤（可选，不归模板管）：比如给 app 建指向根 .env 的链接。主检出里同样会跑
+# 项目自己的补充步骤（模板植入一个空壳，之后归项目、不对账）：比如给 app 建指向根 .env 的链接。主检出里同样会跑
 run_local_hook() {
   local hook="$AI_DIR/scripts/worktree.local.sh"
   [[ -f "$hook" ]] || return 0
