@@ -22,6 +22,7 @@ CLI 用的是**用户本人的账号**：Jira 上的人分不清哪句是用户�
 
 - 不算许可的：交付纪律说该转、PR 已合、DoD 打完勾、上一轮说过类似的话、别的单放行过。
 - 🔴 **QA 打回专用的转移（比如 `QA Failed`）我方永远不用**：那等于替 QA 写下一条「测试未通过」。要把单退回来，找用户。
+- 单已在待测，但 AC 要等别的团队给数据才测得了：不是打回，走项目 Jira 节写的「阻塞」转移（比如 `Blocked`），许可同改状态；项目节没写阻塞转移就问用户。
 - 常设授权表外的单、或方向和表不一致的转移：先问。
 - 用户撤回常设授权（比如说「先不回写 Jira」）：立刻停用，表内的也停，直到用户重新开口；同时在项目 Jira 节注明撤回日期。
 
@@ -41,7 +42,7 @@ flowchart LR
   subgraph Jira 收尾 agent（用户单独派，一批）
     E --> F[汇总清单<br/>用户一次确认]
     F -->|J3| G[发留言]
-    G -->|J4| H[转待测 + 指派 QA<br/>+ reporter 改成用户]
+    G -->|J4| H[转待测 + 指派 QA<br/>reporter 不动]
   end
 ```
 
@@ -59,7 +60,7 @@ flowchart LR
 1. **定范围**：用户点名的 issue / Epic / ticket，加上部署的环境。没点名就先列候选：已合入该环境分支、对应 ticket 还没到「待测」的那些单。列出来问用户，不自己扩大范围。
 2. **汇总清单**：逐张取 issue 里最新的「Jira 留言草稿」（以用户在 issue 里给的改稿为准），排成一张表发给用户：ticket · 草稿全文（或「与 PRD 一致」）· 当前 Jira 状态 · 计划动作。草稿缺的标「缺草稿」，这一张不做，报给用户。
 3. **用户一次回复**：「全部可以」，或者逐条改稿 / 剔除。没点头的不发。
-4. **执行**：逐张做 J3（发定稿原文，一字不加；「与 PRD 一致」的跳过 J3），再做 J4（转待测、assignee 改成 QA、reporter 改成我方负责人）。转之前先 `view` 看当前状态，已经到位的跳过。
+4. **执行**：逐张做 J3（发定稿原文，一字不加；「与 PRD 一致」的跳过 J3），再做 J4（转待测、assignee 改成 QA）。🔴 **reporter 默认不动**：reporter 记的是谁提的单，改掉就丢了出处；只有项目 Jira 节写明「J4 改 reporter、改成谁」时才改。转之前先 `view` 看当前状态，已经到位的跳过。
 5. **回执**：结果写成一张表（ticket · J3 · J4 · 失败原因），发在这次收尾的 issue 里；单张失败不影响其余各张，也不重试第二次。
 
 ### Jira 留言草稿格式（J2）
@@ -96,7 +97,7 @@ flowchart LR
 | 看单 | `jira issue view <KEY> --plain` | 巡检不能只看 status：最新评论里可能有「先别开测」这类人工闸 |
 | 转状态 | `jira issue move <KEY> "<转移名>"` | 按**转移名**转，不是目标状态名；多跳的按项目 Jira 节的顺序逐跳。转之前先 `view` 看当前状态，已到位就不转 |
 | 改 assignee | `jira issue assign <KEY> <accountId>` | 用 accountId |
-| 改 reporter | REST v2 `PUT /rest/api/2/issue/<KEY>`，body `{"fields":{"reporter":{"accountId":"…"}}}` | CLI 改不了 reporter。返回 400 / 403 多半是 reporter 字段不在编辑界面上，或账号没有 Modify Reporter 权限：如实报告，不绕 |
+| 改 reporter（仅项目 Jira 节要求时） | REST v2 `PUT /rest/api/2/issue/<KEY>`，body `{"fields":{"reporter":{"accountId":"…"}}}` | CLI 改不了 reporter。返回 400 / 403 多半是 reporter 字段不在编辑界面上，或账号没有 Modify Reporter 权限：如实报告，不绕 |
 | 发评论 | `jira issue comment add <KEY> --template <文件>`，或 REST v2 `POST /rest/api/2/issue/<KEY>/comment` | 🔴 **正文别当位置参数传**：进程会挂住，而且会重复落评论。发完 `view` 回读，确认只有一条 |
 
 ## 五、读与对账
@@ -109,9 +110,9 @@ flowchart LR
 ```markdown
 ## Jira（jira-cli 技能读这里）
 - 站点 / 项目键 / token 位置：
-- 状态与转移：开发中 = <状态>（从 <起点> 走 <转移名>）；待测 = <状态>（<转移名>，多跳写顺序）；QA 打回专用转移 = <名>（我方禁用）
+- 状态与转移：开发中 = <状态>（从 <起点> 走 <转移名>）；待测 = <状态>（<转移名>，多跳写顺序）；QA 打回专用转移 = <名>（我方禁用）；阻塞 = <转移名>（待测的单缺别的团队数据、测不了时用）
 - 测试环境与对应分支（收尾批次用来列候选）：
-- 人员：QA = <名>（accountId）；我方负责人 / reporter = <名>（accountId）
+- 人员：QA = <名>（accountId）；reporter：默认不改（要改就写改成谁 + accountId）
 - 常设授权（用户 <日期> 定；撤回就在这里注明日期）：
   | 挂点 | 动作 | 触发条件 |
 - 不在 Jira 的工作：（例：后端 / DevOps 的活在 Jira 转给谁）
