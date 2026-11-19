@@ -76,8 +76,8 @@
 
 - **钩子在哪跑**：桌面版 worktree 会话的设置、钩子、技能都从主检出读，钩子在主检出根目录启动、`$CLAUDE_PROJECT_DIR` 指向主检出；只有钩子输入 JSON 的 `cwd` 是会话所在的 worktree（`CLAUDE.md` 仍从 worktree 读）。Codex 的钩子在会话 `cwd` 里跑，输入里同样有 `cwd`。所以 `session-start.sh` 与 `protocol-mirror.sh --hook` 都先读 `cwd` 找会话所在的检出，读不到（终端里手动跑、旧版客户端）或不在同一个仓库，就按脚本所在的检出算
 - **`session-start.sh` 做什么**：拿到锁的那个会话先把 shelf 升到 npm 最新版；会话开在 linked worktree → 用那个 worktree 自己 `ai/scripts/` 下的脚本跑 `protocol-mirror.sh --sync` → `shelf init` → `shelf sync` → `sync-worktree.sh`；然后每次在主检出跑 `protocol-mirror.sh --sync` → `shelf init` → `shelf sync`（不跑保底脚本）。`sync` 都不带 `--merge` / `--push`。最后输出 `reloadSkills`，本会话当场用上同步后的技能
-- **主检出那一遍的规矩**：几个会话同时开场时只有一个真正跑（锁是主检出 git 目录下的 `ai-shelf-sync.lock`，持有进程不在了或放了 10 分钟以上算残留）；主检出有进行中的 merge / rebase / cherry-pick 就跳过；只有账本 `.shelf.json` 的记账字段变了（`shelf init` 每次都改写模板提交号）、文件一个没变，就把账本还原。真改到的文件留在主检出，本会话不提交、不还原
-- **主检出里同步出来的改动怎么收尾**：合并进集成分支后跑 `bash ai/scripts/sync-main-checkout.sh`。它拿同一把锁（最多等 90 秒），逐个文件和远端比：全部和远端逐字节一致 → 还原成 HEAD 版本（快进要写的未跟踪文件一致就删掉）再 `--ff-only`；有一个不一致 → 整批不动，列出文件并标出哪些是货架管的。账本 `.shelf.json` 例外：其余改动都和远端一致时，它的差异当记账噪音一起丢掉。有暂存的改动、不在集成分支上、有本地提交都不动。不 reset、不 stash、不切分支
+- **主检出那一遍的规矩**：几个会话同时开场时只有一个真正跑（锁是主检出 git 目录下的 `ai-shelf-sync.lock`，持有进程不在了或放了 10 分钟以上算残留）；主检出有进行中的 merge / rebase / cherry-pick 就跳过；只有账本 `.shelf.json` 的记账字段变了、文件一个没变，就把账本还原（shelf 2.1 及以前 `shelf init` 每次都改写模板提交号；2.2 起内容没变不改账，这条只剩兜底）。真改到的文件留在主检出，本会话不提交、不还原
+- **主检出里同步出来的改动怎么收尾**：合并进集成分支后跑 `bash ai/scripts/sync-main-checkout.sh`。它拿同一把锁（最多等 90 秒），逐个文件和远端比：全部和远端逐字节一致 → 还原成 HEAD 版本（快进要写的未跟踪文件一致就删掉）再 `--ff-only`；有一个不一致 → 整批不动，列出文件并标出哪些是货架管的。账本 `.shelf.json` 例外：其余改动都和远端一致时，它的差异当记账噪音一起丢掉（不同时间同步的两个检出，来源提交与拉取日期本来就不同，CLI 修好了也一样）。有暂存的改动、不在集成分支上、有本地提交都不动。不 reset、不 stash、不切分支
 - **上游一直没有的同步改动**：货架在两次合并之间又更新过，主检出的同步结果比上游新，快进脚本会停在「不一致」。这时在某个 worktree 会话里跑一次 `shelf sync`、把改动提交合进集成分支，再跑快进脚本
 - **钩子配置怎么进项目**：新项目 `shelf init` 整份植入；已有 `.claude/settings.json` / `.codex/hooks.json` 的老项目，shelf 2.2 起跑一次 `shelf init` 就补上缺的钩子。改的是 gitignored 的本机文件，不进提交；新钩子从下一个会话起生效
 
