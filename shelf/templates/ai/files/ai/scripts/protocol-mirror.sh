@@ -8,7 +8,9 @@
 #   bash <ai>/scripts/protocol-mirror.sh --hook [claude|codex]
 #       SessionStart / UserPromptSubmit 钩子：claude（默认）对齐 CLAUDE.md，由模板的 .claude/settings.json 挂上；
 #       codex 对齐 AGENTS.md，由模板的 .codex/hooks.json 挂上（Codex 要在 /hooks 里信任一次才会跑）。
-#       本会话读到的协议已经过期时提醒重读。两边都把钩子打印的文字放进模型上下文；没事时什么都不打印
+#       本会话读到的协议已经过期时提醒重读。两边都把钩子打印的文字放进模型上下文；没事时什么都不打印。
+#       比对的是会话所在的检出：读钩子输入 JSON 的 cwd（桌面版 worktree 会话的钩子在主检出里启动、$CLAUDE_PROJECT_DIR 指向主检出，
+#       会话读的却是 worktree 里的 CLAUDE.md）；cwd 读不到或不在同一个仓库，就按本脚本所在的检出
 #
 # 规则（用户 2026-10-26 定：根副本和正本永远一致，没有「追加」）：
 #   - 副本不存在 → 从正本创建
@@ -18,15 +20,10 @@
 #     （shelf push <ai>/jaAgents/<名> --take-mirror，shelf 2.1 起副本 → 正本同样要这个确认）；
 #     不要副本的改动 → 用户确认后加 --take-source 用正本覆盖
 #   - Multica 由 bootstrap.sh 生成的协议（首行带生成标记）不归这里管
-# 指纹记在本检出自己的 git 目录里（<git-dir>/ai-mirror/），不进提交、不用 gitignore；每个 worktree 各一份。
+# 指纹记在所对齐的那个检出自己的 git 目录里（<git-dir>/ai-mirror/），不进提交、不用 gitignore；每个 worktree 各一份。
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"   # <ai>/scripts/ → 仓库根
-cd "$ROOT" || exit 0
-AI_DIR="$(sed -n 's/^[[:space:]]*"aiDir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .shelf.json 2>/dev/null | head -n 1 || true)"
-[[ -n "$AI_DIR" ]] || AI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && basename "$(pwd -P)")"
-GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
-STATE="$GIT_DIR/ai-mirror"
 
 MODE=""; AGENT="all"; DRY=0; TAKE=0; HOOK_AGENT="claude"
 while [[ $# -gt 0 ]]; do
@@ -37,11 +34,36 @@ while [[ $# -gt 0 ]]; do
     --agent=*) AGENT="${1#*=}"; shift ;;
     --dry-run) DRY=1; shift ;;
     --take-source) TAKE=1; shift ;;
-    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "✗ 未知参数：$1（用 --help 看用法）"; exit 2 ;;
   esac
 done
 [[ -n "$MODE" ]] || { echo "✗ 要给 --sync 或 --hook（用 --help 看用法）"; exit 2; }
+
+# 钩子输入（JSON，标准输入）：标准输入是终端就不读，管道迟迟不关也只等 2 秒
+INPUT=""; line=""
+if [[ "$MODE" == "hook" && ! -t 0 ]]; then
+  while IFS= read -r -t 2 line || [[ -n "$line" ]]; do INPUT+="$line"$'\n'; line=""; done
+fi
+field() {   # 取钩子输入里的字符串字段（不依赖 jq）；还原 JSON 转义的 \\ 与 \/
+  printf '%s' "$INPUT" | tr -d '\r\n' | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1 \
+    | sed -e 's#\\/#/#g' -e 's#\\\\#\\#g'
+}
+if [[ "$MODE" == "hook" ]]; then
+  cwd_in="$(field cwd)"
+  if [[ -n "$cwd_in" && -d "$cwd_in" ]]; then
+    top="$(git -C "$cwd_in" rev-parse --show-toplevel 2>/dev/null)" && top="$(cd "$top" 2>/dev/null && pwd -P)" || top=""
+    common() { (cd "$1" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P); }
+    # 同一个仓库（公共 git 目录相同）的另一个检出才换过去
+    [[ -n "$top" && "$top" != "$ROOT" && "$(common "$top")" == "$(common "$ROOT")" ]] && ROOT="$top"
+  fi
+fi
+
+cd "$ROOT" || exit 0
+AI_DIR="$(sed -n 's/^[[:space:]]*"aiDir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .shelf.json 2>/dev/null | head -n 1 || true)"
+[[ -n "$AI_DIR" ]] || AI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && basename "$(pwd -P)")"
+GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
+STATE="$GIT_DIR/ai-mirror"
 
 sha_of() { git hash-object "$1" 2>/dev/null; }
 record() { (( DRY )) && return 0; mkdir -p "$STATE" && sha_of "$1" > "$STATE/$1.sha"; }
@@ -99,8 +121,6 @@ if [[ "$MODE" == "sync" ]]; then
 fi
 
 # ---------- 钩子 ----------
-INPUT="$(cat 2>/dev/null || true)"
-field() { printf '%s' "$INPUT" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1; }
 SESSION="$(field session_id | tr -cd 'A-Za-z0-9_-')"
 EVENT="$(field hook_event_name)"
 SOURCE="$(field source)"   # SessionStart 的来由：startup / resume / clear / compact（Codex 另有 fork）
