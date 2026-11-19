@@ -15,7 +15,8 @@
 #   · 主检出那一遍（每次都跑）：protocol-mirror.sh --sync → shelf init → shelf sync。桌面版 worktree 会话的技能、设置、钩子都从
 #       主检出读，主检出不同步，新会话读到的就是旧技能。改到的文件留在主检出、本会话不提交：上游带上同样内容后由
 #       sync-main-checkout.sh 丢掉再快进；上游一直没有的，在某个 worktree 会话里专门提交一次。只有账本 .shelf.json 的记账字段变了
-#       （文件一个没变）就把账本还原，主检出不白白变脏。主检出有进行中的 merge / rebase / cherry-pick 时不动；
+#       （文件一个没变）就把账本还原，主检出不白白变脏（shelf 2.1 及以前 init 每次都改写模板提交号；2.2 起内容没变不改账，
+#       这条只剩兜底）。主检出有进行中的 merge / rebase / cherry-pick 时不动；
 #       几个会话同时开场时只有一个真正跑（锁在主检出的 git 目录，快进脚本也用这把锁），其余跳过。
 #   shelf sync 都不带 --merge / --push：双改和冲突留给人，推货架等任务做完再说。
 # 开头先查一次 npm 上的 shelf 最新版，本机旧了就升级（没网 / 超时就用现有版本；同时开场的会话只有拿到锁的那个升级）。
@@ -34,7 +35,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --agent) AGENT="${2:-claude}"; shift 2 ;;
     --agent=*) AGENT="${1#*=}"; shift ;;
-    -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) shift ;;
   esac
 done
