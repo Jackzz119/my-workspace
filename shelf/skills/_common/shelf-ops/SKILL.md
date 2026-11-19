@@ -22,7 +22,8 @@ shelf 是个人内容货架：一个 git 仓库（货架）放技能、协议和
     - shelf 2.1 起 CLI 自己也守这条：`mirror-ahead` 时 `sync` 列待决、`pull` 不动、`push` / `merge` 列差异退出 2，没有用户确认不加 `--take-mirror`。
   - `ai/jaSkills/<名>/` 是技能唯一正本，`.claude/skills`、`.agents/skills` 是指向它的链接
   - `ai/features/`、`ai/sessions/`、`ai/design_system/` 下的 `concept/ img/ uiux/ codex-visual/`、`ai/project-audit/` 下的 `runs/ scripts/` 是固定目录：各技能在 frontmatter 里声明，init / sync 缺了就建
-  - `ai/JASKILL.md`、`ai/PROJECT.md`、`ai/TODO.md`、`ai/check-docs.json`、`.claude/settings.json`、`.worktreeinclude` 是植入物：装一次，之后归项目，shelf 不对账、不推
+  - `ai/JASKILL.md`、`ai/PROJECT.md`、`ai/TODO.md`、`ai/check-docs.json`、`.claude/settings.json`、`.codex/hooks.json`、`.worktreeinclude` 是植入物：装一次，之后归项目，shelf 不对账、不推。两份钩子配置例外一点：shelf 2.2 起 `init` 给已有的这两份补上模板里缺的钩子（只加不改，本地自己的钩子和其余设置原样），`sync` 不碰
+- **会话开场钩子**（`ai/scripts/session-start.sh`，挂在上面两份钩子配置的 `SessionStart` 上）：主检出、worktree 开的会话都同步。会话开在 worktree 时先在那个 worktree 里 `shelf init` + `shelf sync` + 保底脚本，改到的文件算本会话的改动、随任务提交；每次还在主检出 `shelf init` + `shelf sync`，改到的文件**留在主检出、谁都不提交**，等上游带上同样内容后由 `ai/scripts/sync-main-checkout.sh` 丢掉再快进。开场上下文里会分「worktree」「主检出」两段报结果，照着做；细节见 reference.md「会话开场钩子与主检出快进」
 - **新 worktree 补什么**（三个入口同一口径：桌面版按 `.worktreeinclude`、本机保底 `ai/scripts/sync-worktree.sh`、Multica 的 `ai/scripts/bootstrap.sh`）：技能链接、协议副本，以及**被 git 忽略的环境配置文件**（`.env`、`.env.local`、`.env.<环境>` 等，不含 `.env.example` 这类入库样板）——从主检出照同一相对路径补进来，主检出那份是指向仓库里的相对链接就建同样的链接；指向仓库外的链接与普通文件复制成独立文件；已有的不覆盖，内容不读不打印，目标没被 git 忽略就不补，不留悬空链接。项目要额外步骤（比如给 app 建指向根 `.env` 的链接），放进项目自己的 `ai/scripts/worktree.local.sh`（模板植入一个空壳，之后归项目、不对账），两个脚本补完后会调用它，主检出里也跑
 
 ## 用户这样说 → 你这样做
@@ -77,4 +78,4 @@ shelf 是个人内容货架：一个 git 仓库（货架）放技能、协议和
 4. 账本 `.shelf.json` 不手改；登记的增删用 pull / forget。
 5. Windows 上技能链接是 junction；删链接只用 `cmd /c rmdir <链接路径>`（不带 `/s`），递归删除会删到正本。
 
-细节（JSON 里的物品状态全表、账本字段、货架从哪来、没装 shelf 的机器与 worktree、模板写法）见 ${CLAUDE_SKILL_DIR}/reference.md。
+细节（JSON 里的物品状态全表、账本字段、货架从哪来、没装 shelf 的机器与 worktree、会话开场钩子与主检出快进、模板写法）见 ${CLAUDE_SKILL_DIR}/reference.md。
