@@ -209,3 +209,78 @@ test("货架上没有 templates/ai 时用内置配方，同样落 ai/jaAgents + 
   assert.match(read(p, "ai/PROJECT.md"), /^# bare\n/);
   assert.ok(!exists(p, "ai/scripts"), "内置配方没有模板自带的文件");
 });
+
+test("init：已有的 .claude/settings.json / .codex/hooks.json 只补模板里缺的钩子（本地钩子与设置原样），重跑不变；sync 不碰；坏 JSON 不动", (t) => {
+  const root = tmpRoot(t, "hooks");
+  const m = machine(root, "a", makeRemote(root));
+  const tplClaude = JSON.parse(TEMPLATE_FILES["templates/ai/files/.claude/settings.json"]);
+  const tplCodex = JSON.parse(TEMPLATE_FILES["templates/ai/files/.codex/hooks.json"]);
+  const startClaude = tplClaude.hooks.SessionStart.find((g) => g.matcher === "startup");
+  assert.ok(startClaude, "模板的 Claude 设置里有开场钩子");
+  // 模板加开场钩子之前就装好的本地配置：少开场钩子，多一个自己的钩子，outputStyle 大小写和模板不同
+  const own = { hooks: [{ type: "command", command: "echo mine", timeout: 5 }] };
+  const oldClaude = {
+    outputStyle: "concise",
+    hooks: {
+      SessionStart: tplClaude.hooks.SessionStart.filter((g) => g !== startClaude),
+      UserPromptSubmit: [...tplClaude.hooks.UserPromptSubmit, own],
+    },
+  };
+  const oldCodex = { hooks: { ...tplCodex.hooks, SessionStart: tplCodex.hooks.SessionStart.slice(1) } };
+  const p = project(root, "app", {
+    "package.json": '{"name":"app"}',
+    ".claude/settings.json": JSON.stringify(oldClaude, null, 4) + "\n",
+    ".codex/hooks.json": JSON.stringify(oldCodex, null, 2) + "\n",
+  });
+
+  const r = m.json(p, "init", "--agents", "claude,codex");
+  assert.equal(r.code, 0, r.out);
+  const byKey = Object.fromEntries(r.json.data.items.map((i) => [i.key, i]));
+  assert.equal(byKey["templates/ai/files/.claude/settings.json"].state, "hooks-merged");
+  assert.deepEqual(byKey["templates/ai/files/.claude/settings.json"].hooksAdded, [{ event: "SessionStart", hooks: 1 }]);
+  assert.equal(byKey["templates/ai/files/.codex/hooks.json"].state, "hooks-merged");
+  const claude = JSON.parse(read(p, ".claude/settings.json"));
+  assert.deepEqual(claude.hooks.SessionStart, tplClaude.hooks.SessionStart, "开场钩子补在最前面，和模板顺序一致");
+  assert.deepEqual(claude.hooks.UserPromptSubmit, oldClaude.hooks.UserPromptSubmit, "本地自己的钩子保留");
+  assert.equal(claude.outputStyle, "concise", "其余设置不动");
+  assert.equal(read(p, ".claude/settings.json"), JSON.stringify(claude, null, 4) + "\n", "缩进照原文件");
+  assert.deepEqual(JSON.parse(read(p, ".codex/hooks.json")), tplCodex);
+  assert.equal(read(p, ".codex/hooks.json"), JSON.stringify(tplCodex, null, 2) + "\n");
+  const L = ledger(p);
+  assert.equal(L.shelf["templates/ai/files/.claude/settings.json"].planted, true, "还是植入物");
+
+  // 重跑：什么都不缺，文件与账本都不变
+  const before = [read(p, ".claude/settings.json"), read(p, ".codex/hooks.json"), read(p, ".shelf.json")];
+  const again = m.json(p, "init");
+  assert.equal(again.code, 0, again.out);
+  assert.equal(again.json.data.items.find((i) => i.key === "templates/ai/files/.claude/settings.json").state, "planted");
+  assert.deepEqual([read(p, ".claude/settings.json"), read(p, ".codex/hooks.json"), read(p, ".shelf.json")], before);
+
+  // 已记账的植入物又缺了钩子：sync 不碰，init 补
+  fs.writeFileSync(path.join(p, ".claude", "settings.json"), JSON.stringify(oldClaude, null, 4) + "\n");
+  const s = m.json(p, "sync");
+  assert.equal(s.code, 0, s.out);
+  assert.equal(s.json.data.items.find((i) => i.key === "templates/ai/files/.claude/settings.json").state, "planted");
+  assert.deepEqual(JSON.parse(read(p, ".claude/settings.json")), oldClaude, "sync 不碰植入物");
+  const fix = m.json(p, "init");
+  assert.equal(fix.json.data.items.find((i) => i.key === "templates/ai/files/.claude/settings.json").state, "hooks-merged");
+  assert.deepEqual(JSON.parse(read(p, ".claude/settings.json")).hooks.SessionStart, tplClaude.hooks.SessionStart);
+
+  // pull 记过账的钩子配置（不带 --force）：同样只补缺的钩子
+  fs.writeFileSync(path.join(p, ".claude", "settings.json"), JSON.stringify(oldClaude, null, 4) + "\n");
+  const pulled = m.json(p, "pull", ".claude/settings.json");
+  assert.equal(pulled.code, 0, pulled.out);
+  assert.equal(pulled.json.data.items[0].action, "hooks-merged");
+  assert.deepEqual(JSON.parse(read(p, ".claude/settings.json")).hooks.SessionStart, tplClaude.hooks.SessionStart);
+  assert.equal(JSON.parse(read(p, ".claude/settings.json")).outputStyle, "concise");
+
+  // 坏 JSON：一个字不改，报警告，不算待决
+  fs.writeFileSync(path.join(p, ".codex", "hooks.json"), "{ broken");
+  const bad = m.json(p, "init");
+  assert.equal(bad.code, 0, bad.out);
+  assert.equal(read(p, ".codex/hooks.json"), "{ broken");
+  const badItem = bad.json.data.items.find((i) => i.key === "templates/ai/files/.codex/hooks.json");
+  assert.equal(badItem.state, "planted");
+  assert.match(badItem.mergeError, /JSON/);
+  assert.ok(bad.json.warnings.some((w) => w.includes(".codex/hooks.json")), JSON.stringify(bad.json.warnings));
+});

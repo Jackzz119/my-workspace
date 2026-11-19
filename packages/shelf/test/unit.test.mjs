@@ -11,6 +11,7 @@ import { detectAiDir, planScaffold, applyScaffold, declaredScaffold, isDotnetPro
 import { BUILTIN_AI, expandTemplate, renderText } from "../lib/template.mjs";
 import { mergeTrees, conflictMarkerFiles, mapHash, readTreeFs, writeTree, MARK_OURS, MARK_THEIRS } from "../lib/threeway.mjs";
 import { contentHash } from "../lib/version.mjs";
+import { mergeHooksText } from "../lib/hookmerge.mjs";
 
 const B = (s) => Buffer.from(s);
 
@@ -222,4 +223,63 @@ test("writeTree：只写变化的文件，删掉结果里没有的并清理空�
   const file = path.join(root, "one.md");
   fs.writeFileSync(file, "solo\n");
   assert.equal(mapHash(readTreeFs(file, "one.md"), true), contentHash(file));
+});
+
+test("mergeHooksText：只补模板里缺的钩子，本地自己的钩子、其余键、缩进与结尾换行原样；已有不动；坏 JSON 不改", () => {
+  const cmd = (c) => ({ type: "command", command: c, timeout: 10 });
+  const tpl = JSON.stringify({
+    outputStyle: "Concise",
+    hooks: {
+      SessionStart: [
+        { matcher: "startup", hooks: [{ type: "command", command: "start.sh", timeout: 300 }] },
+        { hooks: [cmd("mirror.sh --hook")] },
+      ],
+      UserPromptSubmit: [{ hooks: [cmd("mirror.sh --hook")] }],
+    },
+  }, null, 2);
+  const local = {
+    outputStyle: "concise",
+    hooks: {
+      SessionStart: [{ hooks: [cmd("mirror.sh --hook")] }],
+      UserPromptSubmit: [{ hooks: [cmd("mirror.sh --hook")] }, { hooks: [cmd("my-own.sh")] }],
+      Stop: [{ hooks: [cmd("notify.sh")] }],
+    },
+  };
+  const localText = JSON.stringify(local, null, 4) + "\n";
+
+  const r = mergeHooksText(localText, tpl);
+  assert.equal(r.state, "merged");
+  assert.deepEqual(r.added, [{ event: "SessionStart", hooks: 1 }]);
+  const out = JSON.parse(r.text);
+  assert.equal(out.outputStyle, "concise", "其余键不动（大小写也不改）");
+  assert.deepEqual(out.hooks.SessionStart, [
+    { matcher: "startup", hooks: [{ type: "command", command: "start.sh", timeout: 300 }] },
+    { hooks: [cmd("mirror.sh --hook")] },
+  ], "新组插在模板里排在它后面的那组前面，顺序跟模板一致");
+  assert.deepEqual(out.hooks.UserPromptSubmit, local.hooks.UserPromptSubmit, "本地自己的钩子保留");
+  assert.deepEqual(out.hooks.Stop, local.hooks.Stop, "模板没有的事件不动");
+  assert.match(r.text, /^\{\n {4}"outputStyle"/, "4 空格缩进照原文件");
+  assert.ok(r.text.endsWith("}\n"), "结尾换行照原文件");
+  assert.equal(r.text, JSON.stringify(out, null, 4) + "\n");
+
+  assert.deepEqual(mergeHooksText(r.text, tpl), { state: "unchanged", added: [] }, "补过一次再跑不变");
+
+  // 同一组里只缺一部分：只补缺的那条，matcher 跟模板
+  const partialTpl = JSON.stringify({ hooks: { SessionStart: [{ matcher: "startup", hooks: [cmd("a.sh"), cmd("b.sh")] }] } });
+  const partial = mergeHooksText(JSON.stringify({ hooks: { SessionStart: [{ hooks: [cmd("a.sh")] }] } }), partialTpl);
+  assert.deepEqual(JSON.parse(partial.text).hooks.SessionStart, [{ hooks: [cmd("a.sh")] }, { matcher: "startup", hooks: [cmd("b.sh")] }]);
+  assert.ok(!partial.text.endsWith("\n"), "原文件没有结尾换行就不加");
+
+  // 本地没有 hooks 键：补在最后；Tab 缩进与 CRLF 照原样
+  const noHooks = mergeHooksText('{\r\n\t"model": "x"\r\n}\r\n', partialTpl);
+  assert.equal(noHooks.state, "merged");
+  assert.deepEqual(Object.keys(JSON.parse(noHooks.text)), ["model", "hooks"]);
+  assert.match(noHooks.text, /^\{\r\n\t"model": "x",\r\n\t"hooks"/);
+  assert.ok(noHooks.text.endsWith("}\r\n"));
+
+  for (const bad of ["{ not json", "[1, 2]", '{"hooks": []}', '{"hooks": {"SessionStart": {}}}']) {
+    const b = mergeHooksText(bad, tpl);
+    assert.equal(b.state, "invalid", bad);
+    assert.equal(b.text, undefined, "读不懂就不给新文本");
+  }
 });

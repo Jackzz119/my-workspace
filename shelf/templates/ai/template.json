@@ -23,7 +23,7 @@
     { "from": "files/ai/TODO-ARCHIVE.md", "to": "{ai}/TODO-ARCHIVE.md", "planted": true, "render": true },
     { "from": "files/ai/check-docs.json", "to": "{ai}/check-docs.json", "planted": true, "render": true },
     { "from": "files/.worktreeinclude", "to": ".worktreeinclude", "planted": true },
-    { "from": "files/.claude/settings.json", "to": ".claude/settings.json", "planted": true, "agents": ["claude"] },
-    { "from": "files/.codex/hooks.json", "to": ".codex/hooks.json", "planted": true, "agents": ["codex"] }
+    { "from": "files/.claude/settings.json", "to": ".claude/settings.json", "planted": true, "merge": "hooks", "agents": ["claude"] },
+    { "from": "files/.codex/hooks.json", "to": ".codex/hooks.json", "planted": true, "merge": "hooks", "agents": ["codex"] }
   ]
 }
