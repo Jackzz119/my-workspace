@@ -235,6 +235,13 @@ function entryFields(ctx, srcAbs, destAbs) {
   };
 }
 
+// 记账字段只在内容变了时才动（SHELF 决策 #47）：内容指纹和账本一致，就沿用账本里的来源提交与拉取日期，
+// 货架 HEAD 往前走了也一样——重跑 init / sync / push 后账本逐字节不变，不在项目 git 里留下噪音
+function keepIfSame(rec, fields) {
+  if (!rec || rec.contentHash !== fields.contentHash) return fields;
+  return { ...fields, sourceCommit: rec.sourceCommit ?? fields.sourceCommit, pulledAt: rec.pulledAt ?? fields.pulledAt };
+}
+
 // ---- 正本与根目录副本（SHELF 决策 #38）----
 
 // 正本（localPath，进项目 git）与副本（mirror，比如给 agent 读的根目录 CLAUDE.md，gitignore）：
@@ -344,7 +351,7 @@ function mergePlantedHooks(localAbs, srcAbs, localPath, { dryRun = false } = {})
 }
 
 // opts：force 覆盖本地改动 · planted 植入物 · mirror 根目录副本 · render 植入时代入占位符 · fromTemplate 来自模板
-// · merge 植入物本地已有时的合并方式（"hooks" = 只补缺的钩子）
+// · merge 植入物本地已有时的合并方式（"hooks" = 只补缺的钩子）· keepLedger 补回文件但不改已有的账
 async function pullEntry(ctx, realRel, manifest, counters, ask, destAbs, opts = {}) {
   const cwd = process.cwd();
   const src = shelfAbs(ctx, realRel);
@@ -357,8 +364,10 @@ async function pullEntry(ctx, realRel, manifest, counters, ask, destAbs, opts = 
   counters.items.push(item);
 
   const record = () => {
+    // 已记账的植入物只是本地文件没了（新 clone / 新 worktree 里被 gitignore 的那几份）：补回文件，账不动
+    if (opts.keepLedger && recorded) return clearMergeState(cwd, realRel);
     updateShelfEntry(manifest, realRel, {
-      ...entryFields(ctx, src, destAbs),
+      ...keepIfSame(recorded, entryFields(ctx, src, destAbs)),
       ...(planted ? { planted: true } : {}),
       ...(mirror ? { mirror } : {}),
       ...(opts.fromTemplate ? { fromTemplate: true } : {}),
@@ -999,9 +1008,11 @@ export async function cmdShelfPush(argv) {
       console.log(`= ${shown} 与货架一致，无需 push（账本已对齐货架当前版本）`);
       if (relocatedFrom) delete manifest.shelf[relocatedFrom];
       updateShelfEntry(manifest, key, {
-        sourceCommit: headCommit(ctx.root),
-        contentHash: contentHash(targetAbs),
-        pulledAt: todayISO(),
+        ...keepIfSame(manifest.shelf?.[key], {
+          sourceCommit: headCommit(ctx.root),
+          contentHash: contentHash(targetAbs),
+          pulledAt: todayISO(),
+        }),
         localPath: localPosix,
       });
       clearMergeState(process.cwd(), key);
@@ -1769,7 +1780,7 @@ async function reconcileEntry(ctx, manifest, key, { dryRun, restore, plan }) {
     const srcAbs = shelfAbs(ctx, key);
     if (restore && localAbs && !fs.existsSync(localAbs) && fs.existsSync(srcAbs)) {
       if (!dryRun) {
-        await pullEntry(ctx, key, manifest, newCounters(), safeAsk, localAbs, { planted: true, render: tplItem?.render ? renderVars(manifest) : null });
+        await pullEntry(ctx, key, manifest, newCounters(), safeAsk, localAbs, { planted: true, keepLedger: true, render: tplItem?.render ? renderVars(manifest) : null });
       }
       item.state = "restored";
     } else if (restore && tplItem?.merge === "hooks" && localAbs && fs.existsSync(srcAbs)) {
@@ -1831,7 +1842,7 @@ async function reconcileEntry(ctx, manifest, key, { dryRun, restore, plan }) {
     if (restore && rec.localPath) {
       if (!dryRun) {
         writeWithMirror(target, localAbs, rec.mirror);
-        manifest.shelf[effKey] = { ...rec, contentHash: contentHash(target), sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
+        manifest.shelf[effKey] = { ...rec, ...keepIfSame(rec, { contentHash: contentHash(target), sourceCommit: headCommit(ctx.root), pulledAt: todayISO() }) };
         clearMergeState(cwd, effKey);
       }
       console.log(`${dryRun ? "· 将补拉" : "↓ 已补拉"} ${shown}`);
@@ -2183,9 +2194,16 @@ export async function cmdShelfInit(argv = []) {
     }
 
     manifest.agents = targets;
-    manifest.template = tpl.builtin ? { name: tpl.name, builtin: true } : { name: tpl.name, commit: headCommit(ctx.root) };
+    // 模板提交号（SHELF 决策 #47）：接入或换模板时记货架 HEAD；之后只在这次对账真的改了账本时才跟到最新，
+    // 内容没变就沿用，免得货架上别的货一推、每个项目重跑 init 都多出一处账本改动
+    const prevTpl = manifest.template;
+    const sameTpl = !tpl.builtin && !!prevTpl && !prevTpl.builtin && prevTpl.name === tpl.name && !!prevTpl.commit;
+    manifest.template = tpl.builtin ? { name: tpl.name, builtin: true } : { name: tpl.name, commit: sameTpl ? prevTpl.commit : headCommit(ctx.root) };
+    const ledgerOf = () => JSON.stringify({ ...manifest, template: undefined });
+    const ledgerBefore = ledgerOf();
     console.log(fresh ? `新项目接入：按模板 ${tpl.name} 初始化` : `按账本还原 / 补齐（模板 ${tpl.name}）`);
     const r = await applyTemplate(ctx, manifest, tpl, targets);
+    if (sameTpl && ledgerOf() !== ledgerBefore) manifest.template.commit = headCommit(ctx.root);
     saveManifest(manifest);
     printApplied(manifest, targets, r, tpl);
 

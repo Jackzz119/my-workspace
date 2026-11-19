@@ -115,6 +115,8 @@ merge 逐文件处理：只有一边改的文件取改过的那边，新增 / �
 
 进项目 git，不要手改（登记的增删用 pull / forget）。
 
+**记账字段只在内容变了时才动**（2.2 起）：某件货的内容指纹和账本一致，`sourceCommit`（来源提交）与 `pulledAt`（拉取日期）就沿用账本里的，货架 HEAD 往前走了也一样；`template.commit` 接入或换模板时记一次，之后只在这次 `init` 真的改了账本时才跟到货架最新；新 clone / 新 worktree 里补回 gitignored 的植入物（如两份钩子配置）不改账。所以内容没变时重跑 `init` / `sync` / `push`，账本逐字节不变，项目 git 里不会多出改动。
+
 ```jsonc
 {
   "source": "https://github.com/Jackzz119/my-workspace.git",

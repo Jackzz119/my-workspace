@@ -284,3 +284,45 @@ test("init：已有的 .claude/settings.json / .codex/hooks.json 只补模板里
   assert.match(badItem.mergeError, /JSON/);
   assert.ok(bad.json.warnings.some((w) => w.includes(".codex/hooks.json")), JSON.stringify(bad.json.warnings));
 });
+
+test("账本只在内容变了时才改：货架 HEAD 前进但相关的货没变，init / sync / push 重跑后账本逐字节不变；补植入、补拉不改账；货真的变了才跟到最新", (t) => {
+  const root = tmpRoot(t, "ledger");
+  const remote = makeRemote(root);
+  const m = machine(root, "a", remote);
+  // 两份钩子配置按真实项目的样子被 gitignore：换设备 / 新 worktree 里本来就没有
+  const p = project(root, "app", { "package.json": '{"name":"app"}', ".gitignore": "/.claude/settings.json\n/.codex/\n" });
+  git(root, p, ["init", "-q"]);
+  assert.equal(m.run(p, "init", "--agents", "claude,codex").code, 0);
+  const L0 = read(p, ".shelf.json");
+
+  // 货架往前走了，改的是模板以外的货：init / sync / 没改动的 push 都不该动账本
+  pushToRemote(root, remote, { "docs/note.md": "a newer note\n" });
+  for (const args of [["init"], ["sync"], ["push", "ai/jaSkills/intj", "--yes"]]) {
+    const r = m.json(p, ...args);
+    assert.equal(r.code, 0, `${args.join(" ")}: ${r.out}`);
+    assert.equal(read(p, ".shelf.json"), L0, `${args.join(" ")} 不该改账本`);
+  }
+
+  // 新 clone：gitignored 的两份钩子配置不在，模板里的 Claude 那份也已经改过；一件随货架同步的脚本本地也没了（内容和账本一致）
+  const copy = cloneProject(root, p, "app-clone");
+  assert.ok(!exists(copy, ".claude/settings.json") && !exists(copy, ".codex/hooks.json"));
+  const tplSettings = JSON.parse(TEMPLATE_FILES["templates/ai/files/.claude/settings.json"]);
+  pushToRemote(root, remote, { "templates/ai/files/.claude/settings.json": JSON.stringify({ ...tplSettings, model: "x" }, null, 4) + "\n" });
+  fs.rmSync(path.join(copy, "ai", "scripts", "bootstrap.sh"));
+  const before = read(copy, ".shelf.json");
+  const r = m.json(copy, "init");
+  assert.equal(r.code, 0, r.out);
+  assert.equal(JSON.parse(read(copy, ".claude/settings.json")).model, "x", "补植入的是模板当前版本");
+  assert.ok(exists(copy, ".codex/hooks.json"));
+  assert.equal(read(copy, "ai/scripts/bootstrap.sh"), TEMPLATE_FILES["templates/ai/files/ai/scripts/bootstrap.sh"], "补拉");
+  assert.equal(read(copy, ".shelf.json"), before, "补植入、补拉都不改账");
+
+  // 货真的变了：本地跟着更新，这件的记账和模板提交号才跟到货架最新
+  const sha = pushToRemote(root, remote, { "skills/_common/feature/SKILL.md": SKILL_MD("feature", "货架新版") });
+  const u = m.json(p, "init");
+  assert.equal(u.code, 0, u.out);
+  const L = ledger(p);
+  assert.equal(L.shelf["skills/_common/feature"].sourceCommit, sha);
+  assert.equal(L.template.commit, sha, "账本真的变了，模板提交号跟到货架最新");
+  assert.equal(L.shelf["skills/_common/intj"].sourceCommit, JSON.parse(L0).shelf["skills/_common/intj"].sourceCommit, "没变的货记账不动");
+});
