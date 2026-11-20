@@ -1,10 +1,12 @@
-# Claude Code / Codex 桌面版新建 worktree 时，把这些 gitignored 文件从主检出复制进去（gitignore 语法）。
-# git 自己不读这个文件；Multica、Codex CLI --worktree、手动 git worktree add 都不会复制——
-# 那些路径靠 bash ai/scripts/sync-worktree.sh 保底（没有主检出时用 ai/jaAgents/ 的正本）；装了 shelf 的机器也可以直接 shelf init。
-# 环境配置（shelf-ops「新 worktree 补什么」的统一口径）：任何层级被 git 忽略的 .env / .env.<环境> 照同一相对路径复制；
-# 入库样板 .env.example 不被忽略，本来就不会复制。项目要额外步骤放 ai/scripts/worktree.local.sh（两个脚本会调用它）。
+# 新 worktree 要从主检出补的本地文件清单（gitignore 语法；匹配这里、而且被 git 忽略的文件才补）。这是唯一清单，项目按需增删：
+# Claude Code / Codex 桌面版建 worktree 时按它复制；Multica、Codex CLI --worktree、手动 git worktree add 不复制，
+# 由 ai/scripts/local-config.sh 按它补（会话开场钩子、bash ai/scripts/sync-worktree.sh、Multica 的 bash ai/scripts/bootstrap.sh 都经它），
+# 规矩是只补缺的、已有不覆盖、仓库内相对链接照建、其余复制成 600、内容不读不打印；Multica 不补两份会话钩子配置。
+# 根目录 CLAUDE.md / AGENTS.md 由 ai/scripts/protocol-mirror.sh 对齐到本分支正本；项目特有的步骤写进 ai/scripts/worktree.local.sh。
+# 入库样板 .env.example 不被忽略，本来就不会复制。
 /CLAUDE.md
 /AGENTS.md
-.claude/settings.json
+/.claude/settings.json
+/.codex/hooks.json
 .env
 .env.*

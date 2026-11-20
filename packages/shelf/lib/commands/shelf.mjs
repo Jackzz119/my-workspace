@@ -35,6 +35,7 @@ import {
 } from "../threeway.mjs";
 import { detectAiDir, planScaffold, applyScaffold, projectName } from "../scaffold.mjs";
 import { DEFAULT_TEMPLATE, listTemplates, loadTemplate, expandTemplate, renderText } from "../template.mjs";
+import { mergeHooksFile, describeAdded } from "../hookmerge.mjs";
 
 const IGNORE_NAMES = new Set(["node_modules", ".git", ".DS_Store"]);
 const SECRET_PATTERNS = [/^\.env(\..+)?$/i, /\.key$/i, /\.pem$/i, /^auth\.json$/i, /^credentials/i];
@@ -234,6 +235,13 @@ function entryFields(ctx, srcAbs, destAbs) {
   };
 }
 
+// 记账字段只在内容变了时才动（SHELF 决策 #47）：内容指纹和账本一致，就沿用账本里的来源提交与拉取日期，
+// 货架 HEAD 往前走了也一样——重跑 init / sync / push 后账本逐字节不变，不在项目 git 里留下噪音
+function keepIfSame(rec, fields) {
+  if (!rec || rec.contentHash !== fields.contentHash) return fields;
+  return { ...fields, sourceCommit: rec.sourceCommit ?? fields.sourceCommit, pulledAt: rec.pulledAt ?? fields.pulledAt };
+}
+
 // ---- 正本与根目录副本（SHELF 决策 #38）----
 
 // 正本（localPath，进项目 git）与副本（mirror，比如给 agent 读的根目录 CLAUDE.md，gitignore）：
@@ -325,7 +333,25 @@ function renderVars(manifest) {
   return { project: projectName(process.cwd()), date: todayISO(), ai: aiDirOf(manifest) };
 }
 
+// 植入物「补钩子」（模板条目 "merge": "hooks"，SHELF 决策 #46）：本地已有就只补模板里缺的钩子，其余原样；
+// JSON 读不懂按「没补」报告，不抛错、不改文件
+function mergePlantedHooks(localAbs, srcAbs, localPath, { dryRun = false } = {}) {
+  let r;
+  try {
+    r = mergeHooksFile(localAbs, srcAbs, { dryRun });
+  } catch (err) {
+    r = { state: "invalid", added: [], error: err.message };
+  }
+  if (r.state === "merged") {
+    console.log(`${dryRun ? "· 将给" : "✓ 已给"} ${localPath} 补上模板里缺的钩子（${describeAdded(r.added)}）：植入物归项目维护，本地原有的钩子与设置不动`);
+  } else if (r.state === "invalid") {
+    console.warn(`! ${localPath} ${r.error}——没补模板里的钩子；修好后再跑 shelf init`);
+  }
+  return r;
+}
+
 // opts：force 覆盖本地改动 · planted 植入物 · mirror 根目录副本 · render 植入时代入占位符 · fromTemplate 来自模板
+// · merge 植入物本地已有时的合并方式（"hooks" = 只补缺的钩子）· keepLedger 补回文件但不改已有的账
 async function pullEntry(ctx, realRel, manifest, counters, ask, destAbs, opts = {}) {
   const cwd = process.cwd();
   const src = shelfAbs(ctx, realRel);
@@ -338,8 +364,10 @@ async function pullEntry(ctx, realRel, manifest, counters, ask, destAbs, opts = 
   counters.items.push(item);
 
   const record = () => {
+    // 已记账的植入物只是本地文件没了（新 clone / 新 worktree 里被 gitignore 的那几份）：补回文件，账不动
+    if (opts.keepLedger && recorded) return clearMergeState(cwd, realRel);
     updateShelfEntry(manifest, realRel, {
-      ...entryFields(ctx, src, destAbs),
+      ...keepIfSame(recorded, entryFields(ctx, src, destAbs)),
       ...(planted ? { planted: true } : {}),
       ...(mirror ? { mirror } : {}),
       ...(opts.fromTemplate ? { fromTemplate: true } : {}),
@@ -391,6 +419,15 @@ async function pullEntry(ctx, realRel, manifest, counters, ask, destAbs, opts = 
   }
   if (planted) {
     if (!recorded) record();
+    if (opts.merge === "hooks") {
+      const r = mergePlantedHooks(destAbs, src, localPath);
+      if (r.state === "merged") {
+        counters.updated++;
+        Object.assign(item, { action: "hooks-merged", hooksAdded: r.added });
+        return;
+      }
+      if (r.state === "invalid") item.mergeError = r.error;
+    }
     console.log(`= ${localPath} 已存在：植入物归项目维护，不覆盖（要重新植入: shelf pull ${realRel} --force）`);
     counters.upToDate++;
     item.action = "planted-kept";
@@ -497,6 +534,9 @@ export async function cmdShelfPull(argv) {
       let opts = { force: !!flags["--force"], render: renderVars(manifest) };
       if (found) {
         key = found.key;
+        // 记过账的模板植入物照样按模板条目补钩子（"merge": "hooks"）
+        const tplIt = destRoot ? null : plan?.items.find((i) => i.key === key);
+        if (tplIt?.merge) opts.merge = tplIt.merge;
         if (!fs.existsSync(shelfAbs(ctx, key))) {
           console.error(`✗ ${displayPath(key)} 在货架上已不在原位（搬家或下架）——跑 shelf sync 处理`);
           missing.push(input);
@@ -518,7 +558,7 @@ export async function cmdShelfPull(argv) {
         const it = destRoot ? null : plan?.items.find((i) => i.key === key);
         if (it) {
           destAbs = path.resolve(process.cwd(), it.dest);
-          opts = { ...opts, planted: it.planted, mirror: it.copy, render: it.render ? opts.render : null, fromTemplate: true };
+          opts = { ...opts, planted: it.planted, mirror: it.copy, render: it.render ? opts.render : null, merge: it.merge, fromTemplate: true };
         } else {
           destAbs = destRoot ? path.join(destRoot, path.basename(key)) : defaultDest(manifest, hit);
         }
@@ -968,9 +1008,11 @@ export async function cmdShelfPush(argv) {
       console.log(`= ${shown} 与货架一致，无需 push（账本已对齐货架当前版本）`);
       if (relocatedFrom) delete manifest.shelf[relocatedFrom];
       updateShelfEntry(manifest, key, {
-        sourceCommit: headCommit(ctx.root),
-        contentHash: contentHash(targetAbs),
-        pulledAt: todayISO(),
+        ...keepIfSame(manifest.shelf?.[key], {
+          sourceCommit: headCommit(ctx.root),
+          contentHash: contentHash(targetAbs),
+          pulledAt: todayISO(),
+        }),
         localPath: localPosix,
       });
       clearMergeState(process.cwd(), key);
@@ -1665,8 +1707,9 @@ const SYNC_TAG = {
   "untracked-differs": "本地已有同名文件、内容和货架不同（没记过账）",
 };
 
-// 模板里有、账本里还没有的货：装上（模板新增的、或第一次接入）
-async function installMissing(ctx, manifest, plan, { dryRun }) {
+// 模板里有、账本里还没有的货：装上（模板新增的、或第一次接入）。
+// merge：本地已有的植入物按模板条目补缺的钩子（init、sync 都开；sync 的只读预演不开）
+async function installMissing(ctx, manifest, plan, { dryRun, merge = false }) {
   const cwd = process.cwd();
   const items = [];
   const counters = newCounters();
@@ -1698,11 +1741,14 @@ async function installMissing(ctx, manifest, plan, { dryRun }) {
       planted: it.planted,
       mirror: it.copy,
       render: it.render ? vars : null,
+      merge: merge ? it.merge : null,
       fromTemplate: true,
     });
     const got = counters.items[counters.items.length - 1];
     const item = { key: it.key, shown: got.shown, localPath: got.localPath };
+    if (got.mergeError) item.mergeError = got.mergeError;
     if (got.action === "pulled") item.state = "installed";
+    else if (got.action === "hooks-merged") Object.assign(item, { state: "hooks-merged", hooksAdded: got.hooksAdded });
     else if (got.action === "planted-kept") item.state = "planted";
     else if (got.action === "up-to-date") item.state = "same";
     else {
@@ -1727,15 +1773,26 @@ async function reconcileEntry(ctx, manifest, key, { dryRun, restore, plan }) {
   const lp = q(rec.localPath ?? "");
   const pend = (state, next) => Object.assign(item, { state, next, pending: true });
 
-  // 植入物：不对账；本地没了就补植入
+  // 植入物：不对账。本地没了：init 一律补植入；sync 只补被 git 忽略的那几份（钩子配置这类本机文件，SHELF 决策 #48），
+  // 进 git 的植入物没了可能是有意删的，照旧不动。补回都不改账。模板条目声明了 merge 的，init / sync 都给本地已有的补上缺的钩子
   if (rec.planted || PLANTED_KEYS.has(key)) {
     const localAbs = rec.localPath ? path.resolve(cwd, rec.localPath) : null;
-    if (restore && localAbs && !fs.existsSync(localAbs) && fs.existsSync(shelfAbs(ctx, key))) {
+    const tplItem = plan?.items.find((i) => i.key === key);
+    const srcAbs = shelfAbs(ctx, key);
+    const missing = !!localAbs && !fs.existsSync(localAbs) && fs.existsSync(srcAbs);
+    if (missing && (restore || gitIgnores(cwd, rec.localPath))) {
       if (!dryRun) {
-        const tplItem = plan?.items.find((i) => i.key === key);
-        await pullEntry(ctx, key, manifest, newCounters(), safeAsk, localAbs, { planted: true, render: tplItem?.render ? renderVars(manifest) : null });
+        await pullEntry(ctx, key, manifest, newCounters(), safeAsk, localAbs, { planted: true, keepLedger: true, render: tplItem?.render ? renderVars(manifest) : null });
       }
-      item.state = "restored";
+      item.state = dryRun ? "would-restore" : "restored";
+      console.log(`${dryRun ? "· 将补回" : "↓ 已补回"} ${rec.localPath}（植入物，被 git 忽略的本机文件；账本不动）`);
+    } else if (tplItem?.merge === "hooks" && localAbs && fs.existsSync(localAbs) && fs.existsSync(srcAbs)) {
+      const r = mergePlantedHooks(localAbs, srcAbs, rec.localPath, { dryRun });
+      if (r.state === "merged") Object.assign(item, { state: dryRun ? "would-merge-hooks" : "hooks-merged", hooksAdded: r.added });
+      else {
+        item.state = "planted";
+        if (r.state === "invalid") item.mergeError = r.error;
+      }
     } else item.state = "planted";
     return item;
   }
@@ -1770,6 +1827,21 @@ async function reconcileEntry(ctx, manifest, key, { dryRun, restore, plan }) {
   if (rec.mirror) {
     const r = reconcileMirror(rec, { dryRun });
     if (r.state === "mirror-ahead") {
+      // 副本领先、但副本就是货架当前版本（新 worktree 从主检出复制来的根副本，主检出已经同步到货架新版）：不是有人改的，
+      // 按「货架有新版、本地没动」处理，正本和副本一起换成货架版（SHELF 决策 #48）
+      if (fs.existsSync(target) && contentHash(path.resolve(cwd, rec.mirror)) === contentHash(target)) {
+        if (dryRun) {
+          item.state = "would-update";
+          console.log(`↓ 将更新本地：${item.shown}（根副本已是货架版）`);
+          return item;
+        }
+        writeWithMirror(target, path.resolve(cwd, rec.localPath), rec.mirror);
+        manifest.shelf[effKey] = { ...rec, contentHash: contentHash(target), sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
+        clearMergeState(cwd, effKey);
+        item.state = "updated";
+        console.log(`↓ 已更新本地：${item.shown}（根副本已是货架版，正本跟上）`);
+        return item;
+      }
       return pend("mirror-ahead", [`git diff --no-index ${lp} ${q(rec.mirror)}`, `shelf push ${lp} --take-mirror`, `shelf pull ${lp} --force`]);
     }
     if (r.state === "mismatch") {
@@ -1788,7 +1860,7 @@ async function reconcileEntry(ctx, manifest, key, { dryRun, restore, plan }) {
     if (restore && rec.localPath) {
       if (!dryRun) {
         writeWithMirror(target, localAbs, rec.mirror);
-        manifest.shelf[effKey] = { ...rec, contentHash: contentHash(target), sourceCommit: headCommit(ctx.root), pulledAt: todayISO() };
+        manifest.shelf[effKey] = { ...rec, ...keepIfSame(rec, { contentHash: contentHash(target), sourceCommit: headCommit(ctx.root), pulledAt: todayISO() }) };
         clearMergeState(cwd, effKey);
       }
       console.log(`${dryRun ? "· 将补拉" : "↓ 已补拉"} ${shown}`);
@@ -2037,7 +2109,7 @@ async function applyTemplate(ctx, manifest, tpl, targets) {
   const plan = planOf(ctx, manifest, tpl, targets);
   for (const m of plan.missing) console.warn(`! 模板里的 ${m} 在货架上找不到，跳过`);
   const health = healthChecks(manifest, plan, { fix: true, links: false });
-  const items = await installMissing(ctx, manifest, plan, { dryRun: false });
+  const items = await installMissing(ctx, manifest, plan, { dryRun: false, merge: true });
   const done = new Set(items.map((i) => i.key));
   for (const key of Object.keys(manifest.shelf ?? {})) {
     if (done.has(key)) continue;
@@ -2069,7 +2141,7 @@ function printApplied(manifest, targets, r, tpl) {
   const c = countStates(r.items);
   const parts = [
     [c.installed, "装上"], [c.restored, "补拉"], [c.updated, "更新"], [c.refreshed, "账本刷新"],
-    [c.same, "一致"], [c.planted, "植入物"],
+    [c.same, "一致"], [c.planted, "植入物"], [c["hooks-merged"], "植入物补钩子"],
   ].filter(([n]) => n).map(([n, l]) => `${n} ${l}`);
   console.log("");
   console.log(`模板 ${tpl.name}${tpl.builtin ? "（内置配方）" : ""}：${parts.join(" · ") || "无变化"}`);
@@ -2140,9 +2212,16 @@ export async function cmdShelfInit(argv = []) {
     }
 
     manifest.agents = targets;
-    manifest.template = tpl.builtin ? { name: tpl.name, builtin: true } : { name: tpl.name, commit: headCommit(ctx.root) };
+    // 模板提交号（SHELF 决策 #47）：接入或换模板时记货架 HEAD；之后只在这次对账真的改了账本时才跟到最新，
+    // 内容没变就沿用，免得货架上别的货一推、每个项目重跑 init 都多出一处账本改动
+    const prevTpl = manifest.template;
+    const sameTpl = !tpl.builtin && !!prevTpl && !prevTpl.builtin && prevTpl.name === tpl.name && !!prevTpl.commit;
+    manifest.template = tpl.builtin ? { name: tpl.name, builtin: true } : { name: tpl.name, commit: sameTpl ? prevTpl.commit : headCommit(ctx.root) };
+    const ledgerOf = () => JSON.stringify({ ...manifest, template: undefined });
+    const ledgerBefore = ledgerOf();
     console.log(fresh ? `新项目接入：按模板 ${tpl.name} 初始化` : `按账本还原 / 补齐（模板 ${tpl.name}）`);
     const r = await applyTemplate(ctx, manifest, tpl, targets);
+    if (sameTpl && ledgerOf() !== ledgerBefore) manifest.template.commit = headCommit(ctx.root);
     saveManifest(manifest);
     printApplied(manifest, targets, r, tpl);
 
@@ -2196,7 +2275,11 @@ export async function cmdShelfTemplate(argv) {
     if (tpl.description) console.log(`  ${tpl.description}`);
     console.log("");
     for (const it of plan.items) {
-      const tags = [it.planted ? "植入一次，之后归项目" : "随货架同步", ...(it.copy ? [`根目录副本 ${it.copy}`] : [])];
+      const tags = [
+        it.planted ? "植入一次，之后归项目" : "随货架同步",
+        ...(it.merge === "hooks" ? ["本地已有时 init 补上模板里缺的钩子"] : []),
+        ...(it.copy ? [`根目录副本 ${it.copy}`] : []),
+      ];
       console.log(`  ${it.dest}  ← ${displayPath(it.key)}（${tags.join("；")}）`);
     }
     console.log("");
@@ -2361,7 +2444,7 @@ export async function cmdShelfSync(argv, { status = false } = {}) {
     }
 
     // 模板新增的货 + 已记账的逐件对账
-    const items = plan ? await installMissing(ctx, manifest, plan, { dryRun }) : [];
+    const items = plan ? await installMissing(ctx, manifest, plan, { dryRun, merge: !dryRun }) : [];
     const done = new Set(items.map((i) => i.key));
     for (const key of Object.keys(manifest.shelf ?? {})) {
       if (done.has(key)) continue;
@@ -2447,7 +2530,8 @@ export async function cmdShelfSync(argv, { status = false } = {}) {
     const parts = [
       [c.same, "一致", true], [c["would-update"], "待更新本地"], [c.updated, "更新本地"], [c["would-install"], "模板待装"],
       [c.installed, "模板新装"], [c.refreshed, "账本刷新"], [c.pushed, "推上库"], [c.cleaned, "清账"], [c.restored, "补拉"],
-      [c.planted, "植入不对账"], [health.linksFixed, "链接修复"], [scaffold.created.length, dryRun ? "目录待补" : "目录补上"],
+      [c.planted, "植入不对账"], [c["would-restore"], "待补回"],
+      [c["hooks-merged"], "补钩子"], [c["would-merge-hooks"], "待补钩子"], [health.linksFixed, "链接修复"], [scaffold.created.length, dryRun ? "目录待补" : "目录补上"],
       [pending.length, "待决", true],
     ].filter(([n, , always]) => always || n > 0).map(([n, label]) => `${n ?? 0} ${label}`);
     console.log("");

@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { resolveShelfPath } from "./shelfnames.mjs";
+import { MERGE_MODES } from "./hookmerge.mjs";
 
 export const DEFAULT_TEMPLATE = "ai";
 const IGNORE_NAMES = new Set(["node_modules", ".git", ".DS_Store"]);
@@ -67,7 +68,7 @@ export function loadTemplate(shelfDir, name) {
   return null;
 }
 
-// 按 agent 目标与 ai 区目录名把配方展开成具体的货：{ key, dest, copy, planted, render }。
+// 按 agent 目标与 ai 区目录名把配方展开成具体的货：{ key, dest, copy, planted, render, merge }。
 // from 以 files/ 开头 = 模板自带的文件；以 /* 结尾 = 该目录下每个子目录各算一件（一个技能一件）
 export function expandTemplate(tpl, { shelfDir, agents, aiDir }) {
   const sub = (s) => String(s).replaceAll("{ai}", aiDir);
@@ -94,7 +95,9 @@ export function expandTemplate(tpl, { shelfDir, agents, aiDir }) {
       if (!it.optional) missing.push(it.from);
       continue;
     }
-    items.push({ key: hit.realRel, dest: sub(it.to), copy: it.copy ? sub(it.copy) : null, planted: !!it.planted, render: !!it.render });
+    // merge 只对植入物有意义（"hooks" = 本地已有时只补模板里缺的钩子，SHELF 决策 #46）；不认识的值忽略
+    const merge = it.planted && MERGE_MODES.has(it.merge) ? it.merge : null;
+    items.push({ key: hit.realRel, dest: sub(it.to), copy: it.copy ? sub(it.copy) : null, planted: !!it.planted, render: !!it.render, merge });
   }
   const scaffold = (tpl.scaffold ?? []).map((s) => ({ ...s, dir: s.dir ? sub(s.dir) : undefined, file: s.file ? sub(s.file) : undefined }));
   return { name: tpl.name, key: tpl.key, builtin: !!tpl.builtin, description: tpl.description ?? "", items, scaffold, missing };

@@ -3,8 +3,8 @@
 # protocol-mirror.sh —— 根目录协议副本（CLAUDE.md / AGENTS.md）与正本（<ai>/jaAgents/ 同名文件）永远一致。
 # AI 工作流模板（货架 templates/ai）的一部分，由 shelf init 装到 <ai>/scripts/。两种用法：
 #
-#   bash <ai>/scripts/protocol-mirror.sh --sync [--agent claude|codex|all] [--dry-run]
-#       给 sync-worktree.sh 用：逐份对齐副本，打印给人看的一行结论
+#   bash <ai>/scripts/protocol-mirror.sh --sync [--root <检出>] [--agent claude|codex|all] [--dry-run]
+#       给 sync-worktree.sh、会话开场钩子用：逐份对齐副本（默认本脚本所在的检出，--root 指定别的检出），打印给人看的一行结论
 #   bash <ai>/scripts/protocol-mirror.sh --hook [claude|codex]
 #       SessionStart / UserPromptSubmit 钩子：claude（默认）对齐 CLAUDE.md，由模板的 .claude/settings.json 挂上；
 #       codex 对齐 AGENTS.md，由模板的 .codex/hooks.json 挂上（Codex 要在 /hooks 里信任一次才会跑）。
@@ -16,6 +16,8 @@
 #   - 副本不存在 → 从正本创建
 #   - 副本 = 正本 → 不动
 #   - 正本更新了、副本没被人动过（等于上次同步时记下的指纹，或等于正本的某个历史版本）→ 用正本覆盖副本
+#   - 副本和主检出的根副本逐字节相同（建 worktree 时按 .worktreeinclude 从主检出复制来的；主检出被开场钩子同步到
+#     货架新版、本分支还没跟上时，它既不是本分支正本的历史版本，也没有指纹）→ 不是有人改的，用本分支正本覆盖
 #   - 副本被人改过 → 两份都不动，报告：先把 diff 给用户看，用户确认后才同步回正本并推货架
 #     （shelf push <ai>/jaAgents/<名> --take-mirror，shelf 2.1 起副本 → 正本同样要这个确认）；
 #     不要副本的改动 → 用户确认后加 --take-source 用正本覆盖
@@ -25,7 +27,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"   # <ai>/scripts/ → 仓库根
 
-MODE=""; AGENT="all"; DRY=0; TAKE=0; HOOK_AGENT="claude"
+MODE=""; AGENT="all"; DRY=0; TAKE=0; HOOK_AGENT="claude"; ROOT_ARG=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sync) MODE="sync"; shift ;;
@@ -34,7 +36,9 @@ while [[ $# -gt 0 ]]; do
     --agent=*) AGENT="${1#*=}"; shift ;;
     --dry-run) DRY=1; shift ;;
     --take-source) TAKE=1; shift ;;
-    -h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --root) ROOT_ARG="${2:-}"; shift 2 ;;
+    --root=*) ROOT_ARG="${1#*=}"; shift ;;
+    -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "✗ 未知参数：$1（用 --help 看用法）"; exit 2 ;;
   esac
 done
@@ -59,7 +63,15 @@ if [[ "$MODE" == "hook" ]]; then
   fi
 fi
 
+if [[ -n "$ROOT_ARG" ]]; then
+  top="$(git -C "$ROOT_ARG" rev-parse --show-toplevel 2>/dev/null)" && ROOT="$(cd "$top" 2>/dev/null && pwd -P)" || { echo "✗ --root 不是 git 检出：$ROOT_ARG"; exit 2; }
+fi
+
 cd "$ROOT" || exit 0
+# 主检出（本检出就是主检出时为空）：新 worktree 的根副本是从它那里复制来的
+MAIN_COPY_ROOT="$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+[[ -n "$MAIN_COPY_ROOT" ]] && MAIN_COPY_ROOT="$(cd "$MAIN_COPY_ROOT" 2>/dev/null && pwd -P)"
+[[ "$MAIN_COPY_ROOT" == "$ROOT" ]] && MAIN_COPY_ROOT=""
 AI_DIR="$(sed -n 's/^[[:space:]]*"aiDir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .shelf.json 2>/dev/null | head -n 1 || true)"
 [[ -n "$AI_DIR" ]] || AI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && basename "$(pwd -P)")"
 GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
@@ -89,6 +101,10 @@ mirror_doc() {
   if cmp -s "$src" "$name"; then record "$name"; RESULT="same"; return; fi
   sha="$(sha_of "$name")"
   if (( TAKE )) || [[ "$(cat "$STATE/$name.sha" 2>/dev/null)" == "$sha" ]] || past_source "$sha" "$src"; then
+    (( DRY )) || cp "$src" "$name"; record "$name"; RESULT="refreshed"; return
+  fi
+  # 建 worktree 时从主检出复制来的副本：和主检出的根副本一模一样，不是有人在这里改的
+  if [[ -n "$MAIN_COPY_ROOT" && -f "$MAIN_COPY_ROOT/$name" ]] && cmp -s "$MAIN_COPY_ROOT/$name" "$name"; then
     (( DRY )) || cp "$src" "$name"; record "$name"; RESULT="refreshed"; return
   fi
   RESULT="drift"
