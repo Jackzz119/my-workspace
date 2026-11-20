@@ -22,10 +22,10 @@ shelf sync --merge --push     # 同步：拿货架新版、三方合并双改、
 | `ai/jaAgents/AGENTS.md` + 根目录 `AGENTS.md`（副本） | `agents/codex/AGENTS.md` | 随货架同步（接 codex / kimi 时） |
 | `ai/jaAgents/MULTICA.md` | `agents/multica/MULTICA.md` | 随货架同步 |
 | `ai/jaSkills/<名>/` | `skills/common/*`（通用技能包，每个技能一件）+ `skills/project-audit` | 随货架同步 |
-| `ai/scripts/` 下的 `sync-worktree.sh`、`bootstrap.sh`、`protocol-mirror.sh`、`session-start.sh`、`sync-main-checkout.sh` | 模板自带 | 随货架同步 |
+| `ai/scripts/` 下的入口 `session-start.sh`（会话开场钩子）、`sync-worktree.sh`（本机保底）、`bootstrap.sh`（Multica）、`sync-main-checkout.sh`（合并后快进主检出），和它们调的模块 `lib/common.sh`、`skills-link.sh`、`local-config.sh`、`protocol-mirror.sh`、`shelf-step.sh` | 模板自带 | 随货架同步 |
 | `ai/JASKILL.md` | `docs/JASKILL.md` | 植入一次，之后归项目 |
 | `ai/PROJECT.md`、`ai/TODO.md`、`ai/check-docs.json` | 模板自带 | 植入一次（代入项目名、日期、ai 区目录名） |
-| `.worktreeinclude`、`.claude/settings.json`、`.codex/hooks.json` | 模板自带 | 植入一次（`.claude/settings.json` 只在接 claude 时，`.codex/hooks.json` 只在接 codex 时）；两份钩子配置本地已有时，`init` / `pull` 只补上模板里缺的钩子（2.2 起） |
+| `.worktreeinclude`、`.claude/settings.json`、`.codex/hooks.json` | 模板自带 | 植入一次（`.claude/settings.json` 只在接 claude 时，`.codex/hooks.json` 只在接 codex 时）；两份钩子配置本地已有时，`init` / `sync` / `pull` 只补上模板里缺的钩子（2.2 起）；`.worktreeinclude` 是新 worktree 从主检出补本地文件的唯一清单 |
 
 另外按接入的 agent 建技能目录链接（`.claude/skills`、`.agents/skills`、`.kimi/skills` → `ai/jaSkills`）。模板改了不用发 CLI 新版：各项目下次 `sync` 自动装上新增的货。
 
@@ -88,14 +88,15 @@ shelf sync --merge --push     # 同步：拿货架新版、三方合并双改、
 - **未知参数直接报错**（退出 1），编造的参数不会被悄悄忽略。
 - 配套的操作手册是货架上的 `shelf-ops` 技能（随 ai 模板装进每个项目）。
 
-物品状态（`data.items[].state`）：`same` 一致 · `updated` / `would-update` 货架新版已更新 / 将更新 · `installed` / `would-install` 模板新增已装 / 将装 · `restored` 补拉 · `refreshed` 只刷新账本 · `planted` 植入物 · `hooks-merged` 植入的钩子配置补上了模板里缺的钩子（`init` / `pull`） · `pushed` 已推 · `local-ahead` 本地领先 · `both-changed` 双方都改过 · `merged` 已合并待推 · `merge-conflict` 合并后有冲突 · `removed` / `ambiguous` 下架 / 同名多义 · `local-missing` 本地没了 · `mirror-ahead` 副本改过、正本没动（等人确认） · `mirror-mismatch` 正本与副本各改各的 · `untracked-differs` 本地有同名文件、没记过账。
+物品状态（`data.items[].state`）：`same` 一致 · `updated` / `would-update` 货架新版已更新 / 将更新 · `installed` / `would-install` 模板新增已装 / 将装 · `restored` 补拉 · `refreshed` 只刷新账本 · `planted` 植入物 · `hooks-merged` / `would-merge-hooks` 植入的钩子配置补上了 / 将补上模板里缺的钩子 · `would-restore` 被 git 忽略的植入物将补回（`status`） · `pushed` 已推 · `local-ahead` 本地领先 · `both-changed` 双方都改过 · `merged` 已合并待推 · `merge-conflict` 合并后有冲突 · `removed` / `ambiguous` 下架 / 同名多义 · `local-missing` 本地没了 · `mirror-ahead` 副本改过、正本没动（等人确认） · `mirror-mismatch` 正本与副本各改各的 · `untracked-differs` 本地有同名文件、没记过账。
 
 ## init：新接入与还原
 
 - **没有 `.shelf.json`**：按模板新接入。agent 目标默认取模板的 `defaultAgents`（claude + codex），终端里会问。ai 区目录名按项目命名规范定：已有 `ai` / `AI` 就沿用；否则 .NET / C# 项目（根目录或一层子目录有 `.sln` / `.csproj`，或 Unity 工程）用 `AI`，JS / TS / Java 等用 `ai`；`--ai-dir` 可指定；结果记进账本 `aiDir`。
 - **有 `.shelf.json`**（换设备、新 clone、新 worktree）：按账本还原——建技能链接；按 `ai/jaAgents` 补根目录协议副本；账上有、本地缺的货从货架补拉；货架有新版且本地没动的更新；模板新增的货装上；`ai/jaSkills` 里没记账的技能登记进账本 `local` 段；核对 `ai/JASKILL.md`（没登记的项目技能、登记了却不存在的技能都会列出来）。
 - 已有的文件永不盲覆盖；重跑只补缺、只做零损失的更新。本地改过的列为待决（退出 2）。
-- **钩子配置只补缺的钩子**（2.2 起，模板条目声明 `"merge": "hooks"`）：项目里已有 `.claude/settings.json` / `.codex/hooks.json` 时，`init` 不整份覆盖，只把模板里有、本地没有的钩子补进去——同一事件下按 `command` 文本比，本地已有的不加、本地自己的钩子和其余键（如 `outputStyle`）原样，缩进与结尾换行照原文件；JSON 读不懂就一个字不改、只警告。账本里仍是植入物，`sync` 不碰。`shelf pull <那份配置>`（不带 `--force`）同样只补缺的钩子。
+- **init 与 sync 的分工**（2.2 起）：`init` 用在新项目第一次接入、新 clone / 新分支 / 新 worktree 第一次按账本还原，由人跑；`sync` 跑多少次都没有副作用，修复也归它——补回缺的技能链接与根目录协议副本、补回被 git 忽略的植入物（钩子配置等；进 git 的植入物没了可能是有意删的，不补）、给已有的钩子配置补缺的钩子、根目录副本就是货架当前版时让正本跟上。会话开场钩子只跑 `sync`，主检出里不自动跑 `init`。
+- **钩子配置只补缺的钩子**（2.2 起，模板条目声明 `"merge": "hooks"`）：项目里已有 `.claude/settings.json` / `.codex/hooks.json` 时，`init` / `sync` 不整份覆盖，只把模板里有、本地没有的钩子补进去——同一事件下按 `command` 文本比，本地已有的不加、本地自己的钩子和其余键（如 `outputStyle`）原样，缩进与结尾换行照原文件；JSON 读不懂就一个字不改、只警告。账本里仍是植入物、记账不变。`shelf pull <那份配置>`（不带 `--force`）同样只补缺的钩子；`status` 只预告（`would-merge-hooks`）。
 
 **协议的正本与副本**：`ai/jaAgents/CLAUDE.md` 是正本（进项目 git），根目录 `CLAUDE.md` 是给 agent 读的副本（gitignore）。只改了正本，`sync` / `push` 自动同步给副本；只改了副本（`mirror-ahead`），不会自动收进正本——`sync` 列为待决、`pull` 不动它、`push` / `merge` 先列出差异退出 2，人看过差异、确认后加 `--take-mirror` 才把副本的改动收进正本再推；不要这些改动就 `shelf pull <正本> --force`。两份各改各的也停下，交给人定。副本是复制出来的文件而不是链接：Windows 上给单个文件建符号链接要管理员权限或开发者模式，硬链接又会在 git 或编辑器整份重写文件时悄悄断开，Codex 读 `AGENTS.md` 也不认 `@` 引用。技能目录是整目录链接（Windows 上是 junction），不需要副本。副本由模板登记、`init` / `sync` 维护，没有手动登记的命令。
 

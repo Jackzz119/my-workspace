@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   tmpRoot, makeRemote, pushToRemote, machine, project, ledger, read, exists, isLink, isJunction, git, cloneProject,
   DEFAULT_SHELF, BARE_SHELF, TEMPLATE_FILES, SKILL_MD,
@@ -210,7 +211,7 @@ test("货架上没有 templates/ai 时用内置配方，同样落 ai/jaAgents + 
   assert.ok(!exists(p, "ai/scripts"), "内置配方没有模板自带的文件");
 });
 
-test("init：已有的 .claude/settings.json / .codex/hooks.json 只补模板里缺的钩子（本地钩子与设置原样），重跑不变；sync 不碰；坏 JSON 不动", (t) => {
+test("init / sync / pull：已有的 .claude/settings.json / .codex/hooks.json 只补模板里缺的钩子（本地钩子与设置原样），重跑不变；status 只预告；坏 JSON 不动", (t) => {
   const root = tmpRoot(t, "hooks");
   const m = machine(root, "a", makeRemote(root));
   const tplClaude = JSON.parse(TEMPLATE_FILES["templates/ai/files/.claude/settings.json"]);
@@ -256,15 +257,18 @@ test("init：已有的 .claude/settings.json / .codex/hooks.json 只补模板里
   assert.equal(again.json.data.items.find((i) => i.key === "templates/ai/files/.claude/settings.json").state, "planted");
   assert.deepEqual([read(p, ".claude/settings.json"), read(p, ".codex/hooks.json"), read(p, ".shelf.json")], before);
 
-  // 已记账的植入物又缺了钩子：sync 不碰，init 补
+  // 已记账的植入物又缺了钩子：status 只预告不写，sync 补（SHELF 决策 #48：修复归 sync，开场钩子只跑 sync）
   fs.writeFileSync(path.join(p, ".claude", "settings.json"), JSON.stringify(oldClaude, null, 4) + "\n");
+  const st = m.json(p, "status");
+  assert.equal(st.json.data.items.find((i) => i.key === "templates/ai/files/.claude/settings.json").state, "would-merge-hooks");
+  assert.deepEqual(JSON.parse(read(p, ".claude/settings.json")), oldClaude, "status 只读");
   const s = m.json(p, "sync");
   assert.equal(s.code, 0, s.out);
-  assert.equal(s.json.data.items.find((i) => i.key === "templates/ai/files/.claude/settings.json").state, "planted");
-  assert.deepEqual(JSON.parse(read(p, ".claude/settings.json")), oldClaude, "sync 不碰植入物");
-  const fix = m.json(p, "init");
-  assert.equal(fix.json.data.items.find((i) => i.key === "templates/ai/files/.claude/settings.json").state, "hooks-merged");
+  assert.equal(s.json.data.items.find((i) => i.key === "templates/ai/files/.claude/settings.json").state, "hooks-merged");
   assert.deepEqual(JSON.parse(read(p, ".claude/settings.json")).hooks.SessionStart, tplClaude.hooks.SessionStart);
+  assert.equal(JSON.parse(read(p, ".claude/settings.json")).outputStyle, "concise");
+  const again2 = m.json(p, "sync");
+  assert.equal(again2.json.data.items.find((i) => i.key === "templates/ai/files/.claude/settings.json").state, "planted", "补过再跑不变");
 
   // pull 记过账的钩子配置（不带 --force）：同样只补缺的钩子
   fs.writeFileSync(path.join(p, ".claude", "settings.json"), JSON.stringify(oldClaude, null, 4) + "\n");
@@ -325,4 +329,90 @@ test("账本只在内容变了时才改：货架 HEAD 前进但相关的货没�
   assert.equal(L.shelf["skills/_common/feature"].sourceCommit, sha);
   assert.equal(L.template.commit, sha, "账本真的变了，模板提交号跟到货架最新");
   assert.equal(L.shelf["skills/_common/intj"].sourceCommit, JSON.parse(L0).shelf["skills/_common/intj"].sourceCommit, "没变的货记账不动");
+});
+
+test("sync 修复：被 git 忽略的植入物本地没了就补回（账本不动），进 git 的植入物没了不补；status 只预告", (t) => {
+  const root = tmpRoot(t, "sync-restore");
+  const m = machine(root, "a", makeRemote(root));
+  const p = project(root, "app", { "package.json": '{"name":"app"}', ".gitignore": "/.claude/settings.json\n/.codex/\n" });
+  git(root, p, ["init", "-q"]);
+  assert.equal(m.run(p, "init", "--agents", "claude,codex").code, 0);
+  const L0 = read(p, ".shelf.json");
+  fs.rmSync(path.join(p, ".claude", "settings.json"));
+  fs.rmSync(path.join(p, ".codex"), { recursive: true });
+  fs.rmSync(path.join(p, "ai", "TODO.md"));   // 进 git 的植入物：可能是有意删的
+
+  const st = m.json(p, "status");
+  const stBy = Object.fromEntries(st.json.data.items.map((i) => [i.key, i.state]));
+  assert.equal(stBy["templates/ai/files/.claude/settings.json"], "would-restore");
+  assert.ok(!exists(p, ".claude/settings.json"), "status 只读");
+
+  const r = m.json(p, "sync");
+  assert.equal(r.code, 0, r.out);
+  const by = Object.fromEntries(r.json.data.items.map((i) => [i.key, i.state]));
+  assert.equal(by["templates/ai/files/.claude/settings.json"], "restored");
+  assert.equal(by["templates/ai/files/.codex/hooks.json"], "restored");
+  assert.equal(by["templates/ai/files/ai/TODO.md"], "planted", "进 git 的植入物不补");
+  assert.equal(read(p, ".claude/settings.json"), TEMPLATE_FILES["templates/ai/files/.claude/settings.json"]);
+  assert.equal(read(p, ".codex/hooks.json"), TEMPLATE_FILES["templates/ai/files/.codex/hooks.json"]);
+  assert.ok(!exists(p, "ai/TODO.md"));
+  assert.equal(read(p, ".shelf.json"), L0, "补回不改账");
+});
+
+test("sync：根目录副本领先、但副本就是货架当前版（新 worktree 从主检出复制来的）→ 正本跟上货架版，不报待决", (t) => {
+  const root = tmpRoot(t, "mirror-shelf");
+  const remote = makeRemote(root);
+  const m = machine(root, "a", remote);
+  const p = project(root, "app", { "package.json": '{"name":"app"}' });
+  git(root, p, ["init", "-q"]);
+  assert.equal(m.run(p, "init", "--agents", "claude,codex").code, 0);
+  const v2 = "# Claude 协议\n\n规则一\n规则二\n规则三\n规则四（货架新版）\n";
+  pushToRemote(root, remote, { "agents/claude/CLAUDE.md": v2 });
+  fs.writeFileSync(path.join(p, "CLAUDE.md"), v2);   // 根副本已经是货架新版，正本还是旧的
+
+  const r = m.json(p, "sync");
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.json.data.items.find((i) => i.key === "agents/claude/CLAUDE.md").state, "updated");
+  assert.equal(read(p, "ai/jaAgents/CLAUDE.md"), v2);
+  assert.equal(read(p, "CLAUDE.md"), v2);
+
+  // 副本是别的内容（真有人改了）：照旧待决
+  fs.writeFileSync(path.join(p, "CLAUDE.md"), v2 + "本机加的一行\n");
+  const d = m.json(p, "sync");
+  assert.equal(d.code, 2, d.out);
+  assert.equal(d.json.data.items.find((i) => i.key === "agents/claude/CLAUDE.md").state, "mirror-ahead");
+});
+
+test("模板装出来的开场脚本能跑：新项目 init 后建 worktree，sync-worktree.sh 补齐链接与协议副本，开场钩子按 cwd 分两段报告（模块一件不缺）", (t) => {
+  if (WIN) return;   // 脚本在 Windows 上由 Git Bash 跑，这里只在 POSIX 上验
+  const root = tmpRoot(t, "scripts");
+  const m = machine(root, "a", makeRemote(root));
+  const p = project(root, "app", { "package.json": '{"name":"app"}', ".gitignore": ".claude/\n.codex/\n.env\n" });
+  git(root, p, ["init", "-q"]);
+  assert.equal(m.run(p, "init", "--agents", "claude,codex").code, 0);
+  for (const f of ["lib/common.sh", "skills-link.sh", "local-config.sh", "shelf-step.sh", "session-start.sh", "sync-worktree.sh", "bootstrap.sh", "protocol-mirror.sh"]) {
+    assert.ok(exists(p, `ai/scripts/${f}`), `模板应装上 ai/scripts/${f}`);
+  }
+  fs.writeFileSync(path.join(p, ".env"), "SECRET=1\n");
+  git(root, p, ["add", "-A"]);
+  git(root, p, ["commit", "-qm", "init"]);
+  const wt = path.join(root, "app-wt");
+  git(root, p, ["worktree", "add", "-q", "--detach", wt]);
+
+  const env = { ...m.env, SESSION_START_SKIP_SHELF: "1" };
+  const sw = spawnSync("bash", [path.join(wt, "ai/scripts/sync-worktree.sh")], { cwd: wt, env, encoding: "utf8" });
+  assert.equal(sw.status, 0, sw.stdout + sw.stderr);
+  assert.ok(isLink(wt, ".claude/skills") && isLink(wt, ".agents/skills"));
+  assert.equal(read(wt, "CLAUDE.md"), read(wt, "ai/jaAgents/CLAUDE.md"));
+  assert.equal(read(wt, ".env"), "SECRET=1\n");
+  assert.equal(read(wt, ".claude/settings.json"), read(p, ".claude/settings.json"), "按 .worktreeinclude 从主检出补钩子配置");
+  assert.doesNotMatch(sw.stdout, /SECRET/);
+
+  const input = JSON.stringify({ session_id: "t", cwd: wt, hook_event_name: "SessionStart", source: "startup" });
+  const ss = spawnSync("bash", [path.join(p, "ai/scripts/session-start.sh")], { cwd: p, env, input, encoding: "utf8" });
+  assert.equal(ss.status, 0, ss.stderr);
+  const out = JSON.parse(ss.stdout).hookSpecificOutput;
+  assert.equal(out.reloadSkills, true);
+  assert.match(out.additionalContext, /【主检出：/);
+  assert.match(out.additionalContext, /【本会话的 worktree：/);
 });
