@@ -22,15 +22,16 @@ shelf 是个人内容货架：一个 git 仓库（货架）放技能、协议和
     - shelf 2.1 起 CLI 自己也守这条：`mirror-ahead` 时 `sync` 列待决、`pull` 不动、`push` / `merge` 列差异退出 2，没有用户确认不加 `--take-mirror`。
   - `ai/jaSkills/<名>/` 是技能唯一正本，`.claude/skills`、`.agents/skills` 是指向它的链接
   - `ai/features/`、`ai/sessions/`、`ai/design_system/` 下的 `concept/ img/ uiux/ codex-visual/`、`ai/project-audit/` 下的 `runs/ scripts/` 是固定目录：各技能在 frontmatter 里声明，init / sync 缺了就建
-  - `ai/JASKILL.md`、`ai/PROJECT.md`、`ai/TODO.md`、`ai/check-docs.json`、`.claude/settings.json`、`.codex/hooks.json`、`.worktreeinclude` 是植入物：装一次，之后归项目，shelf 不对账、不推。两份钩子配置例外一点：shelf 2.2 起 `init` 给已有的这两份补上模板里缺的钩子（只加不改，本地自己的钩子和其余设置原样），`sync` 不碰
-- **会话开场钩子**（`ai/scripts/session-start.sh`，挂在上面两份钩子配置的 `SessionStart` 上）：主检出、worktree 开的会话都同步。会话开在 worktree 时先在那个 worktree 里 `shelf init` + `shelf sync` + 保底脚本，改到的文件算本会话的改动、随任务提交；每次还在主检出 `shelf init` + `shelf sync`，改到的文件**留在主检出、谁都不提交**，等上游带上同样内容后由 `ai/scripts/sync-main-checkout.sh` 丢掉再快进。开场上下文里会分「worktree」「主检出」两段报结果，照着做；细节见 reference.md「会话开场钩子与主检出快进」
-- **新 worktree 补什么**（三个入口同一口径：桌面版按 `.worktreeinclude`、本机保底 `ai/scripts/sync-worktree.sh`、Multica 的 `ai/scripts/bootstrap.sh`）：技能链接、协议副本，以及**被 git 忽略的环境配置文件**（`.env`、`.env.local`、`.env.<环境>` 等，不含 `.env.example` 这类入库样板）——从主检出照同一相对路径补进来，主检出那份是指向仓库里的相对链接就建同样的链接；指向仓库外的链接与普通文件复制成独立文件；已有的不覆盖，内容不读不打印，目标没被 git 忽略就不补，不留悬空链接。项目要额外步骤（比如给 app 建指向根 `.env` 的链接），放进项目自己的 `ai/scripts/worktree.local.sh`（模板植入一个空壳，之后归项目、不对账），两个脚本补完后会调用它，主检出里也跑
+  - `ai/JASKILL.md`、`ai/PROJECT.md`、`ai/TODO.md`、`ai/check-docs.json`、`.claude/settings.json`、`.codex/hooks.json`、`.worktreeinclude` 是植入物：装一次，之后归项目，shelf 不对账、不推。两份钩子配置例外一点：shelf 2.2 起 `init` / `sync` 都给已有的这两份补上模板里缺的钩子（只加不改，本地自己的钩子和其余设置原样），它们（以及别的被 git 忽略的植入物）本地没了 `sync` 也补回
+- **init 与 sync 的分工**（用户 2026-11-19 定）：`shelf init` 只在新项目、新 clone / 新分支 / 新 worktree 第一次接入时由人跑；修复和更新都归 `shelf sync`，它跑多少次都没有副作用。**主检出里不自动跑 init**
+- **会话开场钩子**（`ai/scripts/session-start.sh`，挂在上面两份钩子配置的 `SessionStart` 上）：主检出、worktree 开的会话都同步，只跑 `shelf sync`、任何地方都不跑 `init`。先在主检出对齐协议副本 + `shelf sync`，改到的文件**留在主检出、谁都不提交**，等上游带上同样内容后由 `ai/scripts/sync-main-checkout.sh` 丢掉再快进；会话开在 worktree 时再给那个 worktree 补本地配置、技能链接、协议副本并 `shelf sync`，改到的文件算本会话的改动、随任务提交。开场上下文里分「主检出」「worktree」两段报结果，照着做；细节见 reference.md「会话开场钩子与主检出快进」
+- **新 worktree 补什么**：技能链接、协议副本，以及**仓库根 `.worktreeinclude` 列出、被 git 忽略的本地文件**（钩子配置、`.env` 类等）。`.worktreeinclude` 是唯一清单（项目自己的植入物，按需增删）：桌面版建 worktree 时按它复制，`ai/scripts/local-config.sh` 按它从主检出补（会话开场钩子、本机保底 `ai/scripts/sync-worktree.sh`、Multica 的 `ai/scripts/bootstrap.sh` 都经它）——只补缺的、已有不覆盖，主检出那份是指向仓库里的相对链接就建同样的链接，其余复制成独立文件（600），内容不读不打印，目标没被 git 忽略就不补，不留悬空链接；Multica 不补两份会话钩子配置和 `.mcp.json`。项目要额外步骤（比如给 app 建指向根 `.env` 的链接），放进项目自己的 `ai/scripts/worktree.local.sh`（模板植入一个空壳，之后归项目、不对账），`local-config.sh` 补完后调用它，主检出里也跑
 
 ## 用户这样说 → 你这样做
 
 ### 「帮我初始化 ai 工作流」（新项目 / 换设备 / 新 worktree）
 
-跑 `shelf init`：
+跑 `shelf init`（只用在第一次接入；已经接好的检出要修复、更新，走下面「同步」那一节的 `shelf sync`；主检出不要自动跑 init）：
 
 - 没有账本 → 按模板新接入（默认接 claude + codex；用户点名别的组合时加 `--agents`）
 - 有账本 → 按账本还原：建技能链接、按 `ai/jaAgents` 补根目录协议副本、补拉缺的货、货架有新版且本地没动的直接更新、把 `ai/jaSkills` 里没记账的技能登记进账本
