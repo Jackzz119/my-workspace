@@ -352,13 +352,15 @@ def build_finer(scene, piece, out_dir, name, quality):
     if piece.get('emissive'):
         emissive = polygon_mask(size, scaled_shapes(piece['emissive'], piece['at'], k), 3.0 * k)
     lin = to_linear(src)
+    second = SecondLight(scene, piece) if piece.get('second_light') else None
+    enlarge = lambda a: np.asarray(Image.fromarray(a.astype(np.float32), 'F').resize(size, Image.BILINEAR))  # noqa: E731
+    second_mask = enlarge(second.mask[y:y + h, x:x + w]) if second else None
     for state in scene.states:
         ratio = scene.ratio(state)[y:y + h, x:x + w]
-        big = np.dstack([
-            np.asarray(Image.fromarray(ratio[..., c].astype(np.float32), 'F').resize(size, Image.BILINEAR))
-            for c in range(3)
-        ])
+        big = np.dstack([enlarge(ratio[..., c]) for c in range(3)])
         relit = lin * big
+        if second:
+            relit = second.relight(lin, relit, state, second_mask)
         if emissive is not None:
             e = emissive[..., None]
             relit = relit * (1 - e) + lin * e
@@ -366,6 +368,45 @@ def build_finer(scene, piece, out_dir, name, quality):
         Image.fromarray(np.round(np.clip(rgba, 0, 255)).astype(np.uint8), 'RGBA').save(
             out_dir / piece.get('name', name).format(piece=piece['id'], state=state), quality=quality, method=6)
     return {'x': int(x), 'y': int(y), 'w': int(w), 'h': int(h)}
+
+
+class SecondLight:
+    """The part of a piece that another light paints than the room's (the top of a sofa's back under a window, blue
+    at twilight, while the lamp lights its front): `second_light` in the piece, {"region": [...], "feather": 3,
+    "toward": "cool" | "warm"}. The room's light ratio cannot carry it to a state where that light changes colour:
+    blue paint has next to no red in it, so no ratio turns it into the orange of a sunset, and it comes out green.
+    Where the paint is that light's colour, its brightness is kept and its colour is the plates' own there: the mean
+    colour of the same patch in the state's plate over the reference plate's, per unit of luminance. The plates must
+    show the surface the piece redraws (a finer copy, a piece painted over the plate's own furniture)."""
+
+    def __init__(self, scene, piece):
+        spec = piece['second_light']
+        self.scene = scene
+        self.warm = spec.get('toward', 'cool') == 'warm'
+        self.mask = polygon_mask((scene.w, scene.h), spec['region'], spec.get('feather', 3.0))
+        ref = to_linear(scene.plate(scene.ref))
+        self.weight = self.mask * self.share(ref) * np.clip(luminance(ref) / 0.02, 0, 1)
+        if self.weight.sum() < 1:
+            raise SystemExit(f"{piece['id']}: second_light finds none of that light in the reference plate's region")
+        self.ref_lum = float(luminance(self.mean(ref)[None, None, :])[0, 0])
+
+    def share(self, lin):
+        """How far a linear colour leans to the second light's side (0 neutral or the other way, 1 well over)."""
+        r, b = lin[..., 0], lin[..., 2]
+        lean = (r - b) if self.warm else (b - r)
+        return np.clip(lean / np.maximum(r + b, 1e-4) * 2.0, 0, 1)
+
+    def mean(self, lin):
+        return (lin * self.weight[..., None]).sum((0, 1)) / self.weight.sum()
+
+    def relight(self, lin, relit, state, mask):
+        """`relit` (the piece under the room's ratio) with the second light's share of `lin` carried by luminance;
+        `mask` is the region at the piece's own size."""
+        if state == self.scene.ref:
+            return relit
+        gain = self.mean(to_linear(self.scene.plate(state))) / self.ref_lum
+        m = (mask * self.share(lin))[..., None]
+        return relit * (1 - m) + luminance(lin)[..., None] * gain[None, None, :] * m
 
 
 def bbox(alpha, pad=2, floor=1 / 255):
@@ -380,6 +421,9 @@ def lit_colour(scene, piece, colour, state, emissive):
     """The piece's colour under `state`: its reference colour times the light ratio, glowing parts kept."""
     lin = to_linear(colour)
     relit = lin * scene.ratio(state)
+    if piece.get('second_light'):
+        second = piece.setdefault('_second', SecondLight(scene, piece))
+        relit = second.relight(lin, relit, state, second.mask)
     if emissive is not None:
         e = emissive[..., None]
         relit = relit * (1 - e) + lin * e
