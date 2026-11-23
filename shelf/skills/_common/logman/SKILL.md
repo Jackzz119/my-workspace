@@ -32,7 +32,7 @@ allowed-tools: Read, Grep
 
 ## 环境分级
 
-使用封装类 `Logman` 替代裸 log 调用，详见 `reference.md`。方法名跟随项目语言与现有封装（如 C# 的 `Logman.Log`、TypeScript 的 `Logman.log`），动手前先看项目里的实现。
+项目有封装类 `Logman` 就用它替代裸 log 调用（实现示例见 `reference.md`）；方法名跟随项目语言与现有封装（如 C# 的 `Logman.Log`、TypeScript 的 `Logman.log`），动手前先看项目里的实现。项目写明不建封装的（记在 `PROJECT.md` 标签池那一段），直接用运行时自带的日志 API，标签格式与下表的分级照旧，不为此新建封装类。
 
 | 级别 | 开发/测试 | Pro |
 |------|-----------|-----|
@@ -46,6 +46,6 @@ allowed-tools: Read, Grep
 
 - [ ] 标签顺序：功能域 → 运行时环境 → 类/模块名
 - [ ] 标签后有 `\n`
-- [ ] 使用 `Logman` 而非裸 log 调用
+- [ ] 项目有 `Logman` 封装时用它，不用裸 log 调用；项目写明不建封装时按项目的写法
 - [ ] 功能域标签反映方法归属，不是调用方
 - [ ] 功能域标签已记录在项目 PROJECT.md 的标签池中
