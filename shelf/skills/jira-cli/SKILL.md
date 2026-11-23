@@ -96,7 +96,7 @@ flowchart LR
 |---|---|---|
 | 看单 | `jira issue view <KEY> --plain` | 巡检不能只看 status：最新评论里可能有「先别开测」这类人工闸 |
 | 转状态 | `jira issue move <KEY> "<转移名>"` | 按**转移名**转，不是目标状态名；多跳的按项目 Jira 节的顺序逐跳。转之前先 `view` 看当前状态，已到位就不转 |
-| 改 assignee | `jira issue assign <KEY> <accountId>` | 用 accountId |
+| 改 assignee | `jira issue assign <KEY> <accountId>` | 用 accountId。CLI 回 `400 Bad Request` 时（传 accountId 和显示名都一样）改用 REST v3：`PUT /rest/api/3/issue/<KEY>/assignee`，body `{"accountId":"…"}`，认证同 §三；成功返回 204，再读 `fields.assignee` 确认 |
 | 改 reporter（仅项目 Jira 节要求时） | REST v2 `PUT /rest/api/2/issue/<KEY>`，body `{"fields":{"reporter":{"accountId":"…"}}}` | CLI 改不了 reporter。返回 400 / 403 多半是 reporter 字段不在编辑界面上，或账号没有 Modify Reporter 权限：如实报告，不绕 |
 | 发评论 | `jira issue comment add <KEY> --template <文件>`，或 REST v2 `POST /rest/api/2/issue/<KEY>/comment` | 🔴 **正文别当位置参数传**：进程会挂住，而且会重复落评论。发完 `view` 回读，确认只有一条 |
 
