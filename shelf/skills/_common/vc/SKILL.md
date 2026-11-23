@@ -81,7 +81,7 @@ git status            # 1. 确认当前改动
 git add <files>       # 2. 暂存改动
 git diff --staged     # 3. 确认暂存内容
 git commit -m "..."   # 4. 提交
-git push              # 5. 推送（用户要求时）
+git push              # 5. 推送（时机按项目协议；协议没写就等用户要求）
 ```
 
 ### Commit message 传参方式
