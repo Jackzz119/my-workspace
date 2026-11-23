@@ -8,18 +8,18 @@
 #
 # Multica 给每个 issue 新开一个 git worktree，里面只有 tracked 文件：
 # `.claude/` / `.agents/` 与根目录 `CLAUDE.md` / `AGENTS.md` 全都 gitignored，所以一开始都不存在，
-# agent 一个技能也看不见、一份协议也读不到；被 git 忽略的环境配置（.env 类）也不在。本脚本把三样东西就地生出来：
+# agent 一个技能也看不见、一份协议也读不到；被 git 忽略的本地配置（.env 类）也不在。本脚本把三样东西就地生出来：
 #
-#   1. 技能：把 <ai>/jaSkills/ 下的全部技能复制进 agent 自己的技能目录
+#   1. 技能：skills-link.sh --copy，把 <ai>/jaSkills/ 下的全部技能复制进 agent 自己的技能目录（Multica runtime 不跟链接）
 #        Claude 系 → .claude/skills/<name>/
 #        Codex  系 → .agents/skills/<name>/
-#   2. 协议：把 <ai>/jaAgents/MULTICA.md 复制成根目录的 CLAUDE.md（Claude 系）或 AGENTS.md（Codex 系）
-#   3. 环境配置：主检出里被 git 忽略的 `.env` / `.env.local` / `.env.<环境>` …（不含 .example 等入库样板），
-#      本 worktree 缺的照同一相对路径补过来——主检出那份是指向仓库里的相对链接就建同样的链接（目标读不到就不建），
-#      其余复制成独立文件（权限 600）；已有的不覆盖、悬空链接只报告，内容不读不打印，目标没被 git 忽略就不补。
-#      之后若有 <ai>/scripts/worktree.local.sh（项目自己的补充步骤：模板植入空壳，之后归项目）就跑它。和 sync-worktree.sh 的第 4 步同一口径
+#   2. 协议：把 <ai>/jaAgents/MULTICA.md 复制成根目录的 CLAUDE.md（Claude 系）或 AGENTS.md（Codex 系）——这一步只在本脚本里
+#   3. 本地配置：local-config.sh --multica，按仓库根的 .worktreeinclude（没有就按 .env / .env.*）从主检出补被 git 忽略的文件，
+#      和本机 sync-worktree.sh、会话开场钩子同一口径（已有不覆盖、仓库内相对链接照建、其余复制成 600、内容不读不打印、
+#      目标没被 git 忽略就不补）；但不补会话钩子配置和 .mcp.json——Multica runtime 不挂项目的会话钩子、不拿本机令牌。
+#      之后跑 <ai>/scripts/worktree.local.sh（项目自己的补充步骤：模板植入空壳，之后归项目）
 #
-# 落点全部 gitignored，不会混进提交（环境配置复制前逐个用 git check-ignore 验过）。真源仍只有 <ai>/jaSkills/ 与 <ai>/jaAgents/MULTICA.md 两处，要改就改真源。
+# 落点全部 gitignored，不会混进提交（本地配置复制前逐个用 git check-ignore 验过）。真源仍只有 <ai>/jaSkills/ 与 <ai>/jaAgents/MULTICA.md 两处，要改就改真源。
 #
 # 用法：
 #   bash ai/scripts/bootstrap.sh                 # 按环境变量自动判断是 claude 还是 codex；判断不了就两边都建
@@ -29,7 +29,7 @@
 #   bash ai/scripts/bootstrap.sh --force         # 连没有生成标记的根目录 CLAUDE.md / AGENTS.md 也覆盖（本机慎用）
 #
 # 本机开发者的保护：
-#   - 技能目录里已经是指向 <ai>/jaSkills/ 的 symlink（sync-worktree.sh 或 shelf 建的）→ 原样保留，不换成副本
+#   - 技能目录（或其中的条目）已经是指向 <ai>/jaSkills/ 的 symlink（sync-worktree.sh 或 shelf 建的）→ 原样保留，不换成副本
 #   - 根目录 CLAUDE.md / AGENTS.md 存在、没有本脚本的生成标记：
 #       和 <ai>/jaAgents/ 同名正本一样 → 本机协议副本，不动
 #       其余（Multica runtime 注入的身份简报）→ 把 MULTICA.md 追加在它下面，用 BEGIN/END 标记包住，再跑只替换这一块
@@ -38,7 +38,8 @@
 # 重复执行安全。
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"   # <ai>/scripts/ → 仓库根
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+ROOT="$(cd "$SCRIPTS/../.." && pwd -P)"   # <ai>/scripts/ → 仓库根
 cd "$ROOT"
 
 AI_DIR="$(sed -n 's/^[[:space:]]*"aiDir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .shelf.json 2>/dev/null | head -n 1 || true)"
@@ -61,6 +62,9 @@ done
 
 [[ -d "$SRC_SKILLS" ]]   || { echo "✗ 找不到 $SRC_SKILLS —— 技能真源不在，先确认分支是否已合入"; exit 1; }
 [[ -f "$SRC_PROTOCOL" ]] || { echo "✗ 找不到 $SRC_PROTOCOL —— 协议真源不在，先确认分支是否已合入"; exit 1; }
+for m in lib/common.sh skills-link.sh local-config.sh; do
+  [[ -f "$SCRIPTS/$m" ]] || { echo "✗ 缺 $AI_DIR/scripts/$m（AI 工作流模板的货），先确认分支是否已合入"; exit 1; }
+done
 
 if [[ "$AGENT" == "auto" ]]; then
   if [[ -n "${CLAUDECODE:-}" || -n "${CLAUDE_CODE_ENTRYPOINT:-}" ]]; then
@@ -79,38 +83,7 @@ case "$AGENT" in
   *) echo "✗ --agent 只接受 claude / codex / all，收到：$AGENT"; exit 2 ;;
 esac
 
-copied=0; kept=0; protocols=0; skipped=0; appended=0
-
-copy_tree() {
-  # $1 = 源目录（带尾斜杠） $2 = 目标目录
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete --exclude='.DS_Store' "$1" "$2/"
-  else
-    rm -rf "$2"; mkdir -p "$2"; cp -R "$1". "$2/"
-  fi
-}
-
-fill_skills() {
-  local dir="$1"
-  mkdir -p "$dir"
-  for src in "$SRC_SKILLS"/*/; do
-    local name; name="$(basename "$src")"
-    local dest="$dir/$name"
-    local rel="../../$SRC_SKILLS/$name"
-    if [[ -L "$dest" ]]; then
-      if [[ "$(readlink "$dest")" == "$rel" ]]; then kept=$((kept + 1)); continue; fi
-      rm "$dest"   # 指错地方的旧链接：删 symlink 不碰内容
-    fi
-    copy_tree "$src" "$dest"
-    copied=$((copied + 1))
-  done
-  # 真源里已没有、目录里还剩的副本：只报告不删——可能是别人正在加的东西
-  for leftover in "$dir"/*/; do
-    [[ -d "$leftover" ]] || continue
-    local n; n="$(basename "$leftover")"
-    [[ -d "$SRC_SKILLS/$n" ]] || echo "⚠ $leftover 在真源 $SRC_SKILLS/ 里不存在，已保留未动"
-  done
-}
+protocols=0; skipped=0; appended=0
 
 BLOCK_BEGIN="<!-- BEGIN $AI_DIR/jaAgents/MULTICA.md（由 $AI_DIR/scripts/bootstrap.sh 追加在 runtime 身份简报之后；再跑只替换这一块，不要手改）-->"
 BLOCK_END="<!-- END $AI_DIR/jaAgents/MULTICA.md -->"
@@ -136,61 +109,16 @@ write_protocol() {
   protocols=$((protocols + 1))
 }
 
-# 主检出 = git worktree list 的第一行（整行取：路径里有空格也不截断）；本目录就是主检出时为空
-MAIN_ROOT="$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
-if [[ -n "$MAIN_ROOT" && "$(cd "$MAIN_ROOT" 2>/dev/null && pwd -P)" == "$(pwd -P)" ]]; then MAIN_ROOT=""; fi
-
-envs=0
-# 链接目标落在仓库里（相对路径、解析后仍在本目录之下）才照建同样的链接；指到仓库外的复制内容，免得两边共用一份
-link_inside_repo() {   # link_inside_repo <链接在本目录里的路径> <链接目标>
-  [[ "$2" != /* ]] || return 1
-  local dir; dir="$(cd "$(dirname "$1")" && pwd -P)" || return 1
-  case "$(cd "$dir" && cd "$(dirname "$2")" 2>/dev/null && pwd -P)/" in "$(pwd -P)"/*) return 0 ;; *) return 1 ;; esac
-}
-fill_env() {
-  [[ -n "$MAIN_ROOT" ]] || return 0
-  local rel name src target found=0
-  while IFS= read -r rel; do
-    name="${rel##*/}"
-    case "$name" in .env|.env.*) ;; *) continue ;; esac
-    case "$name" in *.example|*.sample|*.template|*.dist) continue ;; esac
-    found=$((found + 1))
-    src="$MAIN_ROOT/$rel"
-    if [[ -L "$rel" && ! -e "$rel" ]]; then echo "⚠ ${rel}：是悬空链接（→ $(readlink "$rel")），已保留，请自行检查"; continue; fi
-    [[ -e "$rel" ]] && continue
-    [[ -d "$(dirname "$rel")" ]] || { echo "⚠ ${rel}：本 worktree 没有它所在的目录，跳过"; continue; }
-    git check-ignore -q "$rel" || { echo "⚠ ${rel}：没被 git 忽略，不补（免得混进提交）"; continue; }
-    if [[ -L "$src" ]] && target="$(readlink "$src")" && link_inside_repo "$rel" "$target"; then
-      ln -s "$target" "$rel"
-      if [[ ! -e "$rel" ]]; then rm "$rel"; echo "⚠ ${rel}：链接目标 $target 在本 worktree 读不到，不建悬空链接"; continue; fi
-    elif [[ -r "$src" && ! -d "$src" ]]; then
-      (umask 077; cp -L "$src" "$rel")
-    else
-      echo "⚠ ${rel}：主检出那份读不了，跳过"; continue
-    fi
-    envs=$((envs + 1))
-  done < <(git -C "$MAIN_ROOT" ls-files --others --ignored --exclude-standard --directory 2>/dev/null)
-  (( found )) || echo "= 环境配置：主检出里没有被 git 忽略的 .env 类文件"
-}
-
-# 项目自己的补充步骤（模板植入一个空壳，之后归项目、不对账）：比如给 app 建指向根 .env 的链接。主检出里同样会跑
-run_local_hook() {
-  local hook="$AI_DIR/scripts/worktree.local.sh"
-  [[ -f "$hook" ]] || return 0
-  echo "→ 项目补充步骤：$hook"
-  MAIN_ROOT="$MAIN_ROOT" bash "$hook"
-}
-
+bash "$SCRIPTS/skills-link.sh" --root "$ROOT" --agent "$AGENT" --copy
 for side in "${SIDES[@]}"; do
   case "$side" in
-    claude) fill_skills ".claude/skills"; write_protocol "CLAUDE.md" ;;
-    codex)  fill_skills ".agents/skills"; write_protocol "AGENTS.md" ;;
+    claude) write_protocol "CLAUDE.md" ;;
+    codex)  write_protocol "AGENTS.md" ;;
   esac
 done
-fill_env
-run_local_hook
+bash "$SCRIPTS/local-config.sh" --root "$ROOT" --agent "$AGENT" --multica
 
-echo "✓ agent=$AGENT · 复制技能 $copied 个$( ((kept)) && echo " · 保留 symlink $kept 条" ) · 生成协议 $protocols 份$( ((appended)) && echo " · 追加在身份简报之后 $appended 份" )$( ((skipped)) && echo " · 跳过 $skipped 份（本机协议副本）" )$( ((envs)) && echo " · 补环境配置 $envs 个（内容不输出）" )"
+echo "✓ agent=$AGENT · 生成协议 $protocols 份$( ((appended)) && echo " · 追加在身份简报之后 $appended 份" )$( ((skipped)) && echo " · 跳过 $skipped 份（本机协议副本）" )（技能与本地配置见上）"
 for side in "${SIDES[@]}"; do
   case "$side" in
     claude) echo "→ 下一步：从头读一遍 ./CLAUDE.md，按其 §一 准备上下文，然后再开始干活" ;;

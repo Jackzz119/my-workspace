@@ -1,277 +1,56 @@
 #!/usr/bin/env bash
 #
-# sync-worktree.sh —— worktree（或任何新检出）开工第一步：把技能链接、协议文档、MCP 配置和环境配置文件就地补齐。
-# AI 工作流模板（货架 templates/ai）的一部分，由 shelf init 装到 <ai>/scripts/；
-# 机器上装了 shelf 的，直接 `shelf init` 效果相同（还会按账本和货架对账）。本脚本不需要 shelf、不联网。
+# sync-worktree.sh —— worktree（或任何新检出）开工第一步的保底：把技能链接、协议副本、本地配置就地补齐。
+# AI 工作流模板（货架 templates/ai）的一部分，由 shelf 装到 <ai>/scripts/。本脚本不需要 shelf、不联网，重复执行安全；
+# 机器上装了 shelf 的，新 worktree 直接 `shelf init`（按账本还原）效果更全。
 #
-# 为什么需要它：`.claude/skills` `.agents/skills` 和根目录 CLAUDE.md / AGENTS.md 都是 gitignored，
-# git worktree add 只材料化 tracked 文件，所以新 worktree 里既没有技能链接也没有协议文档。
-# Claude Code / Codex 桌面版建的 worktree 会按仓库根 `.worktreeinclude` 把两份协议复制过来，
-# 但技能链接谁都不带；Multica、Codex CLI `--worktree`、手动 `git worktree add` 则什么都不带。
-# 本脚本是所有这些路径的保底，重复执行安全。
+# 为什么需要它：`.claude/skills` `.agents/skills`、根目录 CLAUDE.md / AGENTS.md、.env 这类本地配置都被 git 忽略，
+# git worktree add 只材料化入库的文件。Claude Code / Codex 桌面版建 worktree 时按 .worktreeinclude 复制一部分（技能链接谁都不带），
+# 会话开场钩子会补齐；Codex CLI `--worktree`、手动 `git worktree add`、没装钩子的项目就靠本脚本。Multica 用 bootstrap.sh。
 #
-# ai 资料区目录名取账本 .shelf.json 的 aiDir（.NET / C# 项目是 AI），没有账本就取本脚本所在的那一层（脚本装在 <ai>/scripts/ 下）。
-#
-# 做什么：
-#   1. 技能目录（Claude 读 .claude/skills，Codex 读 .agents/skills）
-#      - 不存在 / 悬空链接 / 空真目录  → 建一条整目录 symlink → ../<ai>/jaSkills
-#      - 已是指向 <ai>/jaSkills 的 symlink → 不动
-#      - 非空真目录（项目没 ignore 这个目录时会这样）→ 追加：真源里每个技能补一条按件链接，
-#        同名条目替换成链接（原内容删除并报告），不在真源里的条目原样保留
-#   2. 协议文档（根目录 CLAUDE.md / AGENTS.md 是副本，正本是本检出 <ai>/jaAgents/ 下的同名文件，入库）：
-#      交给 <ai>/scripts/protocol-mirror.sh --sync，副本和正本永远一致、不追加（用户 2026-10-26 定）——
-#      没有就创建；没人改过的旧副本换成正本；副本被人改过就两份都不动、报告，等用户看过 diff 再定方向
-#      2b. Claude 侧的 .claude/settings.json（gitignored；里面挂着 protocol-mirror.sh 的钩子）：本目录没有、主检出有 → 复制
-#   3. MCP 配置 .mcp.json（gitignored，里面有令牌；只管 Claude 侧，Codex 不读它）
-#      源 = 主检出根目录的 .mcp.json；本目录就是主检出、或主检出没有这个文件 → 跳过
-#      - 本目录在主检出里面（桌面版的 .claude/worktrees/<名>）→ 不复制：Claude 会逐级往上读到主检出那份；
-#        这里若另有一份会盖住它（令牌换过就过期），只报告不删
-#      - 本目录在主检出外面：没有 → 复制；和主检出一致 → 不动；不一致（比如令牌换过）→ 换成主检出的
-#   4. 环境配置文件（.env 类）：主检出里被 git 忽略的 `.env` / `.env.local` / `.env.<环境>` …（不含 .example / .sample /
-#      .template / .dist 这类入库样板），本目录缺的照同一相对路径补过来；本目录就是主检出 → 跳过
-#      - 主检出那份是指向仓库里的相对链接（比如 app 下指向根 .env）→ 建同样的链接，目标读不到就不建（不留悬空链接）；
-#        指向仓库外的链接与普通文件 → 复制成独立文件（权限 600），两边改各自的，内容不读不打印
-#      - 本目录已有（文件或链接）→ 不动：各 worktree 的端口、库可能本来就不同，不拿主检出的覆盖；悬空链接只报告
-#      - 目标路径在本目录没被 git 忽略、或所在目录不存在 → 不补，只报告（免得混进提交）
-#      - 之后若有 <ai>/scripts/worktree.local.sh（项目自己的补充步骤：模板植入一个空壳，之后归项目、不对账）就跑它，主检出里也跑
-#   5. <ai>/jaSkills 不存在 → 退出码 1，把错误原文反馈给用户，不要自己猜着建
+# 本脚本只按顺序调同目录下的模块（各自只做一件事、可单跑）：
+#   1. skills-link.sh：技能目录建成指向 <ai>/jaSkills 的链接（Claude 读 .claude/skills，Codex 读 .agents/skills）
+#   2. protocol-mirror.sh --sync：根目录 CLAUDE.md / AGENTS.md 与正本 <ai>/jaAgents/ 一致——没有就建、没人改过的旧副本
+#      换成正本、副本被人改过就两份都不动并报告，等用户看过 diff 再定方向（用户 2026-10-26 定）
+#   3. local-config.sh：按 .worktreeinclude 从主检出补被 git 忽略的本地配置（钩子配置、.env 类…），.mcp.json 单独处理，
+#      最后跑项目自己的 <ai>/scripts/worktree.local.sh
+#   <ai>/jaSkills 不存在 → 退出码 1，把错误原文反馈给用户，不要自己猜着建。
+# ai 资料区目录名取账本 .shelf.json 的 aiDir（.NET / C# 项目是 AI），没有账本就取本脚本所在的那一层。
 #
 # 用法：
 #   bash ai/scripts/sync-worktree.sh                # 两个 agent 都补
-#   bash ai/scripts/sync-worktree.sh --agent claude # 只补 Claude 侧（.claude/skills + CLAUDE.md + .mcp.json）+ 环境配置
-#   bash ai/scripts/sync-worktree.sh --agent codex  # 只补 Codex 侧（.agents/skills + AGENTS.md）+ 环境配置
+#   bash ai/scripts/sync-worktree.sh --agent claude # 只补 Claude 侧（.claude/skills + CLAUDE.md + .mcp.json）+ 本地配置
+#   bash ai/scripts/sync-worktree.sh --agent codex  # 只补 Codex 侧（.agents/skills + AGENTS.md）+ 本地配置
 #   bash ai/scripts/sync-worktree.sh --dry-run      # 只报告，不动手
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"   # <ai>/scripts → 仓库根
-cd "$ROOT"
-
-AI_DIR="$(sed -n 's/^[[:space:]]*"aiDir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .shelf.json 2>/dev/null | head -n 1 || true)"
-if [[ -z "$AI_DIR" ]]; then
-  AI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && basename "$(pwd -P)")"   # 本脚本就在 <ai>/scripts/ 下
-fi
-SRC_SKILLS="$AI_DIR/jaSkills"
-
-AGENT="all"; DRY=0
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+AGENT="all"; DRY=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --agent) AGENT="${2:-}"; shift 2 ;;
     --agent=*) AGENT="${1#*=}"; shift ;;
-    --dry-run) DRY=1; shift ;;
-    -h|--help) sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --dry-run) DRY=(--dry-run); shift ;;
+    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "✗ 未知参数：$1（用 --help 看用法）"; exit 2 ;;
   esac
 done
-case "$AGENT" in
-  claude) SIDES=("claude") ;; codex) SIDES=("codex") ;; all) SIDES=("claude" "codex") ;;
-  *) echo "✗ --agent 只接受 claude / codex / all，收到：$AGENT"; exit 2 ;;
-esac
-
-if [[ ! -d "$SRC_SKILLS" ]]; then
-  echo "✗ 找不到技能真源 $ROOT/$SRC_SKILLS —— 停下，把这句话反馈给用户：分支可能还没合入，或者目录被改名/删除了" >&2
-  exit 1
-fi
-
-# 主检出 = git worktree list 的第一行（整行取：路径里有空格也不截断）；本目录就是主检出时为空
-MAIN_ROOT="$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
-if [[ -n "$MAIN_ROOT" && "$(cd "$MAIN_ROOT" 2>/dev/null && pwd -P)" == "$ROOT" ]]; then MAIN_ROOT=""; fi
-
-run() { if (( DRY )); then echo "  [dry-run] $*"; else "$@"; fi; }
-
-# Git Bash 的 ln -s 默认把目标整个复制一份，还报成功（PA-060）。nativestrict 让它只建原生链接，建不了就失败；
-# 失败时（没开开发者模式、没有建符号链接的权限）退到 junction，junction 不要权限。两样都不成就报错，绝不留一份副本。
-is_windows=0
-case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) is_windows=1 ;; esac
-if (( is_windows )); then export MSYS=winsymlinks:nativestrict CYGWIN=winsymlinks:nativestrict; fi
-make_link() {   # make_link <相对目标> <链接路径>
-  local target="$1" link="$2"
-  if (( DRY )); then echo "  [dry-run] 链接 $link → $target"; return; fi
-  if ln -s "$target" "$link" 2>/dev/null && [[ -L "$link" ]]; then return; fi
-  if (( is_windows )); then
-    local abs; abs="$(cygpath -w "$(cd "$(dirname "$link")" && cd "$target" && pwd)")"
-    if cmd //c mklink /J "$(cygpath -w "$link")" "$abs" > /dev/null; then echo "  （没有符号链接权限，建的是 junction）"; return; fi
-  fi
-  echo "✗ 建不成链接 $link → ${target}；不会用复制代替，请开 Windows 开发者模式或手动建 junction" >&2
-  exit 1
-}
-
-links_whole=0; links_item=0; replaced=0; kept=0
-sync_skills_dir() {
-  local dir="$1"                     # .claude/skills 或 .agents/skills（深度固定为 2）
-  local whole_rel="../$SRC_SKILLS"   # 从 .claude/ 指向 <ai>/jaSkills
-  local item_rel="../../$SRC_SKILLS" # 从 .claude/skills/ 指向 <ai>/jaSkills
-
-  if [[ -L "$dir" ]]; then
-    if [[ -e "$dir" && "$(cd "$dir" && pwd -P)" == "$ROOT/$SRC_SKILLS" ]]; then
-      echo "= $dir 已是指向 $SRC_SKILLS 的链接"; kept=$((kept+1)); return
-    fi
-    echo "↻ $dir 是悬空/指错的链接（→ $(readlink "$dir")），重建"
-    run rm "$dir"
-  elif [[ -d "$dir" ]]; then
-    if [[ -z "$(find "$dir" -mindepth 1 -maxdepth 1 ! -name .DS_Store -print -quit)" ]]; then
-      echo "↻ $dir 是空真目录，换成整目录链接"
-      run rm -rf "$dir"
-    else
-      echo "＋ $dir 是非空真目录，按件追加链接（不在真源里的条目保留）"
-      local src name dest
-      for src in "$SRC_SKILLS"/*/; do
-        name="$(basename "$src")"; dest="$dir/$name"
-        if [[ -L "$dest" ]]; then
-          if [[ "$(readlink "$dest")" == "$item_rel/$name" ]]; then kept=$((kept+1)); continue; fi
-          run rm "$dest"
-        elif [[ -e "$dest" ]]; then
-          echo "  ⚠ 同名条目 $dest 是真目录/文件，已替换成链接（原内容删除）"
-          run rm -rf "$dest"; replaced=$((replaced+1))
-        fi
-        make_link "$item_rel/$name" "$dest"; links_item=$((links_item+1))
-      done
-      return
-    fi
-  elif [[ -e "$dir" ]]; then
-    echo "↻ $dir 是文件，挪开为 $dir.bak 再建链接"; run mv "$dir" "$dir.bak"
-  fi
-  run mkdir -p "$(dirname "$dir")"
-  make_link "$whole_rel" "$dir"; links_whole=$((links_whole+1))
-  echo "✓ $dir → $whole_rel"
-}
-
-docs_drift=0
-sync_doc() {   # sync_doc <claude|codex>：副本对齐交给 protocol-mirror.sh（它和钩子是同一套判断）
-  if [[ ! -f "$AI_DIR/scripts/protocol-mirror.sh" ]]; then
-    echo "⚠ 缺 $AI_DIR/scripts/protocol-mirror.sh（模板新增的货，跑一次 shelf sync 装上），协议副本没对齐"
-    docs_drift=$((docs_drift+1)); return
-  fi
-  local args=(--sync --agent "$1"); (( DRY )) && args+=(--dry-run)
-  bash "$AI_DIR/scripts/protocol-mirror.sh" "${args[@]}" || docs_drift=$((docs_drift+1))
-}
-
-settings_state="跳过"; codex_hooks_state="跳过"; HOOK_STATE=""
-# 挂协议提醒钩子的配置：本目录没有、主检出有 → 复制。结果写进 HOOK_STATE
-sync_hook_config() {   # sync_hook_config <.claude/settings.json | .codex/hooks.json>
-  local name="$1"
-  if [[ -z "$MAIN_ROOT" ]]; then HOOK_STATE="主检出"; return; fi
-  if [[ -e "$name" ]]; then HOOK_STATE="已有"; return; fi
-  if [[ ! -f "$MAIN_ROOT/$name" ]]; then HOOK_STATE="无源"; return; fi
-  echo "✓ 复制 ${name}（来自主检出；协议副本的提醒钩子在里面）"
-  run mkdir -p "$(dirname "$name")"
-  run cp "$MAIN_ROOT/$name" "$name"; HOOK_STATE="已复制"
-}
-
-mcp_state="跳过"
-sync_mcp_json() {
-  local name=".mcp.json" main_real=""
-  if [[ -z "$MAIN_ROOT" ]]; then
-    echo "= ${name}：本目录是主检出，它就是真源"; mcp_state="主检出"; return
-  fi
-  main_real="$(cd "$MAIN_ROOT" 2>/dev/null && pwd -P)" || true
-  if [[ -z "$main_real" || ! -f "$main_real/$name" ]]; then
-    echo "⚠ ${name}：主检出没有这个文件，跳过"; mcp_state="无源"; return
-  fi
-  # Claude Code looks for .mcp.json in the working directory and every parent, so a worktree nested
-  # inside the main checkout already sees the main file; a copy here would shadow it and go stale.
-  if [[ "$ROOT" == "$main_real"/* ]]; then
-    if [[ -e "$name" ]]; then
-      echo "⚠ ${name}：本目录在主检出里面，本来就读得到主检出那份；这里另有一份会盖住它（令牌换过就过期），不需要就删掉"
-      mcp_state="嵌套·另有一份"
-    else
-      echo "= ${name}：本目录在主检出里面，Claude 会往上读到主检出那份，不复制"
-      mcp_state="嵌套·不需要"
-    fi
-    return
-  fi
-  if [[ ! -e "$name" ]]; then
-    echo "✓ 复制 ${name}（来自主检出；含令牌，.gitignore 已忽略它）"
-    run cp "$main_real/$name" "$name"; mcp_state="已复制"; return
-  fi
-  if cmp -s "$main_real/$name" "$name"; then
-    echo "= $name 已和主检出一致"; mcp_state="已一致"; return
-  fi
-  echo "↻ $name 和主检出不同（比如令牌换过），换成主检出的版本（原内容删除）"
-  run cp "$main_real/$name" "$name"; mcp_state="已更新"
-}
-
-env_copied=0; env_kept=0; env_skipped=0; env_found=0
-# 链接目标落在仓库里（相对路径、解析后仍在本目录之下）才照建同样的链接；指到仓库外的复制内容，免得两边共用一份
-link_inside_repo() {   # link_inside_repo <链接在本目录里的路径> <链接目标>
-  [[ "$2" != /* ]] || return 1
-  local dir; dir="$(cd "$(dirname "$1")" && pwd -P)" || return 1
-  case "$(cd "$dir" && cd "$(dirname "$2")" 2>/dev/null && pwd -P)/" in "$ROOT"/*) return 0 ;; *) return 1 ;; esac
-}
-sync_env_files() {
-  if [[ -z "$MAIN_ROOT" ]]; then echo "= 环境配置：本目录是主检出，它就是真源"; return; fi
-  local rel name src target
-  # --directory 把整个被忽略的目录（node_modules/ 之类）收成一行，几十毫秒列完；按路径排序，根 .env 先于 app 下的链接
-  while IFS= read -r rel; do
-    name="${rel##*/}"
-    case "$name" in .env|.env.*) ;; *) continue ;; esac
-    case "$name" in *.example|*.sample|*.template|*.dist) continue ;; esac
-    env_found=$((env_found+1))
-    src="$MAIN_ROOT/$rel"
-    if [[ -L "$rel" && ! -e "$rel" ]]; then
-      echo "⚠ ${rel}：是悬空链接（→ $(readlink "$rel")），已保留，请自行检查"; env_kept=$((env_kept+1)); continue
-    fi
-    if [[ -e "$rel" ]]; then env_kept=$((env_kept+1)); continue; fi
-    if [[ ! -d "$(dirname "$rel")" ]]; then
-      echo "⚠ ${rel}：本目录没有它所在的目录，跳过"; env_skipped=$((env_skipped+1)); continue
-    fi
-    if ! git check-ignore -q "$rel"; then
-      echo "⚠ ${rel}：在本目录没被 git 忽略，不补（免得混进提交）"; env_skipped=$((env_skipped+1)); continue
-    fi
-    if [[ -L "$src" ]] && target="$(readlink "$src")" && link_inside_repo "$rel" "$target"; then
-      if (( DRY )); then echo "  [dry-run] 链接 $rel → $target"; env_copied=$((env_copied+1)); continue; fi
-      ln -s "$target" "$rel"
-      if [[ ! -e "$rel" ]]; then
-        rm "$rel"; echo "⚠ ${rel}：链接目标 $target 在本目录读不到，不建悬空链接"; env_skipped=$((env_skipped+1)); continue
-      fi
-      echo "✓ $rel → ${target}（照主检出建同样的链接）"
-    elif [[ -r "$src" && ! -d "$src" ]]; then
-      if (( DRY )); then echo "  [dry-run] 复制 $rel"; else (umask 077; cp -L "$src" "$rel"); fi
-      echo "✓ 复制 ${rel}（来自主检出，独立文件，内容不输出）"
-    else
-      echo "⚠ ${rel}：主检出那份读不了，跳过"; env_skipped=$((env_skipped+1)); continue
-    fi
-    env_copied=$((env_copied+1))
-  done < <(git -C "$MAIN_ROOT" ls-files --others --ignored --exclude-standard --directory 2>/dev/null)
-  (( env_found )) || echo "= 环境配置：主检出里没有被 git 忽略的 .env 类文件"
-}
-
-# 项目自己的补充步骤（模板植入一个空壳，之后归项目、不对账）：比如给 app 建指向根 .env 的链接。主检出里同样会跑
-run_local_hook() {
-  local hook="$AI_DIR/scripts/worktree.local.sh"
-  [[ -f "$hook" ]] || return 0
-  if (( DRY )); then echo "  [dry-run] 会跑项目补充步骤 $hook"; return; fi
-  echo "→ 项目补充步骤：$hook"
-  MAIN_ROOT="$MAIN_ROOT" bash "$hook"
-}
-
-for side in "${SIDES[@]}"; do
-  case "$side" in
-    claude) sync_skills_dir ".claude/skills" ;;
-    codex)  sync_skills_dir ".agents/skills" ;;
-  esac
+case "$AGENT" in claude|codex|all) ;; *) echo "✗ --agent 只接受 claude / codex / all，收到：$AGENT"; exit 2 ;; esac
+for m in lib/common.sh skills-link.sh protocol-mirror.sh local-config.sh; do
+  [[ -f "$SCRIPTS/$m" ]] || { echo "✗ 缺 $SCRIPTS/$m（AI 工作流模板的货）：装了 shelf 就跑 shelf init 补上，没装就从主检出或货架拷过来"; exit 1; }
 done
-for side in "${SIDES[@]}"; do
-  case "$side" in
-    claude) sync_doc claude ;;
-    codex)  sync_doc codex ;;
-  esac
-done
-for side in "${SIDES[@]}"; do
-  case "$side" in
-    claude) sync_mcp_json; sync_hook_config .claude/settings.json; settings_state="$HOOK_STATE" ;;
-    codex)  sync_hook_config .codex/hooks.json; codex_hooks_state="$HOOK_STATE" ;;
-  esac
-done
-sync_env_files
-run_local_hook
+ROOT="$(cd "$SCRIPTS/../.." && pwd -P)"
+
+bash "$SCRIPTS/skills-link.sh" --root "$ROOT" --agent "$AGENT" "${DRY[@]+"${DRY[@]}"}"
+drift=0
+bash "$SCRIPTS/protocol-mirror.sh" --sync --root "$ROOT" --agent "$AGENT" "${DRY[@]+"${DRY[@]}"}" || drift=1
+bash "$SCRIPTS/local-config.sh" --root "$ROOT" --agent "$AGENT" "${DRY[@]+"${DRY[@]}"}"
 
 echo ""
-echo "✓ sync-worktree（agent=$AGENT$( ((DRY)) && echo '，dry-run')）：整目录链接 $links_whole · 按件链接 $links_item · 替换同名 $replaced · 原样保留 $kept ·" \
-     "协议$( ((docs_drift)) && echo " ⚠ 有 $docs_drift 份副本被改过，见上" || echo ' 已对齐') · .mcp.json $mcp_state · settings.json $settings_state · .codex/hooks.json $codex_hooks_state ·" \
-     "环境配置 补 $env_copied / 已有 $env_kept / 跳过 $env_skipped"
-for side in "${SIDES[@]}"; do
-  case "$side" in
-    claude) [[ -f CLAUDE.md ]] && echo "→ 下一步：从头读一遍 ./CLAUDE.md 再开工" || true ;;
-    codex)  [[ -f AGENTS.md ]] && echo "→ 下一步：从头读一遍 ./AGENTS.md 再开工" || true ;;
-  esac
-done
+echo "✓ sync-worktree（agent=$AGENT$( (( ${#DRY[@]} )) && echo '，dry-run')）：技能链接、协议副本、本地配置都过了一遍$( ((drift)) && echo '；⚠ 有协议副本被人改过，见上')"
+case "$AGENT" in
+  claude) [[ -f "$ROOT/CLAUDE.md" ]] && echo "→ 下一步：从头读一遍 ./CLAUDE.md 再开工" ;;
+  codex)  [[ -f "$ROOT/AGENTS.md" ]] && echo "→ 下一步：从头读一遍 ./AGENTS.md 再开工" ;;
+  all)    [[ -f "$ROOT/CLAUDE.md" ]] && echo "→ 下一步：从头读一遍 ./CLAUDE.md（Codex 读 ./AGENTS.md）再开工" ;;
+esac
+exit 0
