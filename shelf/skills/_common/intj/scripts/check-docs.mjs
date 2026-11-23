@@ -5,6 +5,8 @@
 // Project settings live in ai/check-docs.json (see DEFAULTS for the fields); without it every doc is living.
 // Exits 1 on a living-doc failure or a doc over its budget. Needs Node and git.
 // node <skill>/scripts/check-docs.mjs [--json] [--all] [--config <file>]   (--all also lists frozen-doc failures)
+// node <skill>/scripts/check-docs.mjs --budgets [--json]   (size budgets only, no link scan: run it before adding
+//   to a budgeted doc, or from a session-start script; one line per budgeted doc, exits 1 when any is over)
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,6 +29,23 @@ const DEFAULTS = {
 const configIndex = argv.indexOf('--config');
 const configPath = configIndex >= 0 ? path.resolve(argv[configIndex + 1]) : path.join(root, 'ai/check-docs.json');
 const config = { ...DEFAULTS, ...(fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {}) };
+
+// --budgets: how full each budgeted doc is. "near" starts at 90%: a doc trimmed to just under its budget is over
+// again after the next addition, so trim to below that mark.
+if (args.has('--budgets')) {
+    const rows = Object.entries(config.budgets)
+        .filter(([rel]) => fs.existsSync(path.join(root, rel)))
+        .map(([rel, budget]) => ({ rel, budget, bytes: fs.statSync(path.join(root, rel)).size }));
+    if (args.has('--json')) process.stdout.write(`${JSON.stringify({ budgets: rows }, null, 2)}\n`);
+    else
+        for (const { rel, bytes, budget } of rows) {
+            const used = Math.round((bytes / budget) * 100);
+            const state = bytes > budget ? 'over budget' : used >= 90 ? 'near budget' : 'ok';
+            process.stdout.write(`${state}: ${rel} ${bytes} B / ${budget} B (${used}%)\n`);
+        }
+    process.exit(rows.some(({ bytes, budget }) => bytes > budget) ? 1 : 0);
+}
+
 const regexes = (list) => list.map((source) => new RegExp(source));
 const SKIPPED = regexes(config.skipped);
 const FROZEN = regexes(config.frozen);
