@@ -250,6 +250,18 @@ Multica 任务跑在**独立 worktree** 里，分支形如 `agent/<agent>/<issue
 
 > 为什么：`todo` = 当场花钱开一个 run。默认 `backlog` 把「想清楚」和「开始做」拆成两个动作，中间给用户留一次叫停的机会。
 
+### 建单必须当场挂上项目归属：project + 期次 label（用户 2026-11-23 定）
+
+**关于某个项目的 issue，建单当场就要挂齐 project 和期次 label，不靠事后补。** 用户布置任务时常说「当作第 N 期做」，这句话就是期次 label，漏挂了这张单就不会出现在那一期的视图和对账里。
+
+| 归属 | 怎么挂 |
+|---|---|
+| project | `issue create` 显式传 `--project <project-id>`（id 用 `multica project list` 查）。工作区就算有默认 project 也要显式传，不赌默认值 |
+| 期次 label | 用户说了第几期，就挂那一期的 label；没说，就挂当前进行中的那一期，并在回复里写明挂的是哪期，方便用户改。名字和含义以 `multica label list` 里的 description 为准；对应期次的 label 还没建，先问用户，不擅自起名 |
+
+- `issue create` 没有 label 参数：建完立刻 `multica issue label add <issue> <label-id>`，再 `issue get` 回读，确认 `project_id` 和 `labels` 都在，才算建完。
+- 适用于所有 lead、所有建单场景：子任务、从别的单转出的单、巡检顺手发现的单都一样。不属于任何项目的单（平台本身、个人杂事）除外。
+
 ### issue 的粒度与标题
 
 - **同一 scope 的改动进同一个 issue，最后合成一个 PR。** 不要把一个功能拆成多张单，也不要把不相关的改动塞进一张单。
