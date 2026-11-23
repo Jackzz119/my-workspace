@@ -68,5 +68,5 @@ chrome.exe --headless=new --disable-gpu --window-size=1400,1500 \
 
 ## 项目设计依据
 
-从项目共享登记找到常驻 `design-system.md`，沿链接读取当前领域/UI 规范和实际素材位置。
+从项目共享登记找到常驻的设计系统根入口文档（名字按项目约定，如 `README.md` 或 `design-system.md`），沿链接读取当前领域/UI 规范和实际素材位置。
 项目决定与资产地址留在项目文档；技能保持通用。复核结论写进当轮报告；调研、比稿与待确认原型归设计系统根下的 `codex-visual/`，给用户看的页面交 `annotated-report` 生成；设计系统的定稿文档只放已定稿的规范与选定展示。
