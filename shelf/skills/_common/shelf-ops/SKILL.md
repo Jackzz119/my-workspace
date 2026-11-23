@@ -76,6 +76,6 @@ shelf 是个人内容货架：一个 git 仓库（货架）放技能、协议和
 2. **`--force` 从不自己加**（它会整体覆盖货架上别人的改动）；`--force-secret` 永远不主动用，被拦下的凭据文件如实告诉用户。
 3. 改技能、改协议只改项目里的正本（或根目录副本），不去改货架 clone；推上去用 push。
 4. 账本 `.shelf.json` 不手改；登记的增删用 pull / forget。
-5. Windows 上技能链接是 junction；删链接只用 `cmd /c rmdir <链接路径>`（不带 `/s`），递归删除会删到正本。
+5. Windows 上技能链接是 junction；删链接只用 `cmd /c rmdir <链接路径>`（不带 `/s`），递归删除会删到正本。Git Bash 里手动 `ln -s` 会把链接建成目录副本（PowerShell `(Get-Item <链接路径>).LinkType` 为空就是副本）：别手动建，用 `shelf init` 或保底脚本。
 
 细节（JSON 里的物品状态全表、账本字段、货架从哪来、没装 shelf 的机器与 worktree、会话开场钩子与主检出快进、模板写法）见 ${CLAUDE_SKILL_DIR}/reference.md。
