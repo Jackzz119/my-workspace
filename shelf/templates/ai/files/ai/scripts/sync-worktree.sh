@@ -165,7 +165,7 @@ sync_mcp_json() {
   fi
   main_real="$(cd "$MAIN_ROOT" 2>/dev/null && pwd -P)" || true
   if [[ -z "$main_real" || ! -f "$main_real/$name" ]]; then
-    echo "⚠ ${name}：主检出没有这个文件，跳过"; mcp_state="无源"; return
+    echo "= ${name}：主检出没有这个文件，跳过"; mcp_state="无源"; return
   fi
   # Claude Code looks for .mcp.json in the working directory and every parent, so a worktree nested
   # inside the main checkout already sees the main file; a copy here would shadow it and go stale.
@@ -240,7 +240,7 @@ run_local_hook() {
   local hook="$AI_DIR/scripts/worktree.local.sh"
   [[ -f "$hook" ]] || return 0
   if (( DRY )); then echo "  [dry-run] 会跑项目补充步骤 $hook"; return; fi
-  echo "→ 项目补充步骤：$hook"
+  echo "项目补充步骤：$hook"
   MAIN_ROOT="$MAIN_ROOT" bash "$hook"
 }
 
