@@ -25,6 +25,8 @@
     --p3: #4a5c77;
     --font-body: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
     --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, "PingFang SC", "Microsoft YaHei", monospace;
+    /* the folds' chevron, drawn in the accent through a mask */
+    --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 3.5 10.5 8 6 12.5' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -157,6 +159,97 @@ h2 code, h3 code { font-size: 0.82em; }
     border-radius: 10px;
     background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 }
+
+/* Folds: details closed until the reader opens them. The whole line opens one, its chevron turns, and an open fold
+   keeps its edge round all it holds. The line says what is inside, with the counts beside it (under it on a phone). */
+details.fold {
+    margin: 0.75rem 0 1.1rem;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--surface);
+}
+details.fold[open] { border-color: color-mix(in srgb, var(--accent) 38%, var(--rule)); }
+details.fold > summary {
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+    column-gap: 10px;
+    align-items: baseline;
+    box-sizing: border-box;
+    min-height: 44px;
+    padding: 10px 14px;
+    border-radius: 9px;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    list-style: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::before {
+    content: "";
+    align-self: start;
+    width: 16px;
+    height: 16px;
+    margin-top: calc((1.5em - 16px) / 2);
+    background: var(--accent);
+    -webkit-mask: var(--chev) center / contain no-repeat;
+    mask: var(--chev) center / contain no-repeat;
+    transition: rotate 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+details.fold[open] > summary::before { rotate: 90deg; }
+/* hover only where there is one: on a touch screen it would stay lit after the tap */
+@media (hover: hover) {
+    details.fold > summary:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+    button.fold-all:hover { border-color: var(--accent); }
+}
+details.fold[open] > summary { border-bottom: 1px solid var(--rule); border-radius: 9px 9px 0 0; }
+.fold-label { font-weight: 600; }
+.fold-meta {
+    font: 0.75rem/1.5 var(--font-mono);
+    color: var(--muted);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.fold-body { padding: 2px 16px 6px; }
+@media (max-width: 560px) {
+    details.fold > summary { grid-template-columns: 16px minmax(0, 1fr); }
+    .fold-meta { grid-column: 2; white-space: normal; }
+    .fold-body { padding-inline: 12px; }
+}
+@media (prefers-reduced-motion: reduce) { details.fold > summary::before { transition: none; } }
+/* open or fold all of them at once: under the title, and atop the contents rail */
+.fold-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    margin: 12px 0 0;
+    font-size: 0.8125rem;
+    color: var(--muted);
+}
+.fold-tools[hidden], button.fold-all[hidden] { display: none; }
+button.fold-all {
+    box-sizing: border-box;
+    min-height: 32px;
+    padding: 2px 12px;
+    border: 1px solid var(--rule);
+    border-radius: 16px;
+    background: var(--surface);
+    color: var(--accent);
+    font: 600 0.8125rem/1.3 var(--font-body);
+    letter-spacing: 0;
+    cursor: pointer;
+}
+.rail button.fold-all { margin-left: auto; min-height: 28px; padding: 2px 10px; font-size: 0.75rem; }
+.layout[data-toc="folded"] .rail button.fold-all { display: none; }
+@media (pointer: coarse) { button.fold-all { min-height: 40px; } }
+/* on paper every fold is open (the page script opens them for printing; this covers browsers that style the part) */
+@media print {
+    .fold-tools, button.fold-all { display: none; }
+    details.fold > summary { grid-template-columns: minmax(0, 1fr) auto; }
+    details.fold > summary::before { display: none; }
+}
+@media print { details.fold::details-content { content-visibility: visible; } }
 
 /* Images: embedded in the page; images on consecutive lines sit side by side when there is room */
 .figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; margin: 1rem 0 1.3rem; }
@@ -373,6 +466,7 @@ details.toc-mobile nav { max-height: 60vh; overflow: auto; padding: 0 8px 10px; 
                             if (localStorage.getItem('report-toc') === 'folded') layout.dataset.toc = 'folded';
                         } catch {}
                     </script>
+                    <button type="button" class="fold-all" hidden>全部展开</button>
                 </p>
                 {toc}
             </nav>
@@ -382,6 +476,10 @@ details.toc-mobile nav { max-height: 60vh; overflow: auto; padding: 0 8px 10px; 
                 <p class="eyebrow"><time>{date}</time></p>
                 <h1>{title}</h1>
                 <p class="meta">源稿 <code>{source}</code></p>
+                <p class="fold-tools" hidden>
+                    <span>细节收在 ▸ 里，共 <span class="fold-count"></span> 处，点标题行展开</span>
+                    <button type="button" class="fold-all">全部展开</button>
+                </p>
             </header>
             {lead}
             <details class="toc-mobile"><summary>目录</summary><nav class="toc" aria-label="目录">{toc}</nav></details>
@@ -495,6 +593,68 @@ details.toc-mobile nav { max-height: 60vh; overflow: auto; padding: 0 8px 10px; 
             } catch {}
             // what is laid over the page by position (the annotation layer's numbers) follows
             dispatchEvent(new Event('resize'));
+        });
+    }
+
+    // Folds (details.fold). A link or the address's #id that points into a closed fold opens it first, so the jump
+    // lands on something shown; the element is returned when a fold had to open for it.
+    const unfoldTo = (hash) => {
+        let [el, opened] = [null, false];
+        try {
+            el = hash.length > 1 && document.getElementById(decodeURIComponent(hash.slice(1)));
+        } catch {}
+        for (let e = el && el.parentElement; e; e = e.parentElement)
+            if (e.localName === 'details' && !e.open) [e.open, opened] = [true, true];
+        return opened && el;
+    };
+    document.addEventListener(
+        'click',
+        (event) => {
+            const a = event.target.closest && event.target.closest('a[href^="#"]');
+            if (a) unfoldTo(a.getAttribute('href'));
+        },
+        true
+    );
+    const target = unfoldTo(location.hash);
+    if (target) target.scrollIntoView();
+    const folds = [...document.querySelectorAll('details.fold')];
+    if (folds.length) {
+        // the page tools: how many there are, and one button that opens them all or folds them all
+        const alls = [...document.querySelectorAll('button.fold-all')];
+        for (const el of [...alls, ...document.querySelectorAll('.fold-tools')]) el.hidden = false;
+        for (const el of document.querySelectorAll('.fold-count')) el.textContent = folds.length;
+        const sync = () => {
+            const open = folds.every((d) => d.open);
+            for (const b of alls) b.textContent = open ? '全部收起' : '全部展开';
+        };
+        sync();
+        document.addEventListener('toggle', (event) => event.target.matches?.('details.fold') && sync(), true);
+        // What is being read stays where it is on screen while folds above it open or close; when it goes into a
+        // fold that closes, that fold's line stays there instead. The browser's own scroll anchoring waits meanwhile.
+        const main = document.querySelector('main');
+        for (const b of alls)
+            b.addEventListener('click', () => {
+                const open = !folds.every((d) => d.open);
+                const box = main.getBoundingClientRect();
+                const at = document.elementsFromPoint(box.left + box.width / 2, innerHeight / 3);
+                let el = at.find((e) => main.contains(e));
+                for (let e = el; e && e !== main; e = e.parentElement) if (e.matches('details.fold')) el = e;
+                const want = el && el.getBoundingClientRect().top;
+                const html = document.documentElement;
+                html.style.overflowAnchor = 'none';
+                for (const d of folds) d.open = open;
+                if (el) scrollBy({ top: el.getBoundingClientRect().top - want, behavior: 'instant' });
+                setTimeout(() => (html.style.overflowAnchor = ''), 300);
+            });
+        // on paper every fold is open; the ones that were closed close again afterwards
+        let closed = [];
+        addEventListener('beforeprint', () => {
+            closed = folds.filter((d) => !d.open);
+            for (const d of closed) d.open = true;
+        });
+        addEventListener('afterprint', () => {
+            for (const d of closed) d.open = false;
+            closed = [];
         });
     }
 })();

@@ -8,7 +8,9 @@
 // well, a note can carry pictures (pasted, dropped or picked): they go into the artifact's assets and the note keeps
 // their ids; without that capability the picture button stays hidden. Ctrl+F / ⌘F, or the magnifier in the dock,
 // opens a find bar for the page: the host app's own find may not reach into an artifact's frame, and a phone has none.
-// The reader can reorder the list (buttons, or the grip on a desktop); the order is each note's `pos`.
+// The reader can reorder the list (buttons, or the grip on a desktop); the order is each note's `pos`. A note inside a
+// closed <details> (a report's fold) shows its number on that fold's summary line, and a jump to it, from the list or
+// from a find hit, opens the fold first.
 (() => {
     'use strict';
     if (window.__annotate) return;
@@ -417,6 +419,17 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         for (let e = start; e && !TOP.test(e.localName); e = e.parentElement) if (isBlock(e)) return e;
         return start && !TOP.test(start.localName) ? start : null;
     };
+    // The closed <details> a node is hidden in, innermost first. A node on a fold's own summary line shows anyway, so
+    // that fold does not count.
+    const shutAround = (node) => {
+        const out = [];
+        for (let e = node && node.parentElement; e; e = e.parentElement) {
+            if (e.localName !== 'details' || e.open) continue;
+            const line = e.querySelector(':scope > summary');
+            if (!(line && line.contains(node))) out.push(e);
+        }
+        return out;
+    };
     const headingOf = (el) => {
         let last = null;
         for (const h of document.querySelectorAll(HEADS)) {
@@ -518,10 +531,10 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         [S.pinned, S.marked] = [[], []];
         S.notes.forEach((n, i) => {
             const m = markOf(n);
-            if (m.range && HL) return ranges.push(m.range);
-            if (!m.el) return;
-            S.pinned.push([m.el, n, i]);
-            if (!TOP.test(m.el.localName)) S.marked.push(m.el);
+            if (m.range && HL) ranges.push(m.range);
+            else if (m.el && !TOP.test(m.el.localName)) S.marked.push(m.el);
+            // highlighted text has a pin too, shown only while a closed fold hides the text (renderPins)
+            if (m.el || m.range) S.pinned.push([m, n, i]);
         });
         for (const el of S.marked) el.setAttribute('data-ann-mark', '');
         if (HL) CSS.highlights.set('ann', new Highlight(...ranges));
@@ -529,15 +542,23 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         list.hidden = copier.hidden = !S.notes.length;
         renderPins();
     };
+    // A pin at the corner of each noted element (and of each noted text without highlights); a note in a closed fold
+    // pins the fold's summary line instead, its number beside the others there, until the fold opens.
     const renderPins = () => {
         pins.textContent = '';
         const [o, w] = [root.getBoundingClientRect(), document.documentElement.clientWidth];
-        for (const [el, n, i] of S.pinned) {
-            const r = el.getBoundingClientRect();
+        const onLine = new Map();
+        for (const [m, n, i] of S.pinned) {
+            const hid = shutAround(m.range ? m.range.startContainer : m.el).pop();
+            if (!hid && m.range && HL) continue; // the highlight shows it
+            const at = hid ? hid.querySelector(':scope > summary') || hid : m.el;
+            const r = at ? at.getBoundingClientRect() : {};
             if (!r.width && !r.height) continue;
+            const k = (hid && onLine.get(hid)) || 0;
+            if (hid) onLine.set(hid, k + 1);
             const pin = button(String(i + 1), 'ann-pin', () => openDrawer(n.id));
-            pin.setAttribute('aria-label', `第 ${i + 1} 条批注`);
-            place(pin, Math.min(r.right - 18, w - 28) - o.left, r.top - 10 - o.top);
+            pin.setAttribute('aria-label', `第 ${i + 1} 条批注${hid ? '（在收起的细节里）' : ''}`);
+            place(pin, Math.min(r.right - 18, w - 28) - k * 28 - o.left, r.top - 10 - o.top);
             pins.append(pin);
         }
     };
@@ -566,6 +587,8 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
         const el = (node && (node.nodeType === 1 ? node : node.parentElement)) || m.el;
         if (!el) return toast('页面上找不到这一处了');
         closePanel();
+        // in a fold the reader has not opened, the fold opens first: while it is closed there is nothing to go to
+        for (const d of shutAround(node || m.el)) d.open = true;
         const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
         el.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' });
         flash(m);
@@ -1498,8 +1521,9 @@ html[data-annotating] body :not([data-annotate-ui]){cursor:pointer!important}
             if (S.panel) S.panel.querySelectorAll('.ann-ta:not([readonly])').forEach((ta) => grow(ta));
         });
         addEventListener('load', paint); // late images and fonts move things: marks and pins again
-        // inner scrollers and late layout move the pins
+        // inner scrollers and late layout move the pins; a fold opening or closing moves them on or off its line
         addEventListener('scroll', (e) => e.target !== document && later(), passive);
+        document.addEventListener('toggle', later, true);
         document.addEventListener('selectionchange', () => {
             clearTimeout(timer);
             timer = setTimeout(() => {

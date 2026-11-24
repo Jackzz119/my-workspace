@@ -12,6 +12,11 @@
 //     row is the head; fenced code with "lang title" after the fence: diff lines are coloured, shell blocks get a
 //     copy button.
 //   :::classes | anchor … ::: containers: lead (the summary, shown above the contents), card decision, callout.
+//     Containers nest, and a ::: line inside fenced code is not one.
+//   :::fold | what is inside … ::: a fold: details the page shows closed until the reader opens them. Its line says
+//     what is inside and counts it (code, tables, list items, paragraphs), so it can be judged unopened; its anchor
+//     is 4.1-d1, and what it holds keeps the section's numbering. It goes anywhere in a section, also indented into a
+//     list item. A picture inside one is reported on stderr: pictures are quick to read and stay out of folds.
 //   {.class …} or {caption: …} alone on a line applies to the next list or table; {.bugs .p1} adds severity chips.
 //   [[anchor]] at the start of a list item makes it an item of its own, with that anchor.
 //   ![caption](path) alone on a line embeds that image in the page (a local file, relative to the source, becomes a
@@ -56,9 +61,12 @@ const joinLines = (lines) => {
     return text;
 };
 
+// the characters a reader reads in a piece of the page: its text without tags and white space
+const textLength = (html) => unesc(html.replace(/<[^>]+>/g, '')).replace(/\s/g, '').length;
+
 /**
- * Renders `source` (the dialect) to { title, toc, lead, body, stats }; `repoUrl` is the base for repo-path links,
- * `baseDir` the folder local image paths are read from.
+ * Renders `source` (the dialect) to { title, toc, lead, body, stats, warnings }; `repoUrl` is the base for repo-path
+ * links, `baseDir` the folder local image paths are read from.
  */
 export function renderReport(source, { repoUrl = '', baseDir = process.cwd() } = {}) {
     const base = repoUrl && !repoUrl.endsWith('/') ? `${repoUrl}/` : repoUrl;
@@ -67,8 +75,15 @@ export function renderReport(source, { repoUrl = '', baseDir = process.cwd() } =
     const first = lines.findIndex((line) => line.trim());
     if (first >= 0 && /^#\s+\S/.test(lines[first])) title = lines.splice(first, 1)[0].replace(/^#\s+/, '').trim();
     const toc = [];
-    const state = { anchor: 'top', counts: new Map(), lead: null };
-    const stats = { sections: 0, subsections: 0, items: 0, code: 0, tables: 0, images: 0, imageBytes: 0 };
+    // folds: the folds being rendered, outermost first, each counting what it holds
+    const state = { anchor: 'top', counts: new Map(), lead: null, folds: [] };
+    const stats = { sections: 0, subsections: 0, items: 0, code: 0, tables: 0, images: 0, imageBytes: 0, folds: 0 };
+    Object.assign(stats, { foldedImages: 0, visibleChars: 0, foldedChars: 0 });
+    const warnings = [];
+    // what the open folds hold, for the counts on their lines
+    const held = (key, n = 1) => {
+        for (const box of state.folds) box[key] = (box[key] || 0) + n;
+    };
     // explicit ids are reserved first, so a made-up id never takes one
     const ids = new Set(lines.map((line) => (line.match(HEAD) || [])[3]).filter(Boolean));
     let made = 0;
@@ -120,6 +135,8 @@ export function renderReport(source, { repoUrl = '', baseDir = process.cwd() } =
         const kind = lang || 'text';
         const anchor = count('c');
         stats.code++;
+        held('code');
+        held('lines', body.length);
         let code, pre;
         if (kind === 'diff') {
             const type = (line) =>
@@ -157,6 +174,15 @@ export function renderReport(source, { repoUrl = '', baseDir = process.cwd() } =
                 src = `data:${mime};base64,${bytes.toString('base64')}`;
             }
             stats.images++;
+            held('images');
+            // a picture is quick to read: it belongs beside the point it shows, not behind a fold's line
+            if (state.folds.length) {
+                stats.foldedImages++;
+                const where = state.folds.at(-1).label;
+                warnings.push(
+                    `picture inside the fold 「${where}」: ![${alt}](${href}); put it beside its point, outside`
+                );
+            }
             const caption = alt ? `<figcaption>${inline(alt)}</figcaption>` : '';
             return `<figure class="img" data-anchor="${esc(count('f'))}"><img src="${esc(src)}" alt="${esc(alt)}" loading="lazy">${caption}</figure>`;
         });
@@ -182,6 +208,8 @@ export function renderReport(source, { repoUrl = '', baseDir = process.cwd() } =
         stats.tables++;
         const ruled = rows.length > 1 && /^\|?\s*:?-{2,}/.test(rows[1].trim());
         const [head, body] = [cells(rows[0]), rows.slice(ruled ? 2 : 1).map(cells)];
+        held('tables');
+        held('rows', body.length);
         const caption = attrs && attrs.caption ? `<caption>${inline(attrs.caption)}</caption>` : '';
         const thead = head.map((c) => `<th scope="col">${inline(c)}</th>`).join('');
         const tbody = body.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`).join('');
@@ -226,6 +254,7 @@ export function renderReport(source, { repoUrl = '', baseDir = process.cwd() } =
             }
             break;
         }
+        held('items', items.length);
         const classes = (attrs && attrs.class) || [];
         const level = classes.includes('bugs') && classes.find((c) => /^p\d$/.test(c));
         const tag = ordered ? 'ol' : 'ul';
@@ -287,6 +316,42 @@ export function renderReport(source, { repoUrl = '', baseDir = process.cwd() } =
         state.lead = html;
         return '';
     };
+    // A fold: <details>, closed until the reader opens it. Its line says what is inside and counts it, so the reader can
+    // tell whether it is worth opening without opening it.
+    const fold = (label, inner) => {
+        const anchor = count('d');
+        const box = { label: label || '细节' };
+        state.folds.push(box);
+        const body = parse(inner);
+        state.folds.pop();
+        stats.folds++;
+        if (!state.folds.length) stats.foldedChars += textLength(body);
+        const parts = [
+            box.code && `代码 ${box.code} 段 ${box.lines} 行`,
+            box.tables && `表 ${box.tables} 张 ${box.rows} 行`,
+            box.items && `列表 ${box.items} 条`,
+            box.paras && `文字 ${box.paras} 段`,
+            box.images && `图 ${box.images} 张`
+        ].filter(Boolean);
+        const meta = parts.length ? `<span class="fold-meta">${parts.join(' · ')}</span>` : '';
+        const line = `<summary><span class="fold-label">${inline(box.label)}</span>${meta}</summary>`;
+        return `<details class="fold" data-anchor="${esc(anchor)}">${line}<div class="fold-body">${body}</div></details>`;
+    };
+    // the line that closes the ::: container opened at line i, past the containers nested in it and past fenced code
+    // (which may quote ::: lines); lines.length when nothing closes it
+    const closing = (lines, i) => {
+        let [depth, fence] = [1, ''];
+        for (let j = i + 1; j < lines.length; j++) {
+            const s = lines[j].trim();
+            if (fence) {
+                if (/^`+$/.test(s) && s.length >= fence.length) fence = '';
+            } else if (s.startsWith('```')) fence = s.match(/^`+/)[0];
+            else if (s === ':::') {
+                if (!--depth) return j;
+            } else if (s.startsWith(':::')) depth++;
+        }
+        return lines.length;
+    };
 
     function parse(lines, top = false) {
         const out = [];
@@ -320,12 +385,18 @@ export function renderReport(source, { repoUrl = '', baseDir = process.cwd() } =
             if (s.startsWith(':::') && s !== ':::') {
                 const spec = s.slice(3);
                 const bar = spec.includes('|') ? spec.indexOf('|') : spec.length;
-                let j = i + 1;
-                const inner = [];
-                while (j < lines.length && lines[j].trim() !== ':::') inner.push(lines[j++]);
+                const j = closing(lines, i);
+                if (j === lines.length) warnings.push(`nothing closes the container "${s}"; it runs to the end`);
+                const [inner, after] = [lines.slice(i + 1, j), spec.slice(bar + 1).trim()];
                 const classes = spec.slice(0, bar).trim().split(/\s+/).filter(Boolean);
-                out.push(container(classes, spec.slice(bar + 1).trim(), inner));
+                out.push(classes.includes('fold') ? fold(after, inner) : container(classes, after, inner));
                 i = j + 1;
+                continue;
+            }
+            if (s === ':::') {
+                // a closing line with nothing open (as a paragraph it would never be passed)
+                warnings.push('a ::: line closes nothing; left out');
+                i++;
                 continue;
             }
             const hm = line.match(HEAD);
@@ -374,6 +445,7 @@ export function renderReport(source, { repoUrl = '', baseDir = process.cwd() } =
             const para = [];
             while (j < lines.length && lines[j].trim() && !startsBlock(lines[j])) para.push(lines[j++].trim());
             out.push(`<p>${inline(joinLines(para))}</p>`);
+            held('paras');
             i = j;
         }
         if (openSub) out.push('</section>');
@@ -382,7 +454,9 @@ export function renderReport(source, { repoUrl = '', baseDir = process.cwd() } =
     }
 
     const body = parse(lines, true);
-    return { title, toc: tocHtml(toc), entries: toc.length, lead: state.lead || '', body, stats };
+    // what shows before anything is opened: the summary and the body, less what the folds hold
+    stats.visibleChars = textLength((state.lead || '') + body) - stats.foldedChars;
+    return { title, toc: tocHtml(toc), entries: toc.length, lead: state.lead || '', body, stats, warnings };
 }
 
 // the contents: ## entries, each with its ### entries nested
@@ -448,6 +522,7 @@ if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.
     if (options.template) options.template = fs.readFileSync(options.template, 'utf8');
     options.baseDir = path.dirname(path.resolve(files[0]));
     const { html, report } = buildReport(fs.readFileSync(files[0], 'utf8'), options);
+    for (const warning of report.warnings) process.stderr.write(`warning: ${warning}\n`);
     // an artifact page holds at most 16 MB; past a few MB of pictures it is slow on a phone anyway
     if (report.stats.imageBytes > 8e6)
         process.stderr.write(`warning: ${(report.stats.imageBytes / 1e6).toFixed(1)} MB of images; use smaller JPEGs\n`);
