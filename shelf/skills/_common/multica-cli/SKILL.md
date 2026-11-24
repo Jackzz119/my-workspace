@@ -5,7 +5,7 @@ description: Multica 平台与 multica CLI 的操作速查——哪些命令「�
 
 # Multica CLI 与平台速查
 
-本技能只收跨项目都成立的用法与坑。交付纪律、DoD、合并方式和 mention 的必守规则在 Multica 协议（Multica worktree 根目录的 `CLAUDE.md` / `AGENTS.md`，真源 `ai/jaAgents/MULTICA.md` §八–§十二）；项目自己的参数与例外在 `ai/PROJECT.md`。
+本技能只收跨项目都成立的用法与坑。交付纪律、DoD、合并方式和 mention 的必守规则在 Multica 协议（Multica worktree 根目录的 `CLAUDE.md` / `AGENTS.md` §八–§十二；真源 `ai/jaAgents/MULTICA.md` 只在要改协议时打开，别为查规则去读它，原因见协议 §零）；项目自己的参数与例外在 `ai/PROJECT.md`。
 
 ## 先核再信
 
