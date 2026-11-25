@@ -25,7 +25,7 @@
 
 - **真源**：技能本体只有一份，在 `ai/jaSkills/`（入库）。`.claude/skills`、`.agents/skills` 是指向它的整目录链接（Claude Code / Codex 各从这里发现技能）。要改技能就改 `ai/jaSkills/`，改完 `shelf push ai/jaSkills/<名>` 同步到货架。
 - **链接与协议副本都被 git 忽略**，新检出、新 worktree 里默认没有，开工第一步先补齐（重复执行安全）。会话开场钩子 `ai/scripts/session-start.sh` 会自动补齐并重扫技能，手动补是兜底：装了 shelf 跑 `shelf init`，没装或没网跑 `bash ai/scripts/sync-worktree.sh`（加 `--dry-run` 只报告；.NET 项目的脚本在 `AI/scripts/`）。Windows 上链接的坑与清理守则见 `shelf-ops`。
-- **读写技能文件前先触发 `custom-skill`**：`ai/jaSkills/` 下的一切与 `ai/JASKILL.md` 都算，不得直接用 Read / Edit 操作。创建规范只在 `custom-skill` 里，不凭记忆另写一套。
+- **读写技能文件前先触发 `custom-skill`**：`ai/jaSkills/` 下的一切与 `ai/JASKILL.md` 都算，不得直接用 Read / Edit 操作；照技能的指引读它的参考文件、跑它的脚本是在用技能，不算。创建规范只在 `custom-skill` 里，不凭记忆另写一套。
 - **技能对话规范**：在技能上下文中回复时，开头标 `**技能名（全大写）**` + 空格 + 正文，像这个技能的「人」在说话，例如 `**INTJ** 好，我看了一下，你现在还有...`。
 - **本项目专属技能**（第三方技能包、绑定本项目基础设施的技能）登记在 `ai/JASKILL.md`；项目特有的强制前置动作见 `ai/PROJECT.md`「开工红线」。
 
@@ -37,7 +37,7 @@
 |---|---|
 | 自动 | `intj`（任务与 Bug、优先级、看任务与进度、文档与决定清单；**会话存档与交接档例外：只在用户开口时写，不自动存、不自动读**）· `vc`（提交、推送、PR、合并）· `logman`（log 语句、新增功能域标签）· `custom-skill`（技能文件）· `monet`（美术与视觉审核）· `ui-tailor`（任何 UI / UX，含纯 UX 讨论）· `annotated-report`（每轮的报告页与批注）· `shelf-ops`（货架与 AI 工作流同步） |
 | 询问后 | `feature`（功能开发流程）· `codex-visual`（把出图 / 审图 / 比稿委派给 Codex CLI：是工具不是设计师，消耗外部额度） |
-| 点名时 | `project-audit`（全项目自审）· `visual-audit`（视觉体验整轮审核） |
+| 点名时 | `project-audit`（全项目自审）· `visual-audit`（视觉体验审核：可整轮，也可只审一个专区） |
 
 ## 文档维护规则
 
