@@ -8,6 +8,7 @@
 | 来源 | 日期 | 用到的结论 |
 | --- | --- | --- |
 | [Claude Code：Extend Claude with skills](https://code.claude.com/docs/en/skills) | 访问 2026-11-12（页面提到的最新版本 v2.1.309，本机 2.1.322） | frontmatter 字段全表与默认值；description 与 `when_to_use` 合计截到 1536 字符；技能清单预算约为上下文 1%，超了先丢最少用的技能的描述；`allowed-tools` 只在调用那一轮免确认、不是限制、工作区信任不拦；`disallowed-tools`；注入命令的语法、失败即中止、`\|\| true`、auto 模式不中止、`disableSkillShellExecution`；参数与目录变量的替换与转义；正文作为一条消息留在对话里、不重读，压缩后每个技能保留前 5000 token（合计 25000）；规则必须每次成立时用钩子；YAML 写坏时字段全空；出了 Claude Code 只允许六个字段；新会话、带 / 不带技能对比的评估；skill-creator 插件、`/skill-doctor` |
+| [Claude Code：Explore the context window](https://code.claude.com/docs/en/context-window)（「What survives compaction」一节） | 访问 2026-11-24（本机 2.1.330） | 压缩后：根协议、记忆从磁盘重新放入，技能清单重建后放入（v2.1.304 起）；调用过的技能正文每个封顶 5,000 token、合计 25,000，从最近调用的排起，截断保留开头；读过或改过的文件最多重读 5 份、最近改过的优先，单份超过 5,000 token 的只给路径；嵌套指令文件与带 `paths:` 的规则按需重载；钩子先前打进来的内容随对话一起被摘要，匹配 `compact` 的 SessionStart 钩子在压缩后重新跑、输出放进新的上下文 |
 | [Claude Code：Configure permissions](https://code.claude.com/docs/en/permissions) | 访问 2026-11-12 | 内置只读命令免确认；`Bash(x *)` 与 `Bash(x:*)` 等价、`:*` 只在末尾；复合命令逐段判定；`npx`、`devbox run` 这类运行器会执行后面的任意命令；按参数收窄的规则很脆；deny → ask → allow 的顺序 |
 | [Skill authoring best practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) | 访问 2026-11-12 | 只写模型不知道的；自由度随脆弱度；用到的模型都测；name 规则与保留词；description 第三人称、做什么 + 什么时候用、≤ 1024；正文 < 500 行；引用只下一层；超过 100 行的参考文件放目录；避免会过期的信息；用词一致；模板、清单、校验回路；先建评估再写文档；一个 Claude 写、另一个 Claude 测；观察模型怎么读技能；正斜杠；脚本自己处理错误、常量写明来由、MCP 工具写全名 |
 | [Agent Skills overview](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) | 访问 2026-11-12 | 三层加载（元数据约 100 token、正文 < 5000 token、资源按需）；安全注意事项（只用可信来源、审完所有文件、外部 URL 风险）；Claude Code 有完整网络、不要全局装包 |
@@ -57,6 +58,11 @@
 | `metadata.shelf-scaffold`（用户 2026-10-19 定） | `metadata` 是字符串映射，键名要独特 | 一致 |
 | 目录结构曾「固定为」SKILL.md + reference.md + examples.md | 开放标准约定 `scripts/`、`references/`、`assets/`；本项目已有技能两种都在用 | 改为推荐结构，两种都允许，一个技能里选一种 |
 | 用户批准过的宽授权（例：某项目的 Jira 技能保留 `jira` / `curl` 预批准） | 最小授权 | 按项目里的批准记录保留，记录不写进本技能 |
+
+## 实测
+
+- 压缩后技能正文怎么截（2026-11-24，Claude Code 2.1.330，看一次真实压缩的会话记录，只有一次）：一份 7,462 字符、实测 6,563 token 的中文技能整份放回，一份英文技能连同截断提示恰好是 20,000 字符。两份都与「按每 4 个字符 1 token 折算」一致（要不要截那一步按字符还是按字节算，中文样本分不出）。所以中文技能的余量比官方数字大，但这是实现细节，随时会变。
+- 读过的文件（同一次压缩，一份样本）：一份 6,514 字符、实测 5,673 token 的中文文件只剩路径、没有内容，与按实际 token 判一致。
 
 ## 未核实
 

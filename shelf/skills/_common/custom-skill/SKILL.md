@@ -1,6 +1,6 @@
 ---
 name: custom-skill
-description: Skill 主管：技能（Agent Skills / SKILL.md）的创建规范、审查清单与 Claude Code、Codex 两边的兼容口径。创建、修改、审查、拆分或登记技能时使用，包括写 description、frontmatter、allowed-tools、注入命令和技能脚本；读写 ai/jaSkills/ 下任何文件或 ai/JASKILL.md 之前先用它。
+description: Skill 主管：技能（Agent Skills / SKILL.md）的创建规范、审查清单与 Claude Code、Codex 两边的兼容口径。创建、修改、审查、拆分或登记技能时使用，包括写 description、frontmatter、allowed-tools、注入命令和技能脚本；读写 ai/jaSkills/ 下任何文件或 ai/JASKILL.md 之前先用它（照某个技能的指引读它的参考文件、跑它的脚本不算）。
 ---
 
 # Skill 主管
@@ -31,7 +31,7 @@ description: Skill 主管：技能（Agent Skills / SKILL.md）的创建规范�
 
 ### 1. 感知 & 触发
 
-**触发策略：自动触发** — 检测到 skill 相关场景（创建 / 修改 / 审查 / 登记 skill，或要读写 `ai/jaSkills/`、`ai/JASKILL.md`）时直接触发，无需询问用户。
+**触发策略：自动触发** — 检测到 skill 相关场景（创建 / 修改 / 审查 / 登记 skill，或要读写 `ai/jaSkills/`、`ai/JASKILL.md`；照某个技能的指引读它的参考文件、跑它的脚本不算）时直接触发，无需询问用户。
 
 加载之后，在本会话里留意用户当前的操作有没有合适的 skill 可用。各 skill 的触发策略以协议「通用技能与触发」表和 `ai/JASKILL.md` 为准（技能正文里那句「触发策略」要等技能加载后才看得到），按策略执行（自动 / 询问后 / 点名时）。
 
@@ -51,6 +51,7 @@ description: Skill 主管：技能（Agent Skills / SKILL.md）的创建规范�
 - 单一职责：一个 skill 是一件连贯的事。太窄，一个任务要同时加载几个技能；太宽，触发不准
 - **description 决定会不会被用**：写清做什么 + 什么时候用，关键用途放最前（写法见 reference.md「name 与 description」）
 - 渐进披露：SKILL.md 正文 ≤ 500 行、约 5000 token，只放每次都要的规则与流程；细节拆进支持文件，从 SKILL.md 直接链接（只下一层），并写明什么情况读哪份
+- 按压缩后排版：上下文压缩后宿主只放回每个技能的开头一段（Claude Code 当前是 5,000 token），全程要守的规则放前部，尾部只放丢了也不会做错的（reference.md「压缩之后还剩什么」）
 - 自由度随脆弱度：有多种合理做法的给原则和默认做法；易错、要一致、顺序固定的给确切命令或脚本
 - 确定性步骤写成脚本（校验、转换、批量操作），SKILL.md 写清是「运行」还是「参考」
 - 谁能触发：默认用户和模型都能触发；要不要收紧见 reference.md「谁能触发」
