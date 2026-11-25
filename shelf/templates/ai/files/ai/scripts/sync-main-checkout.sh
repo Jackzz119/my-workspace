@@ -148,7 +148,10 @@ for p in "${dirty[@]+"${dirty[@]}"}"; do
   else differ+=("$p"); fi
 done
 # 快进要写进来的新文件、本地已有同名的未跟踪文件（被忽略的不算：git 会直接覆盖它们）
+# 列新文件要关掉重命名检测：远端同时删掉一份相似的旧文件时，git 会把新文件算成「重命名」，按「新增」就筛不到它。
+# 代价是只改大小写的重命名也会被列成新增；大小写不敏感的盘上（macOS、Windows）磁盘上那份其实是已跟踪的旧名，要认出来跳过
 untracked_same=()
+icase=0; [[ "$(g config --type=bool core.ignorecase 2>/dev/null || true)" == true ]] && icase=1
 blob_of() {   # 本地文件按 git 的方式算的对象号与类型（普通 / 可执行 / 链接）
   if [[ -L "$MAIN_ROOT/$1" ]]; then printf '120000 %s' "$(readlink "$MAIN_ROOT/$1" | tr -d '\n' | git hash-object --stdin)"
   elif [[ -x "$MAIN_ROOT/$1" ]]; then printf '100755 %s' "$(g hash-object -- "$1")"
@@ -156,14 +159,15 @@ blob_of() {   # 本地文件按 git 的方式算的对象号与类型（普通 /
 }
 while IFS= read -r -d '' p; do
   [[ -e "$MAIN_ROOT/$p" || -L "$MAIN_ROOT/$p" ]] || continue
-  g ls-files --error-unmatch -- "$p" >/dev/null 2>&1 && continue
+  g ls-files --error-unmatch -- ":(literal)$p" >/dev/null 2>&1 && continue
+  (( icase )) && g ls-files --error-unmatch -- ":(literal,icase)$p" >/dev/null 2>&1 && continue
   g check-ignore -q -- "$p" 2>/dev/null && continue
   if [[ -f "$MAIN_ROOT/$p" || -L "$MAIN_ROOT/$p" ]] && [[ "$(blob_of "$p")" == "$(g ls-tree "$remote_ref" -- "$p" | awk '{ print $1 " " $3 }')" ]]; then
     untracked_same+=("$p")
   else
     differ+=("$p（未跟踪，快进要写这个路径）")
   fi
-done < <(g diff --name-only -z --diff-filter=A "$local_sha" "$remote_sha")
+done < <(g diff --no-renames --name-only -z --diff-filter=A "$local_sha" "$remote_sha")
 
 if (( ${#differ[@]} )); then
   say_list "⚠ 主检出有 ${#differ[@]} 个未提交改动和远端 $BRANCH 不一致，不快进（主检出原样未动）：" "${differ[@]}"
