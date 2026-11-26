@@ -1,6 +1,0 @@
-interface:
-  display_name: "ENTJ · 协同开发主管"
-  short_description: "主会话当主管，带名下子会话做开发与独立测试，验证过才收尾"
-  default_prompt: "请用 $entj 当主会话：先和我谈清要求与验收，推荐一套工作流，方案批准后再派活。"
-policy:
-  allow_implicit_invocation: true
